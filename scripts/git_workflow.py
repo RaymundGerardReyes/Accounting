@@ -35,7 +35,7 @@ def run_git_cmd(args, capture_output=True, check=True):
             text=True,
             check=check
         )
-        return result.stdout.strip() if capture_output else ""
+        return result.stdout.rstrip("\r\n") if capture_output else ""
     except subprocess.CalledProcessError as e:
         if capture_output and e.stderr:
             sys.stderr.write(f"Git error: {e.stderr.strip()}\n")
