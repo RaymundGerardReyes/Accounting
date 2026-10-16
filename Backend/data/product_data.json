@@ -1,0 +1,131 @@
+{
+    "productData": [
+        {
+            "product": "Product A",
+            "unitCost": 125,
+            "volume": 1200,
+            "margin": 35,
+            "revenue": 150000,
+            "profit": 52500,
+            "status": "stable"
+        },
+        {
+            "product": "Product B",
+            "unitCost": 89,
+            "volume": 2100,
+            "margin": 42,
+            "revenue": 187000,
+            "profit": 79000,
+            "status": "growing"
+        },
+        {
+            "product": "Product C",
+            "unitCost": 156,
+            "volume": 850,
+            "margin": 28,
+            "revenue": 132500,
+            "profit": 37300,
+            "status": "declining"
+        },
+        {
+            "product": "Product D",
+            "unitCost": 203,
+            "volume": 450,
+            "margin": 18,
+            "revenue": 91500,
+            "profit": 16500,
+            "status": "declining"
+        },
+        {
+            "product": "Product E",
+            "unitCost": 67,
+            "volume": 3200,
+            "margin": 55,
+            "revenue": 214400,
+            "profit": 118400,
+            "status": "growing"
+        }
+    ],
+    "profitabilityData": [
+        {
+            "product": "Product A",
+            "revenue": 150000,
+            "cost": 97500,
+            "profit": 52500
+        },
+        {
+            "product": "Product B",
+            "revenue": 187000,
+            "cost": 108000,
+            "profit": 79000
+        },
+        {
+            "product": "Product C",
+            "revenue": 132500,
+            "cost": 95200,
+            "profit": 37300
+        },
+        {
+            "product": "Product D",
+            "revenue": 91500,
+            "cost": 75000,
+            "profit": 16500
+        },
+        {
+            "product": "Product E",
+            "revenue": 214400,
+            "cost": 96000,
+            "profit": 118400
+        }
+    ],
+    "trendData": [
+        {
+            "month": "Jan",
+            "productA": 125,
+            "productB": 85,
+            "productC": 160,
+            "productD": 210,
+            "productE": 65
+        },
+        {
+            "month": "Feb",
+            "productA": 127,
+            "productB": 87,
+            "productC": 158,
+            "productD": 205,
+            "productE": 66
+        },
+        {
+            "month": "Mar",
+            "productA": 126,
+            "productB": 88,
+            "productC": 155,
+            "productD": 200,
+            "productE": 67
+        },
+        {
+            "month": "Apr",
+            "productA": 128,
+            "productB": 89,
+            "productC": 152,
+            "productD": 198,
+            "productE": 68
+        },
+        {
+            "month": "May",
+            "productA": 125,
+            "productB": 89,
+            "productC": 150,
+            "productD": 195,
+            "productE": 67
+        },
+        {
+            "month": "Jun",
+            "productA": 125,
+            "productB": 89,
+            "productC": 156,
+            "productD": 203,
+            "productE": 67
+        }
+    ]
+}

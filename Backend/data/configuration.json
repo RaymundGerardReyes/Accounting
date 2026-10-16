@@ -1,0 +1,200 @@
+{
+    "config": {
+        "companyName": "Acme Manufacturing Inc.",
+        "fiscalYear": "2025",
+        "allocationMethod": "activity-based",
+        "reportingCurrency": "PHP",
+        "decimalPlaces": 2,
+        "autoBackup": true,
+        "notificationEmail": "admin@acme.com"
+    },
+    "departments": [
+        {
+            "id": "manufacturing",
+            "name": "Manufacturing",
+            "costCenter": "CC-001",
+            "manager": "John Smith",
+            "budget": 450000
+        },
+        {
+            "id": "assembly",
+            "name": "Assembly",
+            "costCenter": "CC-002",
+            "manager": "Sarah Johnson",
+            "budget": 300000
+        },
+        {
+            "id": "qa",
+            "name": "QA",
+            "costCenter": "CC-003",
+            "manager": "Mike Davis",
+            "budget": 150000
+        },
+        {
+            "id": "logistics",
+            "name": "Logistics",
+            "costCenter": "CC-004",
+            "manager": "Lisa Chen",
+            "budget": 100000
+        }
+    ],
+    "users": [
+        {
+            "id": 1,
+            "name": "John Smith",
+            "role": "Admin",
+            "email": "john@acme.com",
+            "status": "Active"
+        },
+        {
+            "id": 2,
+            "name": "Sarah Johnson",
+            "role": "Analyst",
+            "email": "sarah@acme.com",
+            "status": "Active"
+        },
+        {
+            "id": 3,
+            "name": "Mike Davis",
+            "role": "Viewer",
+            "email": "mike@acme.com",
+            "status": "Active"
+        },
+        {
+            "id": 4,
+            "name": "Lisa Chen",
+            "role": "Analyst",
+            "email": "lisa@acme.com",
+            "status": "Inactive"
+        }
+    ],
+    "auditLogs": [
+        {
+            "id": 15,
+            "action": "Payment received: \u20b1178.00 for ORD-202610-0052 (Simulate Fallback Order)",
+            "user": "PayMongo Gateway",
+            "time": "Just now",
+            "severity": "success"
+        },
+        {
+            "id": 14,
+            "action": "Payment received: \u20b1250.00 for ORD-202610-0044 (Webhook Transition Order)",
+            "user": "PayMongo Gateway",
+            "time": "Just now",
+            "severity": "success"
+        },
+        {
+            "id": 13,
+            "action": "Payment received: \u20b1178.00 for ORD-202610-0041 (Simulate Fallback Order)",
+            "user": "PayMongo Gateway",
+            "time": "Just now",
+            "severity": "success"
+        },
+        {
+            "id": 12,
+            "action": "Payment received: \u20b1250.00 for ORD-202610-0033 (Webhook Transition Order)",
+            "user": "PayMongo Gateway",
+            "time": "Just now",
+            "severity": "success"
+        },
+        {
+            "id": 11,
+            "action": "Payment received: \u20b1178.00 for ORD-202610-0030 (Simulate Fallback Order)",
+            "user": "PayMongo Gateway",
+            "time": "Just now",
+            "severity": "success"
+        },
+        {
+            "id": 10,
+            "action": "Payment received: \u20b1250.00 for ORD-202610-0022 (Webhook Transition Order)",
+            "user": "PayMongo Gateway",
+            "time": "Just now",
+            "severity": "success"
+        },
+        {
+            "id": 9,
+            "action": "Payment received: \u20b1250.00 for ORD-202610-0014 (Webhook Transition Order)",
+            "user": "PayMongo Gateway",
+            "time": "Just now",
+            "severity": "success"
+        },
+        {
+            "id": 8,
+            "action": "Payment received: \u20b1250.00 for ORD-202610-0010 (Webhook Transition Order)",
+            "user": "PayMongo Gateway",
+            "time": "Just now",
+            "severity": "success"
+        },
+        {
+            "id": 7,
+            "action": "Payment received: \u20b1250.00 for ORD-202610-0006 (Webhook Transition Order)",
+            "user": "PayMongo Gateway",
+            "time": "Just now",
+            "severity": "success"
+        },
+        {
+            "id": 6,
+            "action": "Payment received: \u20b1250.00 for ORD-202610-0003 (Webhook Transition Order)",
+            "user": "PayMongo Gateway",
+            "time": "Just now",
+            "severity": "success"
+        },
+        {
+            "id": 1,
+            "action": "Cost allocation updated",
+            "user": "John Smith",
+            "time": "2 hours ago",
+            "severity": "info"
+        },
+        {
+            "id": 2,
+            "action": "Department budget modified",
+            "user": "Sarah Johnson",
+            "time": "5 hours ago",
+            "severity": "warning"
+        },
+        {
+            "id": 3,
+            "action": "User added",
+            "user": "Admin",
+            "time": "1 day ago",
+            "severity": "info"
+        },
+        {
+            "id": 4,
+            "action": "System backup completed",
+            "user": "System",
+            "time": "2 days ago",
+            "severity": "success"
+        },
+        {
+            "id": 5,
+            "action": "Configuration changed",
+            "user": "John Smith",
+            "time": "3 days ago",
+            "severity": "warning"
+        }
+    ],
+    "integrations": [
+        {
+            "name": "PayMongo Payment Gateway",
+            "status": "Active (Hosted Checkout & Webhooks)",
+            "lastSync": "Real-time"
+        },
+        {
+            "name": "Database",
+            "status": "Connected",
+            "lastSync": "5 minutes ago"
+        },
+        {
+            "name": "Email Notifications",
+            "status": "Configured",
+            "lastSync": "N/A"
+        },
+        {
+            "name": "API Access",
+            "status": "Enabled",
+            "lastSync": "N/A"
+        }
+    ]
+}

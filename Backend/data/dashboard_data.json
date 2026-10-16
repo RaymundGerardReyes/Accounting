@@ -1,0 +1,31 @@
+{
+  "costTrendData": [
+    { "month": "Jan", "allocated": 125000, "actual": 128000, "variance": -3000, "variancePercent": -2.4 },
+    { "month": "Feb", "allocated": 132000, "actual": 129500, "variance": 2500, "variancePercent": 1.9 },
+    { "month": "Mar", "allocated": 128000, "actual": 135000, "variance": -7000, "variancePercent": -5.5 },
+    { "month": "Apr", "allocated": 140000, "actual": 138000, "variance": 2000, "variancePercent": 1.4 },
+    { "month": "May", "allocated": 145000, "actual": 142000, "variance": 3000, "variancePercent": 2.1 },
+    { "month": "Jun", "allocated": 152000, "actual": 155000, "variance": -3000, "variancePercent": -2.0 }
+  ],
+  "departmentData": [
+    { "name": "Manufacturing", "value": 45, "color": "hsl(var(--color-chart-1))" },
+    { "name": "Assembly", "value": 30, "color": "hsl(var(--color-chart-2))" },
+    { "name": "QA", "value": 15, "color": "hsl(var(--color-chart-3))" },
+    { "name": "Logistics", "value": 10, "color": "hsl(var(--color-chart-4))" }
+  ],
+  "departmentMetrics": [
+    { "name": "Manufacturing", "allocated": 450000, "actual": 465000, "variance": -15000, "status": "unfavorable", "variancePercent": -3.3 },
+    { "name": "Assembly", "allocated": 300000, "actual": 292000, "variance": 8000, "status": "favorable", "variancePercent": 2.7 },
+    { "name": "QA", "allocated": 150000, "actual": 148000, "variance": 2000, "status": "favorable", "variancePercent": 1.3 },
+    { "name": "Logistics", "allocated": 100000, "actual": 100000, "variance": 0, "status": "neutral", "variancePercent": 0 }
+  ],
+  "varianceTrendData": [
+    { "month": "Jan", "favorable": 2, "unfavorable": 2, "neutral": 0 },
+    { "month": "Feb", "favorable": 3, "unfavorable": 1, "neutral": 0 },
+    { "month": "Mar", "favorable": 2, "unfavorable": 2, "neutral": 0 },
+    { "month": "Apr", "favorable": 3, "unfavorable": 1, "neutral": 0 },
+    { "month": "May", "favorable": 3, "unfavorable": 1, "neutral": 0 },
+    { "month": "Jun", "favorable": 2, "unfavorable": 2, "neutral": 0 }
+  ]
+}
+

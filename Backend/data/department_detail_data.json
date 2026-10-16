@@ -1,0 +1,190 @@
+{
+  "manufacturing": {
+    "costBreakdown": [
+      {
+        "category": "Labor",
+        "allocated": 180000,
+        "actual": 185000,
+        "variance": -5000,
+        "variancePercent": -2.8
+      },
+      {
+        "category": "Materials",
+        "allocated": 150000,
+        "actual": 148000,
+        "variance": 2000,
+        "variancePercent": 1.3
+      },
+      {
+        "category": "Overhead",
+        "allocated": 90000,
+        "actual": 92000,
+        "variance": -2000,
+        "variancePercent": -2.2
+      },
+      {
+        "category": "Utilities",
+        "allocated": 30000,
+        "actual": 28000,
+        "variance": 2000,
+        "variancePercent": 6.7
+      }
+    ],
+    "monthlyTrend": [
+      { "month": "Jan", "cost": 125000, "budget": 120000, "variance": -5000 },
+      { "month": "Feb", "cost": 132000, "budget": 125000, "variance": -7000 },
+      { "month": "Mar", "cost": 128000, "budget": 125000, "variance": -3000 },
+      { "month": "Apr", "cost": 140000, "budget": 135000, "variance": -5000 },
+      { "month": "May", "cost": 145000, "budget": 140000, "variance": -5000 },
+      { "month": "Jun", "cost": 152000, "budget": 150000, "variance": -2000 }
+    ],
+    "departmentStats": {
+      "allocated": 450000,
+      "actual": 453000,
+      "variance": -3000,
+      "variancePercent": -0.67,
+      "status": "unfavorable"
+    }
+  },
+  "assembly": {
+    "costBreakdown": [
+      {
+        "category": "Assembly Labor",
+        "allocated": 140000,
+        "actual": 135000,
+        "variance": 5000,
+        "variancePercent": 3.6
+      },
+      {
+        "category": "Components & Fasteners",
+        "allocated": 90000,
+        "actual": 88000,
+        "variance": 2000,
+        "variancePercent": 2.2
+      },
+      {
+        "category": "Tooling Maintenance",
+        "allocated": 45000,
+        "actual": 44500,
+        "variance": 500,
+        "variancePercent": 1.1
+      },
+      {
+        "category": "Assembly Line Power",
+        "allocated": 25000,
+        "actual": 24500,
+        "variance": 500,
+        "variancePercent": 2.0
+      }
+    ],
+    "monthlyTrend": [
+      { "month": "Jan", "cost": 48000, "budget": 50000, "variance": 2000 },
+      { "month": "Feb", "cost": 49000, "budget": 50000, "variance": 1000 },
+      { "month": "Mar", "cost": 47500, "budget": 50000, "variance": 2500 },
+      { "month": "Apr", "cost": 50000, "budget": 50000, "variance": 0 },
+      { "month": "May", "cost": 48500, "budget": 50000, "variance": 1500 },
+      { "month": "Jun", "cost": 49000, "budget": 50000, "variance": 1000 }
+    ],
+    "departmentStats": {
+      "allocated": 300000,
+      "actual": 292000,
+      "variance": 8000,
+      "variancePercent": 2.67,
+      "status": "favorable"
+    }
+  },
+  "qa": {
+    "costBreakdown": [
+      {
+        "category": "Quality Inspection Labor",
+        "allocated": 75000,
+        "actual": 73500,
+        "variance": 1500,
+        "variancePercent": 2.0
+      },
+      {
+        "category": "Testing Equipment & Reagents",
+        "allocated": 40000,
+        "actual": 39800,
+        "variance": 200,
+        "variancePercent": 0.5
+      },
+      {
+        "category": "Calibration & Standards",
+        "allocated": 20000,
+        "actual": 19700,
+        "variance": 300,
+        "variancePercent": 1.5
+      },
+      {
+        "category": "Compliance & Certifications",
+        "allocated": 15000,
+        "actual": 15000,
+        "variance": 0,
+        "variancePercent": 0.0
+      }
+    ],
+    "monthlyTrend": [
+      { "month": "Jan", "cost": 24500, "budget": 25000, "variance": 500 },
+      { "month": "Feb", "cost": 25000, "budget": 25000, "variance": 0 },
+      { "month": "Mar", "cost": 24000, "budget": 25000, "variance": 1000 },
+      { "month": "Apr", "cost": 24800, "budget": 25000, "variance": 200 },
+      { "month": "May", "cost": 24700, "budget": 25000, "variance": 300 },
+      { "month": "Jun", "cost": 25000, "budget": 25000, "variance": 0 }
+    ],
+    "departmentStats": {
+      "allocated": 150000,
+      "actual": 148000,
+      "variance": 2000,
+      "variancePercent": 1.33,
+      "status": "favorable"
+    }
+  },
+  "logistics": {
+    "costBreakdown": [
+      {
+        "category": "Freight & Shipping",
+        "allocated": 50000,
+        "actual": 51000,
+        "variance": -1000,
+        "variancePercent": -2.0
+      },
+      {
+        "category": "Warehousing & Storage",
+        "allocated": 25000,
+        "actual": 24500,
+        "variance": 500,
+        "variancePercent": 2.0
+      },
+      {
+        "category": "Fleet Fuel & Maintenance",
+        "allocated": 15000,
+        "actual": 14800,
+        "variance": 200,
+        "variancePercent": 1.3
+      },
+      {
+        "category": "Packaging Supplies",
+        "allocated": 10000,
+        "actual": 9700,
+        "variance": 300,
+        "variancePercent": 3.0
+      }
+    ],
+    "monthlyTrend": [
+      { "month": "Jan", "cost": 16500, "budget": 16667, "variance": 167 },
+      { "month": "Feb", "cost": 16800, "budget": 16667, "variance": -133 },
+      { "month": "Mar", "cost": 16500, "budget": 16667, "variance": 167 },
+      { "month": "Apr", "cost": 16700, "budget": 16667, "variance": -33 },
+      { "month": "May", "cost": 16600, "budget": 16667, "variance": 67 },
+      { "month": "Jun", "cost": 16900, "budget": 16667, "variance": -233 }
+    ],
+    "departmentStats": {
+      "allocated": 100000,
+      "actual": 100000,
+      "variance": 0,
+      "variancePercent": 0.0,
+      "status": "neutral"
+    }
+  }
+}
