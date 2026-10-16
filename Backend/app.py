@@ -129,6 +129,21 @@ async def save_departments(request: Request):
     write_json_file("configuration.json", cfg_data)
     return {"success": True, "departments": departments}
 
+@app.post("/api/configuration/users", summary="Save Users")
+async def save_users(request: Request):
+    """
+    Persists user access list modifications to configuration.json.
+    """
+    body = await request.json()
+    users = body.get("users")
+    if users is None:
+        raise HTTPException(status_code=400, detail="Missing users array.")
+    cfg_data = read_json_file("configuration.json") or {}
+    cfg_data["users"] = users
+    write_json_file("configuration.json", cfg_data)
+    return {"success": True, "users": users}
+
+
 # ==========================================
 # 2. Payment Orchestration Schemas & Routes (/api/v1/*)
 # ==========================================
