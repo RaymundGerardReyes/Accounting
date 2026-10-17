@@ -17,7 +17,7 @@ SCOPE_PATTERNS = {
     "backend": [r"^Backend/(?!test_).*"],
     "frontend": [r"^Frontend/.*"],
     "test": [r"^Backend/test_.*", r"^tests/.*"],
-    "docs": [r"^docs/.*"],
+    "docs": [r"^docs/.*", r"^INSTRUCTIONS\.txt$"],
     "agents": [r"^\.agents/.*"],
     "versioning": [r"^scripts/.*"],
 }
