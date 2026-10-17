@@ -33,6 +33,7 @@ import {
   FulfillmentOutboxRecord,
   formatPhpFromMinor,
 } from "@/lib/payment-api"
+import { CurrencyDisplay, FinancialStatusBadge } from "@/components/ui/financial-primitives"
 
 export function PaymentsHub() {
   const router = useRouter()
@@ -285,8 +286,8 @@ export function PaymentsHub() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold font-mono tabular-nums text-foreground">
-              {formatPhpFromMinor(totalVolumeMinor)}
+            <div className="text-foreground">
+              <CurrencyDisplay amountMinor={totalVolumeMinor} currency="PHP" size="xl" className="font-bold text-foreground" />
             </div>
             <p className="text-xs text-muted-foreground mt-1">Verified via signed webhook</p>
           </CardContent>
@@ -299,8 +300,8 @@ export function PaymentsHub() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold font-mono tabular-nums text-accent">
-              {formatPhpFromMinor(pendingVolumeMinor)}
+            <div className="text-secondary">
+              <CurrencyDisplay amountMinor={pendingVolumeMinor} currency="PHP" size="xl" className="font-bold text-secondary" />
             </div>
             <p className="text-xs text-muted-foreground mt-1">Awaiting checkout settlement</p>
           </CardContent>
@@ -454,23 +455,11 @@ export function PaymentsHub() {
                                 {o.category === "product_order" ? "Product Run" : "Cost Center"}
                               </span>
                             </td>
-                            <td className="px-6 py-4 font-mono tabular-nums font-bold text-foreground">
-                              {formatPhpFromMinor(o.amount_minor)}
+                            <td className="px-6 py-4">
+                              <CurrencyDisplay amountMinor={o.amount_minor} currency="PHP" size="sm" className="font-bold text-foreground" />
                             </td>
                             <td className="px-6 py-4">
-                              <span
-                                className={`inline-flex items-center gap-1.5 text-[11px] font-mono font-semibold px-2.5 py-0.5 rounded-full ${
-                                  o.status === "paid"
-                                    ? "bg-primary text-primary-foreground"
-                                    : o.status === "cancelled"
-                                    ? "bg-accent/10 text-accent border border-accent/20"
-                                    : "bg-muted text-foreground"
-                                }`}
-                              >
-                                {o.status === "paid" && <CheckCircle2 className="w-3 h-3" />}
-                                {o.status === "pending" && <Clock className="w-3 h-3 text-accent" />}
-                                {o.status.toUpperCase()}
-                              </span>
+                              <FinancialStatusBadge status={o.status} />
                             </td>
                             <td className="px-6 py-4">
                               {latest ? (

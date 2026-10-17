@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { CurrencyDisplay, FinancialStatusBadge } from "@/components/ui/financial-primitives"
 import {
   Landmark,
   Plus,
@@ -1072,14 +1073,12 @@ export function FinanceOperationsHub() {
                         <tr key={exc.id} className="hover:bg-muted/40">
                           <td className="py-2.5 font-mono font-medium">{exc.exception_category}</td>
                           <td className="py-2.5">{exc.entity_type} #{exc.entity_id?.slice(0, 8)}</td>
-                          <td className="py-2.5 font-mono font-medium text-amber-600">
-                            {formatPhpMinor(exc.amount_minor)}
+                          <td className="py-2.5">
+                            <CurrencyDisplay amountMinor={exc.amount_minor} currency="PHP" size="sm" className="font-medium text-amber-600" />
                           </td>
                           <td className="py-2.5 text-muted-foreground max-w-xs truncate">{exc.notes || exc.reason}</td>
                           <td className="py-2.5">
-                            <Badge variant="outline" className="text-[10px] uppercase">
-                              {exc.status}
-                            </Badge>
+                            <FinancialStatusBadge status={exc.status} />
                           </td>
                           <td className="py-2.5 text-right">
                             {exc.status !== "resolved" && (
@@ -1168,45 +1167,26 @@ export function FinanceOperationsHub() {
                           </td>
                           <td className="py-3 px-4">{adv.employee_user_id || "Field Staff"}</td>
                           <td className="py-3 px-4 max-w-xs truncate">{adv.purpose}</td>
-                          <td className="py-3 px-4 font-mono font-semibold">
-                            {formatPhpMinor(adv.requested_amount_minor)}
+                          <td className="py-3 px-4">
+                            <CurrencyDisplay amountMinor={adv.requested_amount_minor} currency="PHP" size="sm" className="font-semibold" />
                           </td>
                           <td className="py-3 px-4 text-muted-foreground">{adv.needed_by_date}</td>
                           <td className="py-3 px-4">
-                            <Badge
-                              variant={
-                                adv.approval_status === "approved"
-                                  ? "default"
-                                  : adv.approval_status === "submitted"
-                                  ? "secondary"
-                                  : "outline"
-                              }
-                              className="text-[10px] uppercase font-mono"
-                            >
-                              {adv.approval_status}
-                            </Badge>
+                            <FinancialStatusBadge status={adv.approval_status} />
                           </td>
                           <td className="py-3 px-4">
-                            <Badge variant="outline" className="text-[10px] uppercase font-mono">
-                              {adv.payment_status}
-                            </Badge>
+                            <FinancialStatusBadge status={adv.payment_status} />
                           </td>
                           <td className="py-3 px-4">
-                            <Badge
-                              variant={
-                                adv.settlement_status === "settled_zero"
-                                  ? "default"
-                                  : adv.settlement_status === "shortfall_receivable"
-                                  ? "destructive"
-                                  : "secondary"
-                              }
-                              className="text-[10px] uppercase font-mono"
-                            >
-                              {adv.settlement_status}
-                            </Badge>
+                            <FinancialStatusBadge status={adv.settlement_status} />
                           </td>
-                          <td className="py-3 px-4 font-mono font-bold text-accent">
-                            {formatPhpMinor(adv.reconciliation?.outstanding_balance_minor ?? adv.requested_amount_minor)}
+                          <td className="py-3 px-4 font-bold text-secondary">
+                            <CurrencyDisplay
+                              amountMinor={adv.reconciliation?.outstanding_balance_minor ?? adv.requested_amount_minor}
+                              currency="PHP"
+                              size="sm"
+                              className="font-bold text-secondary"
+                            />
                           </td>
                           <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
                             {/* Submit */}
@@ -1343,31 +1323,18 @@ export function FinanceOperationsHub() {
                           <td className="py-3 px-4">{exp.employee_user_id || "Field Staff"}</td>
                           <td className="py-3 px-4 font-mono">{exp.period_key}</td>
                           <td className="py-3 px-4 max-w-xs truncate">{exp.title}</td>
-                          <td className="py-3 px-4 font-mono font-semibold">
-                            {formatPhpMinor(exp.total_reported_minor)}
+                          <td className="py-3 px-4">
+                            <CurrencyDisplay amountMinor={exp.total_reported_minor} currency="PHP" size="sm" className="font-semibold" />
                           </td>
-                          <td className="py-3 px-4 font-mono font-semibold text-emerald-600">
-                            {formatPhpMinor(exp.total_approved_minor)}
+                          <td className="py-3 px-4 font-semibold text-emerald-600">
+                            <CurrencyDisplay amountMinor={exp.total_approved_minor} currency="PHP" size="sm" className="font-semibold text-emerald-600" />
                           </td>
                           <td className="py-3 px-4">{exp.lines?.length || 0}</td>
                           <td className="py-3 px-4">
-                            <Badge
-                              variant={
-                                exp.review_status === "approved"
-                                  ? "default"
-                                  : exp.review_status === "partially_approved"
-                                  ? "secondary"
-                                  : "outline"
-                              }
-                              className="text-[10px] uppercase font-mono"
-                            >
-                              {exp.review_status}
-                            </Badge>
+                            <FinancialStatusBadge status={exp.review_status} />
                           </td>
                           <td className="py-3 px-4">
-                            <Badge variant="outline" className="text-[10px] uppercase font-mono">
-                              {exp.settlement_status}
-                            </Badge>
+                            <FinancialStatusBadge status={exp.settlement_status} />
                           </td>
                           <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
                             {/* Manage Lines */}
@@ -1633,43 +1600,51 @@ export function FinanceOperationsHub() {
                             <td className="py-2.5 px-3 font-mono font-medium text-primary">{ap.ap_number}</td>
                             <td className="py-2.5 px-3 font-mono">{ap.invoice_number}</td>
                             <td className="py-2.5 px-3 text-muted-foreground">{ap.due_date}</td>
-                            <td className="py-2.5 px-3 font-mono">{formatPhpMinor(ap.gross_amount_minor)}</td>
-                            <td className="py-2.5 px-3 font-mono font-semibold text-accent">
-                              {formatPhpMinor(ap.net_payable_minor)}
+                            <td className="py-2.5 px-3">
+                              <CurrencyDisplay amountMinor={ap.gross_amount_minor} currency="PHP" size="sm" />
                             </td>
-                            <td className="py-2.5 px-3 font-mono text-emerald-600">
-                              {formatPhpMinor(ap.paid_amount_minor)}
+                            <td className="py-2.5 px-3 font-semibold text-secondary">
+                              <CurrencyDisplay amountMinor={ap.net_payable_minor} currency="PHP" size="sm" className="font-semibold text-secondary" />
                             </td>
                             <td className="py-2.5 px-3">
-                              <Badge variant="outline" className="text-[10px] uppercase font-mono">
-                                {ap.payment_status || "open"}
-                              </Badge>
+                              <CurrencyDisplay amountMinor={ap.paid_amount_minor} currency="PHP" size="sm" className="text-emerald-600" />
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <FinancialStatusBadge status={ap.payment_status || "open"} />
                             </td>
                             <td className="py-2.5 px-3 text-right">
-                              {((ap.balance_minor ?? ap.remaining_balance_minor ?? ap.net_payable_minor) > 0) && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-6 text-[10px]"
-                                  onClick={async () => {
-                                    try {
-                                      const p = await preparePayablePayment(currentActorId, ap.id, {
-                                        payment_amount_minor: ap.balance_minor ?? ap.remaining_balance_minor ?? ap.net_payable_minor,
-                                        payment_method: "bank_transfer",
-                                      })
-                                      setFeedback({
-                                        type: "success",
-                                        message: `Prepared payment ${p.payment_number} for AP ${ap.ap_number}.`,
-                                      })
-                                      await loadData()
-                                    } catch (e: any) {
-                                      setFeedback({ type: "error", message: e.message })
-                                    }
-                                  }}
-                                >
-                                  Disburse AP
-                                </Button>
-                              )}
+                              {(() => {
+                                const apRemainingBalance =
+                                  ap.remaining_balance_minor ??
+                                  ap.balance_minor ??
+                                  Math.max(0, (ap.net_payable_minor ?? 0) - (ap.paid_amount_minor ?? 0))
+                                return (
+                                  apRemainingBalance > 0 && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-6 text-[10px]"
+                                      onClick={async () => {
+                                        try {
+                                          const p = await preparePayablePayment(currentActorId, ap.id, {
+                                            payment_amount_minor: apRemainingBalance,
+                                            payment_method: "bank_transfer",
+                                          })
+                                          setFeedback({
+                                            type: "success",
+                                            message: `Prepared payment ${p.payment_number} for AP ${ap.ap_number}.`,
+                                          })
+                                          await loadData()
+                                        } catch (e: any) {
+                                          setFeedback({ type: "error", message: e.message })
+                                        }
+                                      }}
+                                    >
+                                      Disburse AP
+                                    </Button>
+                                  )
+                                )
+                              })()}
                             </td>
                           </tr>
                         ))
@@ -1945,19 +1920,17 @@ export function FinanceOperationsHub() {
                           <td className="py-2.5 px-3 text-muted-foreground">{r.transaction_date}</td>
                           <td className="py-2.5 px-3">{r.employee_or_vendor}</td>
                           <td className="py-2.5 px-3 text-muted-foreground">{r.category}</td>
-                          <td className="py-2.5 px-3 font-mono">{formatPhpMinor(r.gross_amount_minor)}</td>
-                          <td className="py-2.5 px-3 font-mono font-semibold text-accent">
-                            {formatPhpMinor(r.outstanding_balance_minor)}
+                          <td className="py-2.5 px-3">
+                            <CurrencyDisplay amountMinor={r.gross_amount_minor} currency="PHP" size="sm" />
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-secondary">
+                            <CurrencyDisplay amountMinor={r.outstanding_balance_minor} currency="PHP" size="sm" className="font-semibold text-secondary" />
                           </td>
                           <td className="py-2.5 px-3">
-                            <Badge variant="outline" className="text-[10px] uppercase font-mono">
-                              {r.approval_status}
-                            </Badge>
+                            <FinancialStatusBadge status={r.approval_status} />
                           </td>
                           <td className="py-2.5 px-3">
-                            <Badge variant="outline" className="text-[10px] uppercase font-mono">
-                              {r.payment_status}
-                            </Badge>
+                            <FinancialStatusBadge status={r.payment_status} />
                           </td>
                         </tr>
                       ))
