@@ -242,12 +242,12 @@ export default function PaymentResultPage({ params }: PageProps) {
             </Button>
           )}
 
-          {status === "failed" && order && (
+          {(status === "failed" || status === "expired" || status === "cancelled") && order && (
             <Button
               className="w-full sm:flex-1 bg-accent text-accent-foreground hover:bg-accent/90"
               onClick={() => router.push(`/checkout?order_id=${order.id}`)}
             >
-              Try Again
+              {status === "expired" ? "Start New Checkout" : "Try Again"}
             </Button>
           )}
 

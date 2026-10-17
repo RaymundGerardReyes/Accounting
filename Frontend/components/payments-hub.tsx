@@ -23,6 +23,7 @@ import {
   Check,
   ExternalLink,
   Play,
+  RotateCcw,
 } from "lucide-react"
 import {
   fetchOrders,
@@ -101,6 +102,8 @@ function OrderMobileCard({ order, copiedKey, onCopy, onReconcile, onView, onPay 
                   : latest.status === "failed"
                   ? "bg-accent/10 text-accent border border-accent/20"
                   : latest.status === "requires_action"
+                  ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                  : latest.status === "expired" || latest.status === "cancelled"
                   ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
                   : "bg-muted text-muted-foreground border border-border"
               }`}
@@ -188,7 +191,9 @@ function OrderMobileCard({ order, copiedKey, onCopy, onReconcile, onView, onPay 
             onClick={() => onPay(order.id)}
           >
             <CreditCard className="w-3.5 h-3.5 mr-1 shrink-0" />
-            Pay Now
+            {latest && (latest.status === "failed" || latest.status === "expired" || latest.status === "cancelled")
+              ? "Retry Payment"
+              : "Pay Now"}
           </Button>
         )}
         {latest && latest.status !== "succeeded" && (
@@ -303,6 +308,8 @@ function OrderDesktopRow({ order, copiedKey, onCopy, onReconcile, onView, onPay 
                       ? "bg-accent/10 text-accent border border-accent/20"
                       : latest.status === "requires_action"
                       ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                      : latest.status === "expired" || latest.status === "cancelled"
+                      ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
                       : "bg-muted text-muted-foreground border border-border"
                   }`}
                 >
@@ -407,7 +414,9 @@ function OrderDesktopRow({ order, copiedKey, onCopy, onReconcile, onView, onPay 
               onClick={() => onPay(order.id)}
             >
               <CreditCard className="w-3.5 h-3.5 mr-1 shrink-0" />
-              Pay Now
+              {latest && (latest.status === "failed" || latest.status === "expired" || latest.status === "cancelled")
+                ? "Retry Payment"
+                : "Pay Now"}
             </Button>
           )}
           {latest && latest.status !== "succeeded" && (
@@ -433,6 +442,267 @@ function OrderDesktopRow({ order, copiedKey, onCopy, onReconcile, onView, onPay 
         </div>
       </td>
     </tr>
+  )
+}
+
+interface OutboxItemProps {
+  item: FulfillmentOutboxRecord
+  copiedKey: string | null
+  onCopy: (text: string, key: string) => void
+  onViewAttempt: (attemptId: string) => void
+}
+
+function OutboxMobileCard({ item, copiedKey, onCopy, onViewAttempt }: OutboxItemProps) {
+  return (
+    <div className="p-4 space-y-3 bg-card hover:bg-muted/10 transition-colors">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs font-semibold text-foreground truncate max-w-[130px]" title={item.id}>
+            {item.id.slice(0, 8)}...
+          </span>
+          <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-muted text-foreground font-medium whitespace-nowrap inline-flex items-center shrink-0">
+            {item.event_type || "order.paid"}
+          </span>
+        </div>
+        <span
+          className={`text-[11px] px-2.5 py-0.5 rounded font-mono font-medium uppercase whitespace-nowrap inline-flex items-center shrink-0 ${
+            item.status === "completed"
+              ? "bg-primary text-primary-foreground"
+              : item.status === "pending"
+              ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30"
+              : "bg-destructive text-destructive-foreground"
+          }`}
+        >
+          {item.status}
+        </span>
+      </div>
+
+      <div className="space-y-1.5 text-xs font-mono">
+        <div>
+          <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Outbox Task ID</div>
+          <div className="flex items-center justify-between gap-1.5 mt-0.5 bg-background px-2 py-1 rounded border border-border/60 text-[11px]">
+            <span className="truncate select-all">{item.id}</span>
+            <button
+              type="button"
+              onClick={() => onCopy(item.id, `mob-out-${item.id}`)}
+              className="text-muted-foreground hover:text-foreground p-0.5 rounded shrink-0 transition-colors"
+              title="Copy Outbox ID"
+              aria-label="Copy Outbox ID"
+            >
+              {copiedKey === `mob-out-${item.id}` ? (
+                <Check className="w-3.5 h-3.5 text-primary" />
+              ) : (
+                <Copy className="w-3.5 h-3.5" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Order ID</div>
+          <div className="flex items-center justify-between gap-1.5 mt-0.5 bg-background px-2 py-1 rounded border border-border/60 text-[11px]">
+            <span className="truncate select-all">{item.order_id}</span>
+            <button
+              type="button"
+              onClick={() => onCopy(item.order_id, `mob-ord-${item.order_id}`)}
+              className="text-muted-foreground hover:text-foreground p-0.5 rounded shrink-0 transition-colors"
+              title="Copy Order ID"
+              aria-label="Copy Order ID"
+            >
+              {copiedKey === `mob-ord-${item.order_id}` ? (
+                <Check className="w-3.5 h-3.5 text-primary" />
+              ) : (
+                <Copy className="w-3.5 h-3.5" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Payment Attempt ID</div>
+          <div className="flex items-center justify-between gap-1.5 mt-0.5 bg-background px-2 py-1 rounded border border-border/60 text-[11px]">
+            <span className="truncate select-all">{item.payment_attempt_id}</span>
+            <div className="inline-flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => onCopy(item.payment_attempt_id, `mob-att-${item.payment_attempt_id}`)}
+                className="text-muted-foreground hover:text-foreground p-0.5 rounded transition-colors"
+                title="Copy Attempt ID"
+                aria-label="Copy Attempt ID"
+              >
+                {copiedKey === `mob-att-${item.payment_attempt_id}` ? (
+                  <Check className="w-3.5 h-3.5 text-primary" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => onViewAttempt(item.payment_attempt_id)}
+                className="text-muted-foreground hover:text-foreground p-0.5 rounded transition-colors"
+                title="Inspect Attempt Details"
+                aria-label="Inspect Attempt Details"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between text-xs text-muted-foreground font-mono pt-1 border-t border-border/60">
+        <span className="text-[10px]">Processed Time:</span>
+        <span className="text-[11px]">
+          {item.processed_at ? new Date(item.processed_at).toLocaleString() : "Pending"}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function OutboxDesktopRow({ item, copiedKey, onCopy, onViewAttempt }: OutboxItemProps) {
+  return (
+    <tr className="hover:bg-muted/30 transition-colors">
+      <td className="px-6 py-3.5 font-mono text-xs whitespace-nowrap">
+        <div className="flex items-center gap-1.5">
+          <span className="text-foreground font-medium">{item.id.slice(0, 8)}...</span>
+          <button
+            type="button"
+            onClick={() => onCopy(item.id, `desk-out-${item.id}`)}
+            className="text-muted-foreground hover:text-foreground p-0.5 rounded shrink-0 transition-colors"
+            title="Copy Outbox ID"
+            aria-label="Copy Outbox ID"
+          >
+            {copiedKey === `desk-out-${item.id}` ? (
+              <Check className="w-3.5 h-3.5 text-primary" />
+            ) : (
+              <Copy className="w-3.5 h-3.5" />
+            )}
+          </button>
+        </div>
+      </td>
+      <td className="px-6 py-3.5 font-mono text-xs whitespace-nowrap">
+        <div className="flex items-center gap-1.5">
+          <span className="text-muted-foreground">{item.order_id.slice(0, 8)}...</span>
+          <button
+            type="button"
+            onClick={() => onCopy(item.order_id, `desk-ord-${item.order_id}`)}
+            className="text-muted-foreground hover:text-foreground p-0.5 rounded shrink-0 transition-colors"
+            title="Copy Order ID"
+            aria-label="Copy Order ID"
+          >
+            {copiedKey === `desk-ord-${item.order_id}` ? (
+              <Check className="w-3.5 h-3.5 text-primary" />
+            ) : (
+              <Copy className="w-3.5 h-3.5" />
+            )}
+          </button>
+        </div>
+      </td>
+      <td className="px-6 py-3.5 font-mono text-xs whitespace-nowrap">
+        <div className="flex items-center gap-1.5">
+          <span className="text-muted-foreground">{item.payment_attempt_id.slice(0, 8)}...</span>
+          <button
+            type="button"
+            onClick={() => onCopy(item.payment_attempt_id, `desk-att-${item.payment_attempt_id}`)}
+            className="text-muted-foreground hover:text-foreground p-0.5 rounded shrink-0 transition-colors"
+            title="Copy Attempt ID"
+            aria-label="Copy Attempt ID"
+          >
+            {copiedKey === `desk-att-${item.payment_attempt_id}` ? (
+              <Check className="w-3.5 h-3.5 text-primary" />
+            ) : (
+              <Copy className="w-3.5 h-3.5" />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => onViewAttempt(item.payment_attempt_id)}
+            className="text-muted-foreground hover:text-foreground p-0.5 rounded shrink-0 transition-colors"
+            title="Inspect Attempt Details"
+            aria-label="Inspect Attempt Details"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </td>
+      <td className="px-6 py-3.5 whitespace-nowrap">
+        <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-muted text-foreground font-medium whitespace-nowrap inline-flex items-center shrink-0">
+          {item.event_type || "order.paid"}
+        </span>
+      </td>
+      <td className="px-6 py-3.5 whitespace-nowrap">
+        <span
+          className={`text-[11px] px-2 py-0.5 rounded font-mono font-medium uppercase whitespace-nowrap inline-flex items-center shrink-0 ${
+            item.status === "completed"
+              ? "bg-primary text-primary-foreground"
+              : item.status === "pending"
+              ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30"
+              : "bg-destructive text-destructive-foreground"
+          }`}
+        >
+          {item.status}
+        </span>
+      </td>
+      <td className="px-6 py-3.5 text-muted-foreground font-mono text-xs whitespace-nowrap">
+        {item.processed_at ? new Date(item.processed_at).toLocaleString() : "Pending"}
+      </td>
+    </tr>
+  )
+}
+
+interface WebhookItemProps {
+  webhook: WebhookEventRecord
+  copiedKey: string | null
+  onCopy: (text: string, key: string) => void
+}
+
+function WebhookMobileCard({ webhook, copiedKey, onCopy }: WebhookItemProps) {
+  return (
+    <div className="p-4 space-y-2.5 bg-card hover:bg-muted/10 transition-colors">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span className="font-mono text-xs font-semibold text-foreground truncate max-w-[150px]">
+          {webhook.provider_event_id}
+        </span>
+        <span
+          className={`text-[11px] px-2 py-0.5 rounded font-mono font-medium uppercase whitespace-nowrap inline-flex items-center shrink-0 ${
+            webhook.processing_status === "processed"
+              ? "bg-primary text-primary-foreground"
+              : "bg-muted text-muted-foreground"
+          }`}
+        >
+          {webhook.processing_status}
+        </span>
+      </div>
+
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-muted text-foreground whitespace-nowrap inline-flex items-center shrink-0">
+          {webhook.event_type}
+        </span>
+        <button
+          type="button"
+          onClick={() => onCopy(webhook.provider_event_id, `mob-wh-${webhook.id}`)}
+          className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 font-mono"
+        >
+          {copiedKey === `mob-wh-${webhook.id}` ? (
+            <>
+              <Check className="w-3.5 h-3.5 text-primary" />
+              <span className="text-primary text-[10px]">Copied</span>
+            </>
+          ) : (
+            <>
+              <Copy className="w-3.5 h-3.5" />
+              <span className="text-[10px]">Copy ID</span>
+            </>
+          )}
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between text-[11px] text-muted-foreground font-mono pt-1 border-t border-border/60">
+        <span>Received: {new Date(webhook.received_at).toLocaleTimeString()}</span>
+        <span>Processed: {webhook.processed_at ? new Date(webhook.processed_at).toLocaleTimeString() : "—"}</span>
+      </div>
+    </div>
   )
 }
 
@@ -602,11 +872,15 @@ export function PaymentsHub() {
     }
   }
 
-  const handleProcessOutbox = async () => {
+  const handleProcessOutbox = async (retryFailed = false) => {
     setActionLoading(true)
     try {
-      const res = await processFulfillmentOutbox()
-      setFeedbackMessage(`Outbox processing complete: Processed ${res.processed_count} queued events.`)
+      const res = await processFulfillmentOutbox(retryFailed)
+      setFeedbackMessage(
+        retryFailed
+          ? `Outbox retry complete: Reprocessed ${res.processed_count} events.`
+          : `Outbox processing complete: Processed ${res.processed_count} queued events.`
+      )
       await loadAllData()
     } catch (err: any) {
       setFeedbackMessage(`Outbox error: ${err.message}`)
@@ -615,7 +889,7 @@ export function PaymentsHub() {
     }
   }
 
-  const handleSimulateWebhookEvent = async (type: "paid" | "failed" | "duplicate") => {
+  const handleSimulateWebhookEvent = async (type: "paid" | "failed" | "expired" | "duplicate") => {
     if (orders.length === 0 || !orders[0].latest_attempt) {
       setFeedbackMessage("No orders with payment attempts found to simulate a webhook on.")
       return
@@ -635,9 +909,12 @@ export function PaymentsHub() {
         setFeedbackMessage(
           "Simulated signed 'checkout_session.payment.paid' webhook processed. Order marked paid."
         )
-      } else {
+      } else if (type === "failed") {
         await simulateWebhook(targetAttempt.id, "payment.failed", false)
         setFeedbackMessage("Simulated signed 'payment.failed' webhook processed. Attempt marked failed.")
+      } else if (type === "expired") {
+        await simulateWebhook(targetAttempt.id, "checkout_session.expired", false)
+        setFeedbackMessage("Simulated signed 'checkout_session.expired' webhook processed. Attempt marked expired.")
       }
       await loadAllData()
     } catch (err: any) {
@@ -657,6 +934,7 @@ export function PaymentsHub() {
 
   const paidCount = orders.filter((o) => o.status === "paid").length
   const pendingOutboxCount = outbox.filter((item) => item.status === "pending").length
+  const failedOutboxCount = outbox.filter((item) => item.status === "failed").length
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8 max-w-7xl mx-auto">
@@ -951,50 +1229,82 @@ export function PaymentsHub() {
                   No webhook events received yet. Simulate one in the Checklist tab.
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[700px] text-left text-xs">
-                    <thead className="bg-muted/40 border-b border-border text-muted-foreground uppercase font-mono">
-                      <tr>
-                        <th className="px-6 py-3 whitespace-nowrap">Event ID</th>
-                        <th className="px-6 py-3 whitespace-nowrap">Event Type</th>
-                        <th className="px-6 py-3 whitespace-nowrap">Status</th>
-                        <th className="px-6 py-3 whitespace-nowrap">Received At</th>
-                        <th className="px-6 py-3 whitespace-nowrap">Processed At</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/70">
-                      {webhooks.map((w) => (
-                        <tr key={w.id} className="hover:bg-muted/30">
-                          <td className="px-6 py-3.5 font-mono text-foreground font-medium whitespace-nowrap">
-                            {w.provider_event_id}
-                          </td>
-                          <td className="px-6 py-3.5 whitespace-nowrap">
-                            <span className="bg-muted text-foreground font-mono px-2 py-0.5 rounded">
-                              {w.event_type}
-                            </span>
-                          </td>
-                          <td className="px-6 py-3.5 whitespace-nowrap">
-                            <span
-                              className={`px-2 py-0.5 rounded font-mono font-medium ${
-                                w.processing_status === "processed"
-                                  ? "bg-primary text-primary-foreground"
-                                  : "bg-muted text-muted-foreground"
-                              }`}
-                            >
-                              {w.processing_status}
-                            </span>
-                          </td>
-                          <td className="px-6 py-3.5 text-muted-foreground font-mono whitespace-nowrap">
-                            {new Date(w.received_at).toLocaleString()}
-                          </td>
-                          <td className="px-6 py-3.5 text-muted-foreground font-mono whitespace-nowrap">
-                            {w.processed_at ? new Date(w.processed_at).toLocaleString() : "—"}
-                          </td>
+                <>
+                  {/* Mobile Stacked Card View for Webhooks */}
+                  <div className="block md:hidden divide-y divide-border/70">
+                    {webhooks.map((w) => (
+                      <WebhookMobileCard
+                        key={w.id}
+                        webhook={w}
+                        copiedKey={copiedKey}
+                        onCopy={copyToClipboard}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Desktop Table View for Webhooks */}
+                  <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full min-w-[700px] text-left text-xs">
+                      <thead className="bg-muted/40 border-b border-border text-muted-foreground uppercase font-mono">
+                        <tr>
+                          <th className="px-6 py-3 whitespace-nowrap">Event ID</th>
+                          <th className="px-6 py-3 whitespace-nowrap">Event Type</th>
+                          <th className="px-6 py-3 whitespace-nowrap">Status</th>
+                          <th className="px-6 py-3 whitespace-nowrap">Received At</th>
+                          <th className="px-6 py-3 whitespace-nowrap">Processed At</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="divide-y divide-border/70">
+                        {webhooks.map((w) => (
+                          <tr key={w.id} className="hover:bg-muted/30">
+                            <td className="px-6 py-3.5 font-mono text-foreground font-medium whitespace-nowrap">
+                              <div className="flex items-center gap-1.5">
+                                <span className="truncate max-w-[200px]" title={w.provider_event_id}>
+                                  {w.provider_event_id}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => copyToClipboard(w.provider_event_id, `desk-wh-${w.id}`)}
+                                  className="text-muted-foreground hover:text-foreground p-0.5 rounded shrink-0 transition-colors"
+                                  title="Copy Event ID"
+                                  aria-label="Copy Event ID"
+                                >
+                                  {copiedKey === `desk-wh-${w.id}` ? (
+                                    <Check className="w-3.5 h-3.5 text-primary" />
+                                  ) : (
+                                    <Copy className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                              </div>
+                            </td>
+                            <td className="px-6 py-3.5 whitespace-nowrap">
+                              <span className="bg-muted text-foreground font-mono px-2 py-0.5 rounded whitespace-nowrap inline-flex items-center shrink-0">
+                                {w.event_type}
+                              </span>
+                            </td>
+                            <td className="px-6 py-3.5 whitespace-nowrap">
+                              <span
+                                className={`px-2 py-0.5 rounded font-mono font-medium whitespace-nowrap inline-flex items-center shrink-0 ${
+                                  w.processing_status === "processed"
+                                    ? "bg-primary text-primary-foreground"
+                                    : "bg-muted text-muted-foreground"
+                                }`}
+                              >
+                                {w.processing_status}
+                              </span>
+                            </td>
+                            <td className="px-6 py-3.5 text-muted-foreground font-mono whitespace-nowrap">
+                              {new Date(w.received_at).toLocaleString()}
+                            </td>
+                            <td className="px-6 py-3.5 text-muted-foreground font-mono whitespace-nowrap">
+                              {w.processed_at ? new Date(w.processed_at).toLocaleString() : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
@@ -1011,13 +1321,25 @@ export function PaymentsHub() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={handleProcessOutbox}
+                  onClick={() => handleProcessOutbox(false)}
                   disabled={actionLoading || pendingOutboxCount === 0}
                   className="gap-1.5 text-xs h-7 border-border hover:bg-muted text-foreground"
                 >
                   <Play className={`w-3 h-3 ${actionLoading ? "animate-spin" : ""}`} />
                   <span>Drain Outbox Queue ({pendingOutboxCount} pending)</span>
                 </Button>
+                {failedOutboxCount > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleProcessOutbox(true)}
+                    disabled={actionLoading}
+                    className="gap-1.5 text-xs h-7 border-accent/40 text-accent hover:bg-accent/10"
+                  >
+                    <RotateCcw className={`w-3 h-3 ${actionLoading ? "animate-spin" : ""}`} />
+                    <span>Retry Failed ({failedOutboxCount})</span>
+                  </Button>
+                )}
                 <span className="text-[11px] font-mono px-2.5 py-1 rounded-full bg-accent text-accent-foreground font-semibold shrink-0 w-fit">
                   Transactional Outbox
                 </span>
@@ -1029,44 +1351,47 @@ export function PaymentsHub() {
                   No outbox queue records found.
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[650px] text-left text-xs">
-                    <thead className="bg-muted/40 border-b border-border text-muted-foreground uppercase font-mono">
-                      <tr>
-                        <th className="px-6 py-3 whitespace-nowrap">Outbox ID</th>
-                        <th className="px-6 py-3 whitespace-nowrap">Order ID</th>
-                        <th className="px-6 py-3 whitespace-nowrap">Attempt ID</th>
-                        <th className="px-6 py-3 whitespace-nowrap">Status</th>
-                        <th className="px-6 py-3 whitespace-nowrap">Processed Time</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/70">
-                      {outbox.map((item) => (
-                        <tr key={item.id} className="hover:bg-muted/30">
-                          <td className="px-6 py-3.5 font-mono whitespace-nowrap">{item.id.slice(0, 8)}...</td>
-                          <td className="px-6 py-3.5 font-mono whitespace-nowrap">{item.order_id.slice(0, 8)}...</td>
-                          <td className="px-6 py-3.5 font-mono whitespace-nowrap">{item.payment_attempt_id.slice(0, 8)}...</td>
-                          <td className="px-6 py-3.5 whitespace-nowrap">
-                            <span
-                              className={`px-2 py-0.5 rounded font-mono font-medium ${
-                                item.status === "completed"
-                                  ? "bg-primary text-primary-foreground"
-                                  : item.status === "pending"
-                                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30"
-                                  : "bg-destructive text-destructive-foreground"
-                              }`}
-                            >
-                              {item.status}
-                            </span>
-                          </td>
-                          <td className="px-6 py-3.5 text-muted-foreground font-mono whitespace-nowrap">
-                            {item.processed_at ? new Date(item.processed_at).toLocaleString() : "Pending"}
-                          </td>
+                <>
+                  {/* Mobile Stacked Card View for Outbox */}
+                  <div className="block md:hidden divide-y divide-border/70">
+                    {outbox.map((item) => (
+                      <OutboxMobileCard
+                        key={item.id}
+                        item={item}
+                        copiedKey={copiedKey}
+                        onCopy={copyToClipboard}
+                        onViewAttempt={(attemptId) => router.push(`/payment/result/${attemptId}`)}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Desktop Table View for Outbox */}
+                  <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full min-w-[750px] text-left text-xs">
+                      <thead className="bg-muted/40 border-b border-border text-muted-foreground uppercase font-mono">
+                        <tr>
+                          <th className="px-6 py-3 whitespace-nowrap">Outbox ID</th>
+                          <th className="px-6 py-3 whitespace-nowrap">Order ID</th>
+                          <th className="px-6 py-3 whitespace-nowrap">Attempt ID</th>
+                          <th className="px-6 py-3 whitespace-nowrap">Event Type</th>
+                          <th className="px-6 py-3 whitespace-nowrap">Status</th>
+                          <th className="px-6 py-3 whitespace-nowrap">Processed Time</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="divide-y divide-border/70">
+                        {outbox.map((item) => (
+                          <OutboxDesktopRow
+                            key={item.id}
+                            item={item}
+                            copiedKey={copiedKey}
+                            onCopy={copyToClipboard}
+                            onViewAttempt={(attemptId) => router.push(`/payment/result/${attemptId}`)}
+                          />
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
@@ -1084,7 +1409,7 @@ export function PaymentsHub() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                 <Button
                   variant="outline"
                   onClick={() => handleSimulateWebhookEvent("paid")}
@@ -1111,6 +1436,21 @@ export function PaymentsHub() {
                     <span>Simulate Failed Webhook</span>
                   </div>
                   <span className="text-[11px] font-mono text-muted-foreground">payment.failed</span>
+                </Button>
+
+                <Button
+                  variant="outline"
+                  onClick={() => handleSimulateWebhookEvent("expired")}
+                  disabled={actionLoading}
+                  className="gap-1.5 h-auto py-3.5 px-4 text-left flex-col items-start border-border hover:border-amber-500"
+                >
+                  <div className="flex items-center gap-1.5 font-semibold text-amber-500 text-xs">
+                    <Clock className="w-4 h-4 text-amber-500" />
+                    <span>Simulate Expired Webhook</span>
+                  </div>
+                  <span className="text-[11px] font-mono text-muted-foreground">
+                    checkout_session.expired
+                  </span>
                 </Button>
 
                 <Button
