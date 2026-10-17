@@ -71,6 +71,20 @@
     "auditLogs": [
         {
             "id": 21,
+            "action": "Payment received: \u20b1178.00 for ORD-202610-0118 (Simulate Fallback Order)",
+            "user": "PayMongo Gateway",
+            "time": "Just now",
+            "severity": "success"
+        },
+        {
+            "id": 21,
+            "action": "Payment received: \u20b1250.00 for ORD-202610-0110 (Webhook Transition Order)",
+            "user": "PayMongo Gateway",
+            "time": "Just now",
+            "severity": "success"
+        },
+        {
+            "id": 21,
             "action": "Payment received: \u20b1178.00 for ORD-202610-0107 (Simulate Fallback Order)",
             "user": "PayMongo Gateway",
             "time": "Just now",
@@ -194,20 +208,6 @@
             "user": "PayMongo Gateway",
             "time": "Just now",
             "severity": "success"
-        },
-        {
-            "id": 1,
-            "action": "Cost allocation updated",
-            "user": "John Smith",
-            "time": "2 hours ago",
-            "severity": "info"
-        },
-        {
-            "id": 2,
-            "action": "Department budget modified",
-            "user": "Sarah Johnson",
-            "time": "5 hours ago",
-            "severity": "warning"
         }
     ],
     "integrations": [
