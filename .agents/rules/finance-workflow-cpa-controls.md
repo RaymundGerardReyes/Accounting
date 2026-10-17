@@ -14,4 +14,5 @@ description: CPA-grade control invariants for any finance workflow added to E:\A
 8. **Seeds**: no pre-verified vendors, bank data or financial records outside `FINANCE_SEED=dev`.
 9. **Policy**: business parameters are versioned configuration; unresolved policy is flagged, never invented.
 10. **Review habit**: before implementing a finance spec, list logic conflicts and CPA risks and confirm decisions with the user.
+11. **UI Role Awareness & Dev Identity Persistence**: In development mode (`FINANCE_AUTH_MODE=dev`), persist the active actor identity in browser `localStorage` so role context survives Fast Refresh and page reloads. Financial action buttons (e.g. Verify Vendor, Approve Advance, Release Disbursement) must reflect the active actor's RBAC permissions in the UI, disabling the button and displaying guidance text when the current actor lacks the requisite role or violates Segregation of Duties (SoD).
 
