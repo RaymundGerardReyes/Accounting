@@ -87,7 +87,8 @@ export function Dashboard({ onSelectDepartment }: DashboardProps) {
 
   const totalAllocated = departmentMetrics.reduce((sum, dept) => sum + dept.allocated, 0)
   const totalActual = departmentMetrics.reduce((sum, dept) => sum + dept.actual, 0)
-  const totalVariance = totalActual - totalAllocated
+  const totalVariance = totalAllocated - totalActual
+  const isOverBudget = totalVariance < 0
   const favorableCount = departmentMetrics.filter((d) => d.status === "favorable").length
   const unfavorableCount = departmentMetrics.filter((d) => d.status === "unfavorable").length
 
@@ -158,19 +159,19 @@ export function Dashboard({ onSelectDepartment }: DashboardProps) {
             <div className="flex items-baseline gap-2">
               <div
                 className={`text-2xl font-bold font-mono tabular-nums tracking-tight ${
-                  totalVariance > 0 ? "text-accent" : "text-foreground"
+                  isOverBudget ? "text-accent" : "text-foreground"
                 }`}
               >
-                {totalVariance > 0 ? "+" : "-"}₱{Math.abs(totalVariance / 1000).toFixed(0)}K
+                {totalVariance < 0 ? "-" : "+"}₱{Math.abs(totalVariance / 1000).toFixed(0)}K
               </div>
-              {totalVariance > 0 ? (
+              {isOverBudget ? (
                 <ArrowUpRight className="w-4 h-4 text-accent" />
               ) : (
                 <ArrowDownRight className="w-4 h-4 text-foreground" />
               )}
             </div>
-            <p className={`text-xs mt-1 font-medium ${totalVariance > 0 ? "text-accent" : "text-muted-foreground"}`}>
-              {totalVariance > 0 ? "Over budget threshold" : "Within allocated budget"}
+            <p className={`text-xs mt-1 font-medium ${isOverBudget ? "text-accent" : "text-muted-foreground"}`}>
+              {isOverBudget ? "Over budget threshold" : "Within allocated budget"}
             </p>
           </CardContent>
         </Card>

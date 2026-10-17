@@ -1,6 +1,6 @@
 "use client"
 
-import { BarChart3, TrendingUp, AlertCircle, Cog, CreditCard } from "lucide-react"
+import { BarChart3, TrendingUp, AlertCircle, Cog, CreditCard, Landmark } from "lucide-react"
 
 interface SidebarProps {
   currentPage: string
@@ -10,6 +10,7 @@ interface SidebarProps {
 export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
   const menuItems = [
     { id: "dashboard", label: "Dashboard", icon: BarChart3 },
+    { id: "finance", label: "Finance Operations", icon: Landmark },
     { id: "payments", label: "Payments & Checkout", icon: CreditCard },
     { id: "product", label: "Product Analysis", icon: TrendingUp },
     { id: "variance", label: "Variance Analysis", icon: AlertCircle },

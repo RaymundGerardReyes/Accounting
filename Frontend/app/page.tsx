@@ -1,15 +1,36 @@
 "use client"
 
-import { Configuration } from "@/components/configuration"
+import dynamic from "next/dynamic"
 import { Dashboard } from "@/components/dashboard"
-import { DepartmentDetail } from "@/components/department-detail"
-import { ProductLineAnalysis } from "@/components/product-line-analysis"
 import { Sidebar } from "@/components/sidebar"
-import { VarianceAnalysis } from "@/components/variance-analysis"
-import { PaymentsHub } from "@/components/payments-hub"
 import { useState } from "react"
 
-type Page = "dashboard" | "department" | "product" | "variance" | "config" | "payments"
+const PaymentsHub = dynamic(() => import("@/components/payments-hub").then((m) => m.PaymentsHub), {
+  loading: () => <div className="p-8 text-xs font-mono text-muted-foreground">Loading payments ledger...</div>,
+  ssr: false,
+})
+const DepartmentDetail = dynamic(() => import("@/components/department-detail").then((m) => m.DepartmentDetail), {
+  loading: () => <div className="p-8 text-xs font-mono text-muted-foreground">Loading department details...</div>,
+  ssr: false,
+})
+const ProductLineAnalysis = dynamic(() => import("@/components/product-line-analysis").then((m) => m.ProductLineAnalysis), {
+  loading: () => <div className="p-8 text-xs font-mono text-muted-foreground">Loading product analysis...</div>,
+  ssr: false,
+})
+const VarianceAnalysis = dynamic(() => import("@/components/variance-analysis").then((m) => m.VarianceAnalysis), {
+  loading: () => <div className="p-8 text-xs font-mono text-muted-foreground">Loading variance analysis...</div>,
+  ssr: false,
+})
+const Configuration = dynamic(() => import("@/components/configuration").then((m) => m.Configuration), {
+  loading: () => <div className="p-8 text-xs font-mono text-muted-foreground">Loading configuration...</div>,
+  ssr: false,
+})
+const FinanceOperationsHub = dynamic(() => import("@/components/finance-operations-hub").then((m) => m.FinanceOperationsHub), {
+  loading: () => <div className="p-8 text-xs font-mono text-muted-foreground">Loading finance operations hub...</div>,
+  ssr: false,
+})
+
+type Page = "dashboard" | "department" | "product" | "variance" | "config" | "payments" | "finance"
 
 export default function Home() {
   const [currentPage, setCurrentPage] = useState<Page>("dashboard")
@@ -26,6 +47,8 @@ export default function Home() {
             }}
           />
         )
+      case "finance":
+        return <FinanceOperationsHub />
       case "payments":
         return <PaymentsHub />
       case "department":

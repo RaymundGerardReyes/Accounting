@@ -16,7 +16,7 @@ import {
   ArrowRight,
   Loader2,
 } from "lucide-react"
-import { fetchOrder, Order, formatPhpFromMinor, simulateWebhook } from "@/lib/payment-api"
+import { fetchOrder, pollPaymentStatus, Order, formatPhpFromMinor, simulateWebhook } from "@/lib/payment-api"
 
 interface SandboxProps {
   params: Promise<{ attemptId: string }>

@@ -75,36 +75,54 @@ export function VarianceAnalysis({ onBack }: VarianceAnalysisProps) {
 
   const totalBudget = varianceData.reduce((sum, item) => sum + item.budget, 0)
   const totalActual = varianceData.reduce((sum, item) => sum + item.actual, 0)
-  const totalVariance = totalActual - totalBudget
+  const totalVariance = totalBudget - totalActual
   const variancePercent = totalBudget > 0 ? (totalVariance / totalBudget) * 100 : 0
+  const isUnfavorable = totalVariance < 0
   const favorableCount = varianceReasons.filter((r) => r.type === "favorable").length
   const unfavorableCount = varianceReasons.filter((r) => r.type === "unfavorable").length
 
   const handleExportReport = () => {
-    const csvContent = [
-      ["Variance Analysis Report"],
-      ["Generated:", new Date().toLocaleDateString()],
+    const escapeCsv = (val: string | number) => {
+      const str = String(val)
+      return str.includes(",") || str.includes('"') || str.includes("\n")
+        ? `"${str.replace(/"/g, '""')}"`
+        : str
+    }
+
+    const csvRows = [
+      [escapeCsv("Variance Analysis Report")],
+      [escapeCsv("Generated:"), escapeCsv(new Date().toISOString().split("T")[0])],
       [],
-      ["Category", "Budget (PHP)", "Actual (PHP)", "Variance (PHP)", "Variance %"],
+      ["Category", "Budget (PHP)", "Actual (PHP)", "Variance (PHP)", "Variance %"].map(escapeCsv),
       ...varianceData.map((item) => [
-        item.category,
-        `₱${item.budget}`,
-        `₱${item.actual}`,
-        `₱${item.variance}`,
-        `${item.variancePercent.toFixed(2)}%`,
+        escapeCsv(item.category),
+        item.budget,
+        item.actual,
+        item.variance,
+        escapeCsv(`${item.variancePercent.toFixed(2)}%`),
       ]),
       [],
-      ["Total", `₱${totalBudget}`, `₱${totalActual}`, `₱${totalVariance}`, `${variancePercent.toFixed(2)}%`],
+      [
+        escapeCsv("Total"),
+        totalBudget,
+        totalActual,
+        totalVariance,
+        escapeCsv(`${variancePercent.toFixed(2)}%`),
+      ],
     ]
-      .map((row) => row.join(","))
-      .join("\n")
 
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+    const csvContent = csvRows.map((row) => row.join(",")).join("\r\n")
+
+    // Prepend \uFEFF UTF-8 BOM so Microsoft Excel for Windows natively decodes UTF-8 without ANSI Mojibake (â,±)
+    const blob = new Blob(["\uFEFF", csvContent], { type: "text/csv;charset=utf-8;" })
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
     a.download = `variance-report-${new Date().toISOString().split("T")[0]}.csv`
+    document.body.appendChild(a)
     a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
   }
 
   return (
@@ -174,19 +192,19 @@ export function VarianceAnalysis({ onBack }: VarianceAnalysisProps) {
             <div className="flex items-baseline gap-2">
               <div
                 className={`text-2xl font-bold font-mono tabular-nums ${
-                  totalVariance > 0 ? "text-accent" : "text-foreground"
+                  isUnfavorable ? "text-accent" : "text-foreground"
                 }`}
               >
-                ₱{Math.abs(totalVariance / 1000).toFixed(0)}K
+                {totalVariance < 0 ? "-" : "+"}₱{Math.abs(totalVariance / 1000).toFixed(0)}K
               </div>
-              {totalVariance > 0 ? (
+              {isUnfavorable ? (
                 <TrendingDown className="w-4 h-4 text-accent" />
               ) : (
                 <TrendingUp className="w-4 h-4 text-foreground" />
               )}
             </div>
-            <p className={`text-xs mt-1 font-medium ${totalVariance > 0 ? "text-accent" : "text-muted-foreground"}`}>
-              {totalVariance > 0 ? "Unfavorable drift" : "Favorable savings"}
+            <p className={`text-xs mt-1 font-medium ${isUnfavorable ? "text-accent" : "text-muted-foreground"}`}>
+              {isUnfavorable ? "Unfavorable drift" : "Favorable savings"}
             </p>
           </CardContent>
         </Card>
