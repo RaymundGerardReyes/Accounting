@@ -19,6 +19,7 @@ from database import get_db
 from models import init_db, Order, PaymentAttempt, WebhookEvent, FulfillmentOutbox
 from services.payment_orchestrator import PaymentOrchestrator
 from providers.paymongo import PayMongoProvider
+from finance_routes import router as finance_router
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -44,6 +45,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(finance_router)
 
 orchestrator = PaymentOrchestrator(provider=PayMongoProvider())
 

@@ -168,6 +168,8 @@ class FulfillmentOutbox(Base):
         }
 
 def init_db():
+    # Ensure finance_models are registered on Base.metadata before create_all
+    import finance_models  # noqa: F401
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
@@ -227,6 +229,40 @@ def init_db():
             ]
             db.add_all(seed_orders)
             db.commit()
+        finance_models.seed_finance_db(db)
     finally:
         db.close()
+
+
+from finance_models import (  # noqa: E402,F401
+    FinanceUser,
+    RoleAssignment,
+    ApprovalMatrix,
+    NumberSequence,
+    HolidayCalendar,
+    AuditEvent,
+    FinancialPolicy,
+    PolicyVersion,
+    PolicyRule,
+    PeriodCounter,
+    ExceptionRequest,
+    CashAdvance,
+    ApprovalHistory,
+    Disbursement,
+    AdvanceLedgerEntry,
+    DocumentReference,
+    ExpenseReport,
+    ExpenseLine,
+    SettlementApplication,
+    ClosingSnapshot,
+    Vendor,
+    VendorBankChange,
+    TaxCode,
+    PurchaseRequest,
+    PurchaseRequestLine,
+    AccountPayable,
+    PaymentRecord,
+    ExceptionRegister,
+    seed_finance_db,
+)
 

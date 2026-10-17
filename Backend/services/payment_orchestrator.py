@@ -389,6 +389,7 @@ class PaymentOrchestrator:
             order = db.query(Order).filter(Order.id == attempt.order_id).first()
             if order and order.status == "paid" and attempt.status != "succeeded":
                 attempt.status = "duplicate_paid_review"
+                attempt.paid_at = provider_status.paid_at or utc_now()
             else:
                 attempt.status = "succeeded"
                 attempt.paid_at = provider_status.paid_at or utc_now()
