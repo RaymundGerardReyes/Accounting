@@ -438,3 +438,30 @@ def test_simulate_webhook_with_order_id_fallback():
     assert poll["order"]["status"] == "paid"
 
 
+def test_legacy_configuration_users_persistence():
+    # Fetch existing users
+    initial_cfg = client.get("/api/configuration").json()
+    orig_users = initial_cfg.get("users", [])
+
+    test_user_list = orig_users + [{
+        "id": 9999,
+        "name": "Audit Test Operator",
+        "email": "audit.test@acme.com",
+        "role": "Auditor",
+        "status": "Active"
+    }]
+
+    resp = client.post("/api/configuration/users", json={"users": test_user_list})
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+
+    # Verify persisted in GET
+    updated_cfg = client.get("/api/configuration").json()
+    assert any(u.get("name") == "Audit Test Operator" for u in updated_cfg["users"])
+
+    # Clean up by restoring original users list
+    restore_resp = client.post("/api/configuration/users", json={"users": orig_users})
+    assert restore_resp.status_code == 200
+
+
+
