@@ -33,6 +33,8 @@ ENV/
 *.sqlite3
 accounting_payments.db
 Backend/accounting_payments.db
+Backend/uploads/
+uploads/
 
 # Environment & Credentials
 .env
