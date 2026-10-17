@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { AlertCircle, ArrowLeft, CheckCircle } from "lucide-react"
+import { AlertCircle, ArrowLeft, CheckCircle2 } from "lucide-react"
 import { useEffect, useState } from "react"
 import {
   Bar,
@@ -42,7 +42,7 @@ export function DepartmentDetail({ department, onBack }: DepartmentDetailProps) 
   useEffect(() => {
     const fetchDepartmentData = async () => {
       try {
-        const response = await fetch(`http://localhost:5000/api/department/${department}`)
+        const response = await fetch(`/api/department/${department}`)
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`)
         }
@@ -59,239 +59,221 @@ export function DepartmentDetail({ department, onBack }: DepartmentDetailProps) 
   }, [department])
 
   if (loading) {
-    return <div className="p-8 text-center">Loading department details...</div>
+    return <div className="p-8 text-center text-sm text-muted-foreground">Loading department details...</div>
   }
 
   if (error) {
-    return <div className="p-8 text-center text-red-500">Failed to load data: {error}</div>
+    return (
+      <div className="p-8 max-w-7xl mx-auto">
+        <div className="p-4 rounded-lg border border-accent/30 bg-accent/5 text-accent text-sm flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>Failed to load department data: {error}</span>
+        </div>
+      </div>
+    )
   }
 
   if (!data) {
-    return <div className="p-8 text-center">No data available for this department.</div>
+    return <div className="p-8 text-center text-sm text-muted-foreground">No data available for this department.</div>
   }
 
   const { costBreakdown, monthlyTrend, departmentStats } = data
 
   const totalAllocated = costBreakdown.reduce((sum, item) => sum + item.allocated, 0)
   const totalActual = costBreakdown.reduce((sum, item) => sum + item.actual, 0)
-  const favorableCategories = costBreakdown.filter((item) => item.variance > 0).length
+  const favorableCategories = costBreakdown.filter((item) => item.variance >= 0).length
+  const isUnfavorable = departmentStats.status === "unfavorable"
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-8 space-y-8 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between border-b border-border pb-6">
         <div className="flex items-center gap-4">
-          <Button variant="outline" size="icon" onClick={onBack}>
+          <Button variant="outline" size="icon-sm" onClick={onBack} className="border-border">
             <ArrowLeft className="w-4 h-4" />
           </Button>
           <div>
-            <h1 className="text-4xl font-bold text-foreground capitalize">{department} Department</h1>
-            <p className="text-muted-foreground mt-2">Detailed cost analysis and allocation management</p>
+            <p className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
+              Cost Center Drill-Down
+            </p>
+            <h1 className="text-3xl font-bold tracking-tight text-foreground capitalize mt-0.5">
+              {department.replace("-", " ")} Department
+            </h1>
           </div>
         </div>
       </div>
 
-      {/* Metrics */}
-      <div className="grid grid-cols-4 gap-4">
-        <Card className="border-l-4 border-l-accent">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Allocated</CardTitle>
+      {/* KPI Metrics */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Total Allocated
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">₱{(departmentStats.allocated / 1000).toFixed(0)}K</div>
-            <p className="text-xs text-muted-foreground mt-1">Current month</p>
+            <div className="text-2xl font-bold font-mono tabular-nums text-foreground">
+              ₱{(departmentStats.allocated / 1000).toFixed(0)}K
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Current period budget</p>
           </CardContent>
         </Card>
 
-        <Card className="border-l-4 border-l-primary">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Actual Cost</CardTitle>
+        <Card className="shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Actual Cost
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">₱{(departmentStats.actual / 1000).toFixed(0)}K</div>
-            <p className="text-xs text-muted-foreground mt-1">Incurred</p>
+            <div className="text-2xl font-bold font-mono tabular-nums text-foreground">
+              ₱{(departmentStats.actual / 1000).toFixed(0)}K
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Incurred expenditure</p>
           </CardContent>
         </Card>
 
-        <Card
-          className={`border-l-4 ${departmentStats.status === "favorable" ? "border-l-accent" : "border-l-primary"}`}
-        >
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Variance</CardTitle>
+        <Card className="shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Variance
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div
-              className={`text-3xl font-bold ${departmentStats.status === "favorable" ? "text-accent" : "text-primary"}`}
+              className={`text-2xl font-bold font-mono tabular-nums ${
+                isUnfavorable ? "text-accent" : "text-foreground"
+              }`}
             >
               ₱{Math.abs(departmentStats.variance / 1000).toFixed(0)}K
             </div>
-            <p className={`text-xs mt-1 ${departmentStats.status === "favorable" ? "text-accent" : "text-primary"}`}>
-              {departmentStats.status === "favorable" ? "Favorable" : "Unfavorable"}
+            <p className={`text-xs mt-1 font-medium ${isUnfavorable ? "text-accent" : "text-muted-foreground"}`}>
+              {isUnfavorable ? "Unfavorable (Over budget)" : "Favorable (Within budget)"}
             </p>
           </CardContent>
         </Card>
 
-        <Card className="border-l-4 border-l-accent">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Categories</CardTitle>
+        <Card className="shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Cost Categories
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{costBreakdown.length}</div>
-            <div className="flex gap-2 mt-2 text-xs">
-              <span className="text-accent">{favorableCategories} favorable</span>
-              <span className="text-primary">{costBreakdown.length - favorableCategories} unfavorable</span>
+            <div className="text-2xl font-bold font-mono tabular-nums text-foreground">
+              {costBreakdown.length}
+            </div>
+            <div className="flex gap-2 mt-1 text-xs">
+              <span className="text-foreground font-medium">{favorableCategories} favorable</span>
+              <span className="text-border">·</span>
+              <span className="text-accent font-medium">{costBreakdown.length - favorableCategories} unfavorable</span>
             </div>
           </CardContent>
         </Card>
       </div>
 
       {/* Charts */}
-      <div className="grid grid-cols-2 gap-6">
-        {/* Cost Breakdown */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Cost Breakdown</CardTitle>
-            <CardDescription>Allocated vs Actual by category</CardDescription>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card className="shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-semibold">Cost Breakdown</CardTitle>
+            <CardDescription className="text-xs">Allocated vs. Actual by category</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={costBreakdown}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--color-border))" />
-                <XAxis dataKey="category" stroke="hsl(var(--color-muted-foreground))" />
-                <YAxis stroke="hsl(var(--color-muted-foreground))" />
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={costBreakdown} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                <XAxis dataKey="category" stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
+                <YAxis stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: "hsl(var(--color-card))",
-                    border: "1px solid hsl(var(--color-border))",
+                    backgroundColor: "var(--card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius)",
+                    fontSize: "12px",
                   }}
-                  labelStyle={{ color: "hsl(var(--color-foreground))" }}
                 />
-                <Legend />
-                <Bar dataKey="allocated" fill="hsl(var(--color-chart-1))" name="Allocated" />
-                <Bar dataKey="actual" fill="hsl(var(--color-chart-2))" name="Actual" />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: "12px", paddingTop: "10px" }} />
+                <Bar dataKey="allocated" fill="var(--chart-1)" radius={[4, 4, 0, 0]} name="Allocated (₱)" />
+                <Bar dataKey="actual" fill="var(--chart-2)" radius={[4, 4, 0, 0]} name="Actual (₱)" />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
 
-        {/* Monthly Trend */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Monthly Trend</CardTitle>
-            <CardDescription>Cost vs Budget over time</CardDescription>
+        <Card className="shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-semibold">Monthly Trend</CardTitle>
+            <CardDescription className="text-xs">Actual Cost vs. Budget over time</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={monthlyTrend}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--color-border))" />
-                <XAxis dataKey="month" stroke="hsl(var(--color-muted-foreground))" />
-                <YAxis stroke="hsl(var(--color-muted-foreground))" />
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart data={monthlyTrend} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                <XAxis dataKey="month" stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
+                <YAxis stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: "hsl(var(--color-card))",
-                    border: "1px solid hsl(var(--color-border))",
+                    backgroundColor: "var(--card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius)",
+                    fontSize: "12px",
                   }}
-                  labelStyle={{ color: "hsl(var(--color-foreground))" }}
                 />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="cost"
-                  stroke="hsl(var(--color-chart-1))"
-                  strokeWidth={2}
-                  name="Actual Cost"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="budget"
-                  stroke="hsl(var(--color-chart-2))"
-                  strokeWidth={2}
-                  name="Budget"
-                />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: "12px", paddingTop: "10px" }} />
+                <Line type="monotone" dataKey="budget" stroke="var(--chart-1)" strokeWidth={2} dot={false} name="Budget (₱)" />
+                <Line type="monotone" dataKey="cost" stroke="var(--chart-2)" strokeWidth={2} dot={{ r: 3 }} name="Actual Cost (₱)" />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
       </div>
 
-      {/* Cost Categories Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Cost Categories</CardTitle>
-          <CardDescription>Detailed breakdown and variance analysis</CardDescription>
+      {/* Cost Categories List */}
+      <Card className="shadow-none border-border/90 overflow-hidden">
+        <CardHeader className="border-b border-border/60 pb-4">
+          <CardTitle className="text-base font-semibold">Cost Categories Ledger</CardTitle>
+          <CardDescription className="text-xs">Granular breakdown and variance analysis</CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {costBreakdown.map((item) => (
-              <div
-                key={item.category}
-                className="flex items-center justify-between p-4 border border-border rounded-lg hover:bg-muted transition-colors"
-              >
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-foreground">{item.category}</h3>
-                    {item.variance > 0 ? (
-                      <CheckCircle className="w-4 h-4 text-accent" />
-                    ) : (
-                      <AlertCircle className="w-4 h-4 text-primary" />
-                    )}
+        <CardContent className="p-0">
+          <div className="divide-y divide-border/70">
+            {costBreakdown.map((item) => {
+              const itemUnfavorable = item.actual > item.allocated
+              return (
+                <div
+                  key={item.category}
+                  className="flex items-center justify-between px-6 py-4 hover:bg-muted/30 transition-colors"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-sm text-foreground">{item.category}</span>
+                      {itemUnfavorable ? (
+                        <AlertCircle className="w-3.5 h-3.5 text-accent" />
+                      ) : (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-foreground" />
+                      )}
+                    </div>
+                    <div className="flex gap-6 text-xs text-muted-foreground font-mono tabular-nums">
+                      <span>Allocated: ₱{(item.allocated / 1000).toFixed(0)}K</span>
+                      <span>Actual: ₱{(item.actual / 1000).toFixed(0)}K</span>
+                    </div>
                   </div>
-                  <div className="flex gap-6 mt-1 text-sm text-muted-foreground">
-                    <span>Allocated: ₱{(item.allocated / 1000).toFixed(0)}K</span>
-                    <span>Actual: ₱{(item.actual / 1000).toFixed(0)}K</span>
+                  <div className="text-right font-mono tabular-nums">
+                    <p className={`text-sm font-bold ${itemUnfavorable ? "text-accent" : "text-foreground"}`}>
+                      ₱{Math.abs(item.variance / 1000).toFixed(1)}K
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {item.variancePercent > 0 ? "+" : ""}
+                      {item.variancePercent.toFixed(1)}%
+                    </p>
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className={`font-semibold ${item.variance > 0 ? "text-accent" : "text-primary"}`}>
-                    ₱{Math.abs(item.variance / 1000).toFixed(1)}K
-                  </p>
-                  <p className={`text-xs ${item.variance > 0 ? "text-accent" : "text-primary"}`}>
-                    {item.variance > 0 ? "+" : ""}
-                    {item.variancePercent.toFixed(1)}%
-                  </p>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </CardContent>
       </Card>
-
-      {/* Summary Stats */}
-      <div className="grid grid-cols-3 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Total Allocated</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">₱{(totalAllocated / 1000).toFixed(0)}K</div>
-            <p className="text-xs text-muted-foreground mt-1">All categories</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Total Actual</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">₱{(totalActual / 1000).toFixed(0)}K</div>
-            <p className="text-xs text-muted-foreground mt-1">Total spent</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Total Variance</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className={`text-2xl font-bold ${totalActual > totalAllocated ? "text-primary" : "text-accent"}`}>
-              ₱{Math.abs(totalActual - totalAllocated) / 1000}K
-            </div>
-            <p className={`text-xs mt-1 ${totalActual > totalAllocated ? "text-primary" : "text-accent"}`}>
-              {totalActual > totalAllocated ? "Over" : "Under"} budget
-            </p>
-          </CardContent>
-        </Card>
-      </div>
     </div>
   )
 }
+

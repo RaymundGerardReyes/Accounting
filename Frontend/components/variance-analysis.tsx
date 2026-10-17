@@ -21,7 +21,6 @@ interface VarianceAnalysisProps {
   onBack: () => void
 }
 
-// Corrected the interface to match the JSON structure
 interface VarianceData {
   varianceData: any[]
   monthlyVariance: any[]
@@ -37,7 +36,7 @@ export function VarianceAnalysis({ onBack }: VarianceAnalysisProps) {
   useEffect(() => {
     const fetchVarianceData = async () => {
       try {
-        const response = await fetch("http://localhost:5000/api/variance")
+        const response = await fetch("/api/variance")
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`)
         }
@@ -54,18 +53,24 @@ export function VarianceAnalysis({ onBack }: VarianceAnalysisProps) {
   }, [])
 
   if (loading) {
-    return <div className="p-8 text-center">Loading variance analysis...</div>
+    return <div className="p-8 text-center text-sm text-muted-foreground">Loading variance analysis...</div>
   }
 
   if (error) {
-    return <div className="p-8 text-center text-red-500">Failed to load data: {error}</div>
+    return (
+      <div className="p-8 max-w-7xl mx-auto">
+        <div className="p-4 rounded-lg border border-accent/30 bg-accent/5 text-accent text-sm flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>Failed to load variance data: {error}</span>
+        </div>
+      </div>
+    )
   }
 
   if (!data) {
-    return <div className="p-8 text-center">No variance data available.</div>
+    return <div className="p-8 text-center text-sm text-muted-foreground">No variance data available.</div>
   }
 
-  // Corrected the destructuring to match the JSON key 'varianceData'
   const { varianceData, monthlyVariance, varianceReasons, departmentVariance } = data
 
   const totalBudget = varianceData.reduce((sum, item) => sum + item.budget, 0)
@@ -76,12 +81,11 @@ export function VarianceAnalysis({ onBack }: VarianceAnalysisProps) {
   const unfavorableCount = varianceReasons.filter((r) => r.type === "unfavorable").length
 
   const handleExportReport = () => {
-    // Generate CSV report
     const csvContent = [
       ["Variance Analysis Report"],
       ["Generated:", new Date().toLocaleDateString()],
       [],
-      ["Category", "Budget", "Actual", "Variance", "Variance %"],
+      ["Category", "Budget (PHP)", "Actual (PHP)", "Variance (PHP)", "Variance %"],
       ...varianceData.map((item) => [
         item.category,
         `₱${item.budget}`,
@@ -95,7 +99,7 @@ export function VarianceAnalysis({ onBack }: VarianceAnalysisProps) {
       .map((row) => row.join(","))
       .join("\n")
 
-    const blob = new Blob([csvContent], { type: "text/csv" })
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
@@ -104,136 +108,163 @@ export function VarianceAnalysis({ onBack }: VarianceAnalysisProps) {
   }
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-8 space-y-8 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-border pb-6">
         <div className="flex items-center gap-4">
-          <Button variant="outline" size="icon" onClick={onBack}>
+          <Button variant="outline" size="icon-sm" onClick={onBack} className="border-border">
             <ArrowLeft className="w-4 h-4" />
           </Button>
           <div>
-            <h1 className="text-4xl font-bold text-foreground">Variance Analysis & Reports</h1>
-            <p className="text-muted-foreground mt-2">Comprehensive budget vs actual cost analysis</p>
+            <p className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
+              Budget Auditing
+            </p>
+            <h1 className="text-3xl font-bold tracking-tight text-foreground mt-0.5">
+              Variance Analysis & Reports
+            </h1>
           </div>
         </div>
-        <Button onClick={handleExportReport} className="gap-2">
-          <Download className="w-4 h-4" />
-          Export Report
+        <Button
+          onClick={handleExportReport}
+          size="sm"
+          className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
+        >
+          <Download className="w-3.5 h-3.5" />
+          <span>Export CSV Report</span>
         </Button>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-4 gap-4">
-        <Card className="border-l-4 border-l-accent">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Budget</CardTitle>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Total Budget
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">₱{(totalBudget / 1000).toFixed(0)}K</div>
-            <p className="text-xs text-muted-foreground mt-1">Current month</p>
+            <div className="text-2xl font-bold font-mono tabular-nums text-foreground">
+              ₱{(totalBudget / 1000).toFixed(0)}K
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Allocated baseline</p>
           </CardContent>
         </Card>
 
-        <Card className="border-l-4 border-l-primary">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Actual</CardTitle>
+        <Card className="shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Total Actual
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">₱{(totalActual / 1000).toFixed(0)}K</div>
-            <p className="text-xs text-muted-foreground mt-1">Incurred</p>
+            <div className="text-2xl font-bold font-mono tabular-nums text-foreground">
+              ₱{(totalActual / 1000).toFixed(0)}K
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Incurred ledger spend</p>
           </CardContent>
         </Card>
 
-        <Card className={`border-l-4 ${totalVariance > 0 ? "border-l-primary" : "border-l-accent"}`}>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Variance</CardTitle>
+        <Card className="shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Net Variance
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className={`flex items-baseline gap-2`}>
-              <div className={`text-3xl font-bold ${totalVariance > 0 ? "text-primary" : "text-accent"}`}>
+            <div className="flex items-baseline gap-2">
+              <div
+                className={`text-2xl font-bold font-mono tabular-nums ${
+                  totalVariance > 0 ? "text-accent" : "text-foreground"
+                }`}
+              >
                 ₱{Math.abs(totalVariance / 1000).toFixed(0)}K
               </div>
               {totalVariance > 0 ? (
-                <TrendingDown className="w-5 h-5 text-primary" />
+                <TrendingDown className="w-4 h-4 text-accent" />
               ) : (
-                <TrendingUp className="w-5 h-5 text-accent" />
+                <TrendingUp className="w-4 h-4 text-foreground" />
               )}
             </div>
-            <p className={`text-xs mt-1 ${totalVariance > 0 ? "text-primary" : "text-accent"}`}>
-              {totalVariance > 0 ? "Unfavorable" : "Favorable"}
+            <p className={`text-xs mt-1 font-medium ${totalVariance > 0 ? "text-accent" : "text-muted-foreground"}`}>
+              {totalVariance > 0 ? "Unfavorable drift" : "Favorable savings"}
             </p>
           </CardContent>
         </Card>
 
-        <Card className="border-l-4 border-l-accent">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Variance %</CardTitle>
+        <Card className="shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Variance Ratio
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{Math.abs(variancePercent).toFixed(2)}%</div>
-            <p className="text-xs text-muted-foreground mt-1">Of budget</p>
+            <div className="text-2xl font-bold font-mono tabular-nums text-foreground">
+              {Math.abs(variancePercent).toFixed(2)}%
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Percentage of total budget</p>
           </CardContent>
         </Card>
       </div>
 
       {/* Charts */}
-      <div className="grid grid-cols-2 gap-6">
-        {/* Category Variance */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Variance by Category</CardTitle>
-            <CardDescription>Budget vs Actual comparison</CardDescription>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card className="shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-semibold">Variance by Category</CardTitle>
+            <CardDescription className="text-xs">Budget (Black) vs. Actual (Red)</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={varianceData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--color-border))" />
-                <XAxis dataKey="category" stroke="hsl(var(--color-muted-foreground))" />
-                <YAxis stroke="hsl(var(--color-muted-foreground))" />
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={varianceData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                <XAxis dataKey="category" stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
+                <YAxis stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: "hsl(var(--color-card))",
-                    border: "1px solid hsl(var(--color-border))",
+                    backgroundColor: "var(--card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius)",
+                    fontSize: "12px",
                   }}
-                  labelStyle={{ color: "hsl(var(--color-foreground))" }}
                 />
-                <Legend />
-                <Bar dataKey="budget" fill="hsl(var(--color-chart-2))" name="Budget" />
-                <Bar dataKey="actual" fill="hsl(var(--color-chart-1))" name="Actual" />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: "12px", paddingTop: "10px" }} />
+                <Bar dataKey="budget" fill="var(--chart-1)" radius={[4, 4, 0, 0]} name="Budget (₱)" />
+                <Bar dataKey="actual" fill="var(--chart-2)" radius={[4, 4, 0, 0]} name="Actual (₱)" />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
 
-        {/* Monthly Variance Trend */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Monthly Variance Trend</CardTitle>
-            <CardDescription>Variance percentage over time</CardDescription>
+        <Card className="shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-semibold">Monthly Variance Trend</CardTitle>
+            <CardDescription className="text-xs">Variance percentage movement over time</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={monthlyVariance}>
+            <ResponsiveContainer width="100%" height={280}>
+              <AreaChart data={monthlyVariance} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorVariance" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(var(--color-chart-1))" stopOpacity={0.8} />
-                    <stop offset="95%" stopColor="hsl(var(--color-chart-1))" stopOpacity={0} />
+                    <stop offset="5%" stopColor="var(--chart-2)" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="var(--chart-2)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--color-border))" />
-                <XAxis dataKey="month" stroke="hsl(var(--color-muted-foreground))" />
-                <YAxis stroke="hsl(var(--color-muted-foreground))" />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                <XAxis dataKey="month" stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
+                <YAxis stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: "hsl(var(--color-card))",
-                    border: "1px solid hsl(var(--color-border))",
+                    backgroundColor: "var(--card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius)",
+                    fontSize: "12px",
                   }}
-                  labelStyle={{ color: "hsl(var(--color-foreground))" }}
                 />
                 <Area
                   type="monotone"
                   dataKey="percentage"
-                  stroke="hsl(var(--color-chart-1))"
+                  stroke="var(--chart-2)"
+                  strokeWidth={2}
                   fillOpacity={1}
                   fill="url(#colorVariance)"
                   name="Variance %"
@@ -244,104 +275,52 @@ export function VarianceAnalysis({ onBack }: VarianceAnalysisProps) {
         </Card>
       </div>
 
-      {/* Department Variance */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Department Variance Summary</CardTitle>
-          <CardDescription>Budget vs Actual by department</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {departmentVariance.map((dept) => (
-              <div
-                key={dept.department}
-                className="flex items-center justify-between p-4 border border-border rounded-lg hover:bg-muted transition-colors"
-              >
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-foreground">{dept.department}</h3>
-                    {dept.status === "favorable" ? (
-                      <TrendingUp className="w-4 h-4 text-accent" />
-                    ) : dept.status === "unfavorable" ? (
-                      <TrendingDown className="w-4 h-4 text-primary" />
-                    ) : null}
-                  </div>
-                  <div className="flex gap-6 mt-1 text-sm text-muted-foreground">
-                    <span>Budget: ₱{(dept.budget / 1000).toFixed(0)}K</span>
-                    <span>Actual: ₱{(dept.actual / 1000).toFixed(0)}K</span>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p
-                    className={`font-semibold ${dept.status === "favorable"
-                        ? "text-accent"
-                        : dept.status === "unfavorable"
-                          ? "text-primary"
-                          : "text-muted-foreground"
-                      }`}
-                  >
-                    ₱{Math.abs(dept.variance / 1000).toFixed(1)}K
-                  </p>
-                  <p
-                    className={`text-xs ${dept.status === "favorable"
-                        ? "text-accent"
-                        : dept.status === "unfavorable"
-                          ? "text-primary"
-                          : "text-muted-foreground"
-                      }`}
-                  >
-                    {dept.status === "favorable"
-                      ? "Favorable"
-                      : dept.status === "unfavorable"
-                        ? "Unfavorable"
-                        : "Neutral"}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Variance Reasons */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Variance Analysis Breakdown</CardTitle>
-          <CardDescription>
-            {favorableCount} favorable, {unfavorableCount} unfavorable variances
+      {/* Root Cause Breakdown */}
+      <Card className="shadow-none border-border/90 overflow-hidden">
+        <CardHeader className="border-b border-border/60 pb-4">
+          <CardTitle className="text-base font-semibold">Variance Drivers & Root Causes</CardTitle>
+          <CardDescription className="text-xs">
+            {favorableCount} favorable · {unfavorableCount} unfavorable cost drivers identified
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {varianceReasons.map((item) => (
-              <div
-                key={item.reason}
-                className="flex items-center justify-between p-4 border border-border rounded-lg hover:bg-muted transition-colors"
-              >
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-foreground">{item.reason}</h3>
-                    {item.impact === "High" && <AlertCircle className="w-4 h-4 text-primary" />}
+        <CardContent className="p-0">
+          <div className="divide-y divide-border/70">
+            {varianceReasons.map((item) => {
+              const isUnfavorable = item.type === "unfavorable"
+              return (
+                <div
+                  key={item.reason}
+                  className="flex items-center justify-between px-6 py-4 hover:bg-muted/30 transition-colors"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2.5">
+                      <span className="font-semibold text-sm text-foreground">{item.reason}</span>
+                      {item.impact === "High" && (
+                        <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/20 font-medium">
+                          High Impact
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex gap-4 text-xs">
+                      <span className={isUnfavorable ? "text-accent font-medium" : "text-foreground font-medium"}>
+                        {isUnfavorable ? "Unfavorable" : "Favorable"}
+                      </span>
+                      <span className="text-muted-foreground">· Severity: {item.impact}</span>
+                    </div>
                   </div>
-                  <div className="flex gap-4 mt-1 text-sm">
-                    <span className={item.type === "favorable" ? "text-accent" : "text-primary"}>
-                      {item.type === "favorable" ? "Favorable" : "Unfavorable"}
+                  <div className="flex items-center gap-2 font-mono tabular-nums">
+                    {isUnfavorable ? (
+                      <TrendingDown className="w-4 h-4 text-accent" />
+                    ) : (
+                      <TrendingUp className="w-4 h-4 text-foreground" />
+                    )}
+                    <span className={`text-lg font-bold ${isUnfavorable ? "text-accent" : "text-foreground"}`}>
+                      ₱{Math.abs(item.amount / 1000).toFixed(1)}K
                     </span>
-                    <span className="text-muted-foreground">Impact: {item.impact}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {item.type === "favorable" ? (
-                    <TrendingUp className="w-5 h-5 text-accent" />
-                  ) : (
-                    <TrendingDown className="w-5 h-5 text-primary" />
-                  )}
-                  <span className={`text-2xl font-bold ${item.type === "favorable" ? "text-accent" : "text-primary"}`}>
-                    ₱{Math.abs(item.amount / 1000).toFixed(1)}K
-                  </span>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </CardContent>
       </Card>

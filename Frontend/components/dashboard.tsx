@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { AlertCircle, ArrowDownRight, ArrowUpRight, TrendingUp } from "lucide-react"
+import { AlertCircle, ArrowDownRight, ArrowUpRight, ChevronRight, TrendingUp } from "lucide-react"
 import { useEffect, useState } from "react"
 import {
   Bar,
@@ -39,7 +39,7 @@ export function Dashboard({ onSelectDepartment }: DashboardProps) {
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
-        const response = await fetch("http://localhost:5000/api/dashboard")
+        const response = await fetch("/api/dashboard")
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`)
         }
@@ -56,15 +56,31 @@ export function Dashboard({ onSelectDepartment }: DashboardProps) {
   }, [])
 
   if (loading) {
-    return <div className="p-8 text-center">Loading dashboard...</div>
+    return (
+      <div className="p-8 space-y-6 max-w-7xl mx-auto">
+        <div className="h-8 w-64 bg-muted animate-pulse rounded-md" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-28 bg-muted/60 animate-pulse rounded-lg border border-border" />
+          ))}
+        </div>
+      </div>
+    )
   }
 
   if (error) {
-    return <div className="p-8 text-center text-red-500">Failed to load data: {error}</div>
+    return (
+      <div className="p-8 max-w-7xl mx-auto">
+        <div className="p-4 rounded-lg border border-accent/30 bg-accent/5 text-accent text-sm flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>Failed to load dashboard data: {error}</span>
+        </div>
+      </div>
+    )
   }
 
   if (!data) {
-    return <div className="p-8 text-center">No dashboard data available.</div>
+    return <div className="p-8 text-center text-sm text-muted-foreground">No dashboard data available.</div>
   }
 
   const { costTrendData, departmentData, departmentMetrics, varianceTrendData } = data
@@ -75,111 +91,161 @@ export function Dashboard({ onSelectDepartment }: DashboardProps) {
   const favorableCount = departmentMetrics.filter((d) => d.status === "favorable").length
   const unfavorableCount = departmentMetrics.filter((d) => d.status === "unfavorable").length
 
+  // Strict palette shades for pie slices (Black, Red, and Neutrals)
+  const PIE_COLORS = [
+    "oklch(0.15 0 0)",
+    "oklch(0.55 0.2 25)",
+    "oklch(0.38 0 0)",
+    "oklch(0.68 0.14 25)",
+    "oklch(0.65 0 0)",
+  ]
+
   return (
-    <div className="p-8 space-y-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="p-8 space-y-8 max-w-7xl mx-auto">
+      {/* Minimalist Header */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-border pb-6">
         <div>
-          <h1 className="text-4xl font-bold text-foreground">Cost Analysis Dashboard</h1>
-          <p className="text-muted-foreground mt-2">Real-time cost allocation and variance analysis</p>
+          <p className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
+            Executive Overview
+          </p>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground mt-1">
+            Cost Analysis Dashboard
+          </h1>
         </div>
-        <div className="text-right text-sm text-muted-foreground">
-          <p>Last updated: Today at 2:30 PM</p>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono bg-card px-3 py-1.5 rounded-md border border-border">
+          <span className="w-2 h-2 rounded-full bg-primary" />
+          <span>Synced · Real-time PHP (₱) Ledger</span>
         </div>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-4 gap-4">
-        <Card className="border-l-4 border-l-accent">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Allocated</CardTitle>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Total Allocated
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">₱{(totalAllocated / 1000000).toFixed(2)}M</div>
-            <p className="text-xs text-muted-foreground mt-1">All departments</p>
+            <div className="text-2xl font-bold font-mono tabular-nums tracking-tight text-foreground">
+              ₱{(totalAllocated / 1000000).toFixed(2)}M
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Master budget across cost centers</p>
           </CardContent>
         </Card>
 
-        <Card className="border-l-4 border-l-primary">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Actual</CardTitle>
+        <Card className="shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Total Actual
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">₱{(totalActual / 1000000).toFixed(2)}M</div>
-            <p className="text-xs text-muted-foreground mt-1">Actual spend</p>
+            <div className="text-2xl font-bold font-mono tabular-nums tracking-tight text-foreground">
+              ₱{(totalActual / 1000000).toFixed(2)}M
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Verified cumulative spend</p>
           </CardContent>
         </Card>
 
-        <Card className={`border-l-4 ${totalVariance > 0 ? "border-l-accent" : "border-l-primary"}`}>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Variance</CardTitle>
+        <Card className="shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Net Variance
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex items-baseline gap-2">
-              <div className="text-3xl font-bold">₱{Math.abs(totalVariance / 1000).toFixed(0)}K</div>
+              <div
+                className={`text-2xl font-bold font-mono tabular-nums tracking-tight ${
+                  totalVariance > 0 ? "text-accent" : "text-foreground"
+                }`}
+              >
+                {totalVariance > 0 ? "+" : "-"}₱{Math.abs(totalVariance / 1000).toFixed(0)}K
+              </div>
               {totalVariance > 0 ? (
-                <ArrowUpRight className="w-5 h-5 text-accent" />
+                <ArrowUpRight className="w-4 h-4 text-accent" />
               ) : (
-                <ArrowDownRight className="w-5 h-5 text-primary" />
+                <ArrowDownRight className="w-4 h-4 text-foreground" />
               )}
             </div>
-            <p className={`text-xs mt-1 ${totalVariance > 0 ? "text-accent" : "text-primary"}`}>
-              {totalVariance > 0 ? "Over budget" : "Under budget"}
+            <p className={`text-xs mt-1 font-medium ${totalVariance > 0 ? "text-accent" : "text-muted-foreground"}`}>
+              {totalVariance > 0 ? "Over budget threshold" : "Within allocated budget"}
             </p>
           </CardContent>
         </Card>
 
-        <Card className="border-l-4 border-l-accent">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Departments</CardTitle>
+        <Card className="shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Active Cost Centers
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{departmentMetrics.length}</div>
-            <div className="flex gap-2 mt-2 text-xs">
-              <span className="text-accent">{favorableCount} favorable</span>
-              <span className="text-primary">{unfavorableCount} unfavorable</span>
+            <div className="text-2xl font-bold font-mono tabular-nums tracking-tight text-foreground">
+              {departmentMetrics.length}
+            </div>
+            <div className="flex items-center gap-3 mt-1 text-xs">
+              <span className="text-foreground font-medium">{favorableCount} favorable</span>
+              <span className="text-border">·</span>
+              <span className="text-accent font-medium">{unfavorableCount} unfavorable</span>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-3 gap-6">
+      {/* Primary Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Cost Trend */}
-        <Card className="col-span-2">
-          <CardHeader>
-            <CardTitle>Cost Trend Analysis</CardTitle>
-            <CardDescription>Allocated vs Actual costs over time</CardDescription>
+        <Card className="lg:col-span-2 shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-semibold">Cost Trend Analysis</CardTitle>
+            <CardDescription className="text-xs">
+              Allocated budget (Black) vs. Actual expenditure (Red)
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={costTrendData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--color-border))" />
-                <XAxis dataKey="month" stroke="hsl(var(--color-muted-foreground))" />
-                <YAxis stroke="hsl(var(--color-muted-foreground))" />
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart data={costTrendData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                <XAxis
+                  dataKey="month"
+                  stroke="var(--muted-foreground)"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  stroke="var(--muted-foreground)"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: "hsl(var(--color-card))",
-                    border: "1px solid hsl(var(--color-border))",
+                    backgroundColor: "var(--card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius)",
+                    fontSize: "12px",
                   }}
-                  labelStyle={{ color: "hsl(var(--color-foreground))" }}
+                  labelStyle={{ color: "var(--foreground)", fontWeight: 600 }}
                 />
-                <Legend />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: "12px", paddingTop: "12px" }} />
                 <Line
                   type="monotone"
                   dataKey="allocated"
-                  stroke="hsl(var(--color-chart-1))"
+                  stroke="var(--chart-1)"
                   strokeWidth={2}
                   dot={false}
-                  name="Allocated"
+                  name="Allocated (₱)"
                 />
                 <Line
                   type="monotone"
                   dataKey="actual"
-                  stroke="hsl(var(--color-chart-2))"
+                  stroke="var(--chart-2)"
                   strokeWidth={2}
-                  dot={false}
-                  name="Actual"
+                  dot={{ r: 3, fill: "var(--chart-2)" }}
+                  name="Actual (₱)"
                 />
               </LineChart>
             </ResponsiveContainer>
@@ -187,108 +253,145 @@ export function Dashboard({ onSelectDepartment }: DashboardProps) {
         </Card>
 
         {/* Department Distribution */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Cost Distribution</CardTitle>
-            <CardDescription>By department (%)</CardDescription>
+        <Card className="shadow-none border-border/90">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-semibold">Cost Distribution</CardTitle>
+            <CardDescription className="text-xs">Share by department (%)</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
                   data={departmentData}
                   cx="50%"
                   cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
-                  paddingAngle={2}
+                  innerRadius={62}
+                  outerRadius={95}
+                  paddingAngle={3}
                   dataKey="value"
                 >
-                  {departmentData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  {departmentData.map((_: any, index: number) => (
+                    <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                   ))}
                 </Pie>
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "var(--card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius)",
+                    fontSize: "12px",
+                  }}
+                />
               </PieChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Variance Trend</CardTitle>
-          <CardDescription>Department performance over time</CardDescription>
+      {/* Variance Bar Chart */}
+      <Card className="shadow-none border-border/90">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base font-semibold">Monthly Variance Distribution</CardTitle>
+          <CardDescription className="text-xs">
+            Favorable vs. Unfavorable cost center drift over time
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={varianceTrendData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--color-border))" />
-              <XAxis dataKey="month" stroke="hsl(var(--color-muted-foreground))" />
-              <YAxis stroke="hsl(var(--color-muted-foreground))" />
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={varianceTrendData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+              <XAxis
+                dataKey="month"
+                stroke="var(--muted-foreground)"
+                fontSize={12}
+                tickLine={false}
+                axisLine={false}
+              />
+              <YAxis
+                stroke="var(--muted-foreground)"
+                fontSize={12}
+                tickLine={false}
+                axisLine={false}
+              />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: "hsl(var(--color-card))",
-                  border: "1px solid hsl(var(--color-border))",
+                  backgroundColor: "var(--card)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius)",
+                  fontSize: "12px",
                 }}
-                labelStyle={{ color: "hsl(var(--color-foreground))" }}
+                labelStyle={{ color: "var(--foreground)", fontWeight: 600 }}
               />
-              <Legend />
-              <Bar dataKey="favorable" stackId="a" fill="hsl(var(--color-chart-1))" name="Favorable" />
-              <Bar dataKey="unfavorable" stackId="a" fill="hsl(var(--color-chart-2))" name="Unfavorable" />
+              <Legend iconType="circle" wrapperStyle={{ fontSize: "12px", paddingTop: "10px" }} />
+              <Bar dataKey="favorable" stackId="a" fill="var(--chart-1)" radius={[0, 0, 4, 4]} name="Favorable" />
+              <Bar dataKey="unfavorable" stackId="a" fill="var(--chart-2)" radius={[4, 4, 0, 0]} name="Unfavorable" />
             </BarChart>
           </ResponsiveContainer>
         </CardContent>
       </Card>
 
-      {/* Department Metrics Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Department Performance</CardTitle>
-          <CardDescription>Cost allocation and variance by department</CardDescription>
+      {/* Department Performance List */}
+      <Card className="shadow-none border-border/90 overflow-hidden">
+        <CardHeader className="border-b border-border/60 pb-4">
+          <CardTitle className="text-base font-semibold">Department Ledger Performance</CardTitle>
+          <CardDescription className="text-xs">
+            Click any department row to inspect granular cost drivers
+          </CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {departmentMetrics.map((dept) => (
-              <div
-                key={dept.name}
-                onClick={() => onSelectDepartment(dept.name.toLowerCase().replace(" ", "-"))}
-                className="flex items-center justify-between p-4 border border-border rounded-lg hover:bg-muted cursor-pointer transition-colors"
-              >
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-foreground">{dept.name}</h3>
-                    {dept.status === "favorable" ? (
-                      <TrendingUp className="w-4 h-4 text-accent" />
-                    ) : dept.status === "unfavorable" ? (
-                      <AlertCircle className="w-4 h-4 text-primary" />
-                    ) : null}
+        <CardContent className="p-0">
+          <div className="divide-y divide-border/70">
+            {departmentMetrics.map((dept) => {
+              const isUnfavorable = dept.status === "unfavorable"
+              return (
+                <div
+                  key={dept.name}
+                  onClick={() => onSelectDepartment(dept.name.toLowerCase().replace(" ", "-"))}
+                  className="group flex items-center justify-between px-6 py-4 hover:bg-muted/40 cursor-pointer transition-colors"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2.5">
+                      <span className="font-semibold text-sm text-foreground">{dept.name}</span>
+                      <span
+                        className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded-full font-medium ${
+                          isUnfavorable
+                            ? "bg-accent/10 text-accent border border-accent/20"
+                            : "bg-muted text-foreground"
+                        }`}
+                      >
+                        {dept.status}
+                      </span>
+                    </div>
+                    <div className="flex gap-6 text-xs text-muted-foreground font-mono tabular-nums">
+                      <span>Allocated: ₱{(dept.allocated / 1000).toFixed(0)}K</span>
+                      <span>Actual: ₱{(dept.actual / 1000).toFixed(0)}K</span>
+                    </div>
                   </div>
-                  <div className="flex gap-6 mt-1 text-sm text-muted-foreground">
-                    <span>Allocated: ₱{(dept.allocated / 1000).toFixed(0)}K</span>
-                    <span>Actual: ₱{(dept.actual / 1000).toFixed(0)}K</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div
-                    className={`flex flex-col items-end ${dept.status === "favorable"
-                        ? "text-accent"
-                        : dept.status === "unfavorable"
-                          ? "text-primary"
-                          : "text-muted-foreground"
+
+                  <div className="flex items-center gap-6">
+                    <div
+                      className={`text-right font-mono tabular-nums ${
+                        isUnfavorable ? "text-accent" : "text-foreground"
                       }`}
-                  >
-                    <span className="font-semibold">₱{Math.abs(dept.variance / 1000).toFixed(1)}K</span>
-                    <span className="text-xs">
-                      {dept.variancePercent > 0 ? "+" : ""}
-                      {dept.variancePercent.toFixed(1)}%
-                    </span>
+                    >
+                      <div className="text-sm font-bold">
+                        {dept.variance > 0 ? "+" : ""}₱{Math.abs(dept.variance / 1000).toFixed(1)}K
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {dept.variancePercent > 0 ? "+" : ""}
+                        {dept.variancePercent.toFixed(1)}%
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </Button>
                   </div>
-                  <Button variant="outline" size="sm">
-                    View
-                  </Button>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </CardContent>
       </Card>
