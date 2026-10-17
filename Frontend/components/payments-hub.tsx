@@ -19,6 +19,10 @@ import {
   Loader2,
   Search,
   X,
+  Copy,
+  Check,
+  ExternalLink,
+  Play,
 } from "lucide-react"
 import {
   fetchOrders,
@@ -27,6 +31,7 @@ import {
   reconcileAllPayments,
   fetchWebhookEvents,
   fetchFulfillmentOutbox,
+  processFulfillmentOutbox,
   simulateWebhook,
   Order,
   WebhookEventRecord,
@@ -34,6 +39,406 @@ import {
   formatPhpFromMinor,
 } from "@/lib/payment-api"
 import { CurrencyDisplay, FinancialStatusBadge } from "@/components/ui/financial-primitives"
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card"
+
+// ============================================================================
+// Subcomponents for Modular Performance & Error Isolation
+// ============================================================================
+
+interface OrderMobileCardProps {
+  order: Order
+  copiedKey: string | null
+  onCopy: (text: string, key: string) => void
+  onReconcile: (attemptId: string) => void
+  onView: (attemptId: string) => void
+  onPay: (orderId: string) => void
+}
+
+function OrderMobileCard({ order, copiedKey, onCopy, onReconcile, onView, onPay }: OrderMobileCardProps) {
+  const latest = order.latest_attempt
+  return (
+    <div className="p-4 space-y-3 bg-card hover:bg-muted/10 transition-colors">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs font-semibold text-foreground">
+            {order.order_number}
+          </span>
+          <span className="text-[11px] font-mono px-2.5 py-1 rounded-md bg-muted text-foreground font-medium whitespace-nowrap inline-flex items-center shrink-0">
+            {order.category === "product_order" ? "Product Run" : "Cost Center"}
+          </span>
+        </div>
+        <FinancialStatusBadge status={order.status} />
+      </div>
+
+      <div>
+        <div className="font-semibold text-foreground text-sm">{order.title}</div>
+        <div className="text-xs text-muted-foreground font-mono mt-0.5">
+          {order.reference_code}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between py-2 px-3 rounded-md bg-muted/40 border border-border/60">
+        <span className="text-xs text-muted-foreground font-medium">Order Total:</span>
+        <CurrencyDisplay
+          amountMinor={order.amount_minor}
+          currency="PHP"
+          size="sm"
+          className="font-bold text-foreground text-sm"
+        />
+      </div>
+
+      {latest ? (
+        <div className="p-3 rounded-md bg-muted/30 border border-border/70 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5 font-mono">
+              <Activity className="w-3.5 h-3.5 text-accent" />
+              Latest Attempt
+            </span>
+            <span
+              className={`text-[10px] px-2 py-0.5 rounded font-mono font-medium uppercase ${
+                latest.status === "succeeded"
+                  ? "bg-primary/10 text-foreground border border-primary/20"
+                  : latest.status === "failed"
+                  ? "bg-accent/10 text-accent border border-accent/20"
+                  : latest.status === "requires_action"
+                  ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                  : "bg-muted text-muted-foreground border border-border"
+              }`}
+            >
+              {latest.status}
+            </span>
+          </div>
+
+          <div className="space-y-1.5 text-xs font-mono">
+            <div>
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Attempt ID</div>
+              <div className="flex items-center justify-between gap-1.5 mt-0.5 bg-background px-2 py-1 rounded border border-border/60 text-[11px]">
+                <span className="truncate select-all">{latest.id}</span>
+                <button
+                  type="button"
+                  onClick={() => onCopy(latest.id, `mob-att-${latest.id}`)}
+                  className="text-muted-foreground hover:text-foreground p-0.5 rounded shrink-0 transition-colors"
+                  title="Copy Attempt ID"
+                  aria-label="Copy Attempt ID"
+                >
+                  {copiedKey === `mob-att-${latest.id}` ? (
+                    <Check className="w-3.5 h-3.5 text-primary" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {latest.provider_payment_id && (
+              <div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Provider Ref / Session ID</div>
+                <div className="flex items-center justify-between gap-1.5 mt-0.5 bg-background px-2 py-1 rounded border border-border/60 text-[11px]">
+                  <span className="truncate select-all">{latest.provider_payment_id}</span>
+                  <button
+                    type="button"
+                    onClick={() => onCopy(latest.provider_payment_id || "", `mob-prov-${latest.provider_payment_id}`)}
+                    className="text-muted-foreground hover:text-foreground p-0.5 rounded shrink-0 transition-colors"
+                    title="Copy Provider Payment ID"
+                    aria-label="Copy Provider Payment ID"
+                  >
+                    {copiedKey === `mob-prov-${latest.provider_payment_id}` ? (
+                      <Check className="w-3.5 h-3.5 text-primary" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border/40 text-[11px]">
+              <div>
+                <span className="text-[10px] text-muted-foreground block">Method:</span>
+                <span className="text-foreground uppercase">{latest.payment_method || "PayMongo Checkout"}</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-muted-foreground block">Created:</span>
+                <span className="text-muted-foreground">{new Date(latest.created_at).toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+
+          <Button
+            size="sm"
+            variant="secondary"
+            className="w-full text-xs font-semibold h-8 mt-2 flex items-center justify-center gap-1.5"
+            onClick={() => onView(latest.id)}
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            <span>Inspect Full Attempt Details</span>
+          </Button>
+        </div>
+      ) : (
+        <div className="text-xs text-muted-foreground font-mono py-1">
+          No payment attempt recorded yet
+        </div>
+      )}
+
+      <div className="flex items-center gap-2 pt-2 border-t border-border/50 flex-wrap">
+        {order.status === "pending" && (
+          <Button
+            size="sm"
+            className="bg-accent text-accent-foreground hover:bg-accent/90 text-xs font-semibold h-8 flex-1 min-w-[100px] whitespace-nowrap"
+            onClick={() => onPay(order.id)}
+          >
+            <CreditCard className="w-3.5 h-3.5 mr-1 shrink-0" />
+            Pay Now
+          </Button>
+        )}
+        {latest && latest.status !== "succeeded" && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-xs h-8 flex-1 min-w-[90px] whitespace-nowrap"
+            onClick={() => onReconcile(latest.id)}
+          >
+            Reconcile
+          </Button>
+        )}
+        {latest && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs text-muted-foreground hover:text-foreground h-8 flex-1 min-w-[80px] whitespace-nowrap"
+            onClick={() => onView(latest.id)}
+          >
+            View
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+interface OrderDesktopRowProps {
+  order: Order
+  copiedKey: string | null
+  onCopy: (text: string, key: string) => void
+  onReconcile: (attemptId: string) => void
+  onView: (attemptId: string) => void
+  onPay: (orderId: string) => void
+}
+
+function OrderDesktopRow({ order, copiedKey, onCopy, onReconcile, onView, onPay }: OrderDesktopRowProps) {
+  const latest = order.latest_attempt
+  return (
+    <tr className="hover:bg-muted/30 transition-colors">
+      <td className="px-6 py-4 font-mono text-xs font-medium text-foreground whitespace-nowrap">
+        {order.order_number}
+      </td>
+      <td className="px-6 py-4">
+        <div className="font-semibold text-foreground text-sm line-clamp-1">{order.title}</div>
+        <div className="text-xs text-muted-foreground font-mono mt-0.5">
+          {order.reference_code}
+        </div>
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap">
+        <span className="text-[11px] font-mono px-2.5 py-1 rounded-md bg-muted text-foreground font-medium whitespace-nowrap inline-flex items-center shrink-0">
+          {order.category === "product_order" ? "Product Run" : "Cost Center"}
+        </span>
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap">
+        <CurrencyDisplay amountMinor={order.amount_minor} currency="PHP" size="sm" className="font-bold text-foreground" />
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap">
+        <FinancialStatusBadge status={order.status} />
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap">
+        {latest ? (
+          <HoverCard openDelay={150} closeDelay={200}>
+            <HoverCardTrigger asChild>
+              <button
+                type="button"
+                className="space-y-1 cursor-pointer group text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded p-1 -m-1 transition-colors"
+              >
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className={`text-[11px] px-2 py-0.5 rounded font-mono font-medium transition-colors ${
+                      latest.status === "succeeded"
+                        ? "bg-primary/10 text-foreground group-hover:bg-primary/20"
+                        : latest.status === "failed"
+                        ? "bg-accent/10 text-accent group-hover:bg-accent/20"
+                        : latest.status === "requires_action"
+                        ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 group-hover:bg-amber-500/20"
+                        : "bg-muted text-muted-foreground group-hover:bg-muted/80"
+                    }`}
+                  >
+                    {latest.status}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground/70 font-mono hidden group-hover:inline transition-opacity">
+                    (details)
+                  </span>
+                </div>
+                {latest.provider_payment_id ? (
+                  <div className="text-[10px] text-muted-foreground font-mono group-hover:text-foreground transition-colors">
+                    {latest.provider_payment_id.slice(0, 12)}...
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-muted-foreground font-mono group-hover:text-foreground transition-colors">
+                    {latest.id.slice(0, 12)}...
+                  </div>
+                )}
+              </button>
+            </HoverCardTrigger>
+            <HoverCardContent
+              className="w-80 p-4 space-y-3 bg-popover text-popover-foreground shadow-xl border border-border rounded-lg"
+              align="start"
+            >
+              <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
+                  <Activity className="w-3.5 h-3.5 text-accent" />
+                  <span>Latest Payment Attempt</span>
+                </div>
+                <span
+                  className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold uppercase ${
+                    latest.status === "succeeded"
+                      ? "bg-primary/10 text-foreground border border-primary/20"
+                      : latest.status === "failed"
+                      ? "bg-accent/10 text-accent border border-accent/20"
+                      : latest.status === "requires_action"
+                      ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                      : "bg-muted text-muted-foreground border border-border"
+                  }`}
+                >
+                  {latest.status}
+                </span>
+              </div>
+
+              <div className="space-y-2 text-xs">
+                <div>
+                  <div className="text-[10px] font-medium text-muted-foreground uppercase font-mono tracking-wider">Attempt ID</div>
+                  <div className="flex items-center justify-between gap-2 mt-0.5 bg-muted/50 px-2 py-1 rounded border border-border/60 font-mono text-[11px] text-foreground">
+                    <span className="truncate select-all" title={latest.id}>{latest.id}</span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onCopy(latest.id, `desk-att-${latest.id}`)
+                      }}
+                      className="text-muted-foreground hover:text-foreground p-0.5 rounded shrink-0 transition-colors"
+                      title="Copy Attempt ID"
+                      aria-label="Copy Attempt ID"
+                    >
+                      {copiedKey === `desk-att-${latest.id}` ? (
+                        <Check className="w-3.5 h-3.5 text-primary" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {latest.provider_payment_id && (
+                  <div>
+                    <div className="text-[10px] font-medium text-muted-foreground uppercase font-mono tracking-wider">Provider Session / Payment ID</div>
+                    <div className="flex items-center justify-between gap-2 mt-0.5 bg-muted/50 px-2 py-1 rounded border border-border/60 font-mono text-[11px] text-foreground">
+                      <span className="truncate select-all" title={latest.provider_payment_id}>{latest.provider_payment_id}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onCopy(latest.provider_payment_id || "", `desk-prov-${latest.provider_payment_id}`)
+                        }}
+                        className="text-muted-foreground hover:text-foreground p-0.5 rounded shrink-0 transition-colors"
+                        title="Copy Provider Payment ID"
+                        aria-label="Copy Provider Payment ID"
+                      >
+                        {copiedKey === `desk-prov-${latest.provider_payment_id}` ? (
+                          <Check className="w-3.5 h-3.5 text-primary" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border/40">
+                  <div>
+                    <div className="text-[10px] text-muted-foreground font-mono">Method</div>
+                    <div className="font-mono font-medium text-foreground text-[11px] uppercase truncate">
+                      {latest.payment_method || "PayMongo Checkout"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-muted-foreground font-mono">Amount</div>
+                    <div className="font-mono font-bold text-foreground text-[11px]">
+                      {formatPhpFromMinor(latest.amount_minor)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-1 border-t border-border/40">
+                  <div className="text-[10px] text-muted-foreground font-mono">Created Timestamp</div>
+                  <div className="text-[11px] font-mono text-muted-foreground mt-0.5 flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-muted-foreground shrink-0" />
+                    <span>{new Date(latest.created_at).toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              <Button
+                size="sm"
+                variant="secondary"
+                className="w-full text-xs font-semibold h-8 mt-2 flex items-center justify-center gap-1.5"
+                onClick={() => onView(latest.id)}
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Inspect Full Attempt Details</span>
+              </Button>
+            </HoverCardContent>
+          </HoverCard>
+        ) : (
+          <span className="text-xs text-muted-foreground font-mono">—</span>
+        )}
+      </td>
+      <td className="px-6 py-4 text-right whitespace-nowrap">
+        <div className="inline-flex items-center justify-end gap-1.5 flex-nowrap">
+          {order.status === "pending" && (
+            <Button
+              size="sm"
+              className="bg-accent text-accent-foreground hover:bg-accent/90 text-xs font-semibold h-8 shrink-0 whitespace-nowrap"
+              onClick={() => onPay(order.id)}
+            >
+              <CreditCard className="w-3.5 h-3.5 mr-1 shrink-0" />
+              Pay Now
+            </Button>
+          )}
+          {latest && latest.status !== "succeeded" && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-8 shrink-0 whitespace-nowrap"
+              onClick={() => onReconcile(latest.id)}
+            >
+              Reconcile
+            </Button>
+          )}
+          {latest && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs text-muted-foreground hover:text-foreground h-8 shrink-0 whitespace-nowrap"
+              onClick={() => onView(latest.id)}
+            >
+              View
+            </Button>
+          )}
+        </div>
+      </td>
+    </tr>
+  )
+}
+
+// ============================================================================
+// Main PaymentsHub Component
+// ============================================================================
 
 export function PaymentsHub() {
   const router = useRouter()
@@ -44,6 +449,42 @@ export function PaymentsHub() {
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
+  const [copiedKey, setCopiedKey] = useState<string | null>(null)
+
+  const copyToClipboard = (text: string, key: string) => {
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => {
+          setCopiedKey(key)
+          setTimeout(() => setCopiedKey(null), 2000)
+        }).catch(() => {
+          fallbackCopy(text, key)
+        })
+      } else {
+        fallbackCopy(text, key)
+      }
+    } catch {
+      // ignore clipboard failures
+    }
+  }
+
+  const fallbackCopy = (text: string, key: string) => {
+    try {
+      const el = document.createElement("textarea")
+      el.value = text
+      el.setAttribute("readonly", "")
+      el.style.position = "absolute"
+      el.style.left = "-9999px"
+      document.body.appendChild(el)
+      el.select()
+      document.execCommand("copy")
+      document.body.removeChild(el)
+      setCopiedKey(key)
+      setTimeout(() => setCopiedKey(null), 2000)
+    } catch {
+      // ignore
+    }
+  }
 
   // Search & Status Filter State for Orders Table
   const [searchQuery, setSearchQuery] = useState("")
@@ -57,7 +498,7 @@ export function PaymentsHub() {
   const [orderQuantity, setOrderQuantity] = useState(1)
 
   const productOptions = [
-    { name: "Product A", unitPrice: 125 },
+    { name: "Product A", unitPrice: 1 },
     { name: "Product B", unitPrice: 89 },
     { name: "Product C", unitPrice: 156 },
     { name: "Product D", unitPrice: 203 },
@@ -161,6 +602,19 @@ export function PaymentsHub() {
     }
   }
 
+  const handleProcessOutbox = async () => {
+    setActionLoading(true)
+    try {
+      const res = await processFulfillmentOutbox()
+      setFeedbackMessage(`Outbox processing complete: Processed ${res.processed_count} queued events.`)
+      await loadAllData()
+    } catch (err: any) {
+      setFeedbackMessage(`Outbox error: ${err.message}`)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   const handleSimulateWebhookEvent = async (type: "paid" | "failed" | "duplicate") => {
     if (orders.length === 0 || !orders[0].latest_attempt) {
       setFeedbackMessage("No orders with payment attempts found to simulate a webhook on.")
@@ -173,7 +627,7 @@ export function PaymentsHub() {
         const res = await simulateWebhook(targetAttempt.id, "checkout_session.payment.paid", true)
         setFeedbackMessage(
           `Duplicate webhook test: ${
-            res.result.duplicate ? "Deduplicated cleanly (200 OK without double fulfillment)" : "Received"
+            res.result?.duplicate ? "Deduplicated cleanly (200 OK without double fulfillment)" : "Received"
           }`
         )
       } else if (type === "paid") {
@@ -202,9 +656,10 @@ export function PaymentsHub() {
     .reduce((acc, curr) => acc + curr.amount_minor, 0)
 
   const paidCount = orders.filter((o) => o.status === "paid").length
+  const pendingOutboxCount = outbox.filter((item) => item.status === "pending").length
 
   return (
-    <div className="p-8 space-y-8 max-w-7xl mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8 max-w-7xl mx-auto">
       {/* Minimalist Header */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-border pb-6">
         <div>
@@ -217,11 +672,11 @@ export function PaymentsHub() {
               PayMongo Ready
             </span>
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-foreground mt-1">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground mt-1">
             Payments & Live Orchestration
           </h1>
         </div>
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <Button
             variant="outline"
             size="sm"
@@ -318,14 +773,14 @@ export function PaymentsHub() {
               {webhooks.length}
             </div>
             <p className="text-xs text-muted-foreground mt-1 font-mono">
-              {outbox.length} Outbox records
+              {outbox.length} Outbox records ({pendingOutboxCount} pending)
             </p>
           </CardContent>
         </Card>
       </div>
 
       {/* Minimalist Tab Navigation */}
-      <div role="tablist" aria-label="Payment Hub Sections" className="flex gap-6 border-b border-border">
+      <div role="tablist" aria-label="Payment Hub Sections" className="flex gap-4 sm:gap-6 border-b border-border overflow-x-auto whitespace-nowrap scrollbar-none pb-0.5">
         {[
           { id: "orders", label: "Orders & Invoices", icon: FileText },
           { id: "webhooks", label: "Live Orchestrator & Webhooks", icon: Activity },
@@ -368,7 +823,7 @@ export function PaymentsHub() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search order #, title, or reference..."
                 aria-label="Search orders"
-                className="w-full pl-9 pr-8 py-1.5 text-xs border border-border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full pl-9 pr-8 py-1.5 text-xs bg-muted/30 border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring font-mono"
               />
               {searchQuery && (
                 <button
@@ -382,7 +837,7 @@ export function PaymentsHub() {
               )}
             </div>
 
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               {(["all", "pending", "paid", "cancelled"] as const).map((status) => {
                 const active = statusFilter === status
                 return (
@@ -404,14 +859,14 @@ export function PaymentsHub() {
           </div>
 
           <Card className="shadow-none border-border/90 overflow-hidden">
-            <CardHeader className="flex flex-row items-center justify-between border-b border-border/60 pb-4">
+            <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/60 pb-4">
               <div>
-                <CardTitle className="text-base font-semibold">Accounting Orders & Payables</CardTitle>
+                <CardTitle className="text-base font-semibold">Order Ledger & Payment Operations</CardTitle>
                 <CardDescription className="text-xs">
                   Showing {filteredOrders.length} of {orders.length} authoritative ledger orders
                 </CardDescription>
               </div>
-              <span className="text-[11px] font-mono text-muted-foreground">
+              <span className="text-[11px] font-mono text-muted-foreground sm:text-right">
                 Server-side centavo ledger
               </span>
             </CardHeader>
@@ -423,106 +878,52 @@ export function PaymentsHub() {
                   No orders match your current filter. Try clearing your search query or status filter.
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-muted/40 border-b border-border text-[11px] text-muted-foreground uppercase font-mono">
-                      <tr>
-                        <th className="px-6 py-3">Order No.</th>
-                        <th className="px-6 py-3">Title & Reference</th>
-                        <th className="px-6 py-3">Category</th>
-                        <th className="px-6 py-3">Amount</th>
-                        <th className="px-6 py-3">Order Status</th>
-                        <th className="px-6 py-3">Latest Attempt</th>
-                        <th className="px-6 py-3 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/70">
-                      {filteredOrders.map((o) => {
-                        const latest = o.latest_attempt
-                        return (
-                          <tr key={o.id} className="hover:bg-muted/30 transition-colors">
-                            <td className="px-6 py-4 font-mono text-xs font-medium text-foreground">
-                              {o.order_number}
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="font-semibold text-foreground text-sm">{o.title}</div>
-                              <div className="text-xs text-muted-foreground font-mono mt-0.5">
-                                {o.reference_code}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className="text-[11px] font-mono px-2.5 py-1 rounded-md bg-muted text-foreground font-medium">
-                                {o.category === "product_order" ? "Product Run" : "Cost Center"}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4">
-                              <CurrencyDisplay amountMinor={o.amount_minor} currency="PHP" size="sm" className="font-bold text-foreground" />
-                            </td>
-                            <td className="px-6 py-4">
-                              <FinancialStatusBadge status={o.status} />
-                            </td>
-                            <td className="px-6 py-4">
-                              {latest ? (
-                                <div className="space-y-1">
-                                  <span
-                                    className={`text-[11px] px-2 py-0.5 rounded font-mono font-medium ${
-                                      latest.status === "succeeded"
-                                        ? "bg-primary/10 text-foreground"
-                                        : latest.status === "failed"
-                                        ? "bg-accent/10 text-accent"
-                                        : "bg-muted text-muted-foreground"
-                                    }`}
-                                  >
-                                    {latest.status}
-                                  </span>
-                                  {latest.provider_payment_id && (
-                                    <div className="text-[10px] text-muted-foreground font-mono">
-                                      {latest.provider_payment_id.slice(0, 12)}...
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-xs text-muted-foreground font-mono">—</span>
-                              )}
-                            </td>
-                            <td className="px-6 py-4 text-right space-x-2">
-                              {o.status === "pending" && (
-                                <Button
-                                  size="sm"
-                                  className="bg-accent text-accent-foreground hover:bg-accent/90 text-xs font-semibold h-8"
-                                  onClick={() => router.push(`/checkout?order_id=${o.id}`)}
-                                >
-                                  <CreditCard className="w-3.5 h-3.5 mr-1" />
-                                  Pay Now
-                                </Button>
-                              )}
-                              {latest && latest.status !== "succeeded" && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="text-xs h-8"
-                                  onClick={() => handleReconcileSingle(latest.id)}
-                                >
-                                  Reconcile
-                                </Button>
-                              )}
-                              {latest && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-xs text-muted-foreground hover:text-foreground h-8"
-                                  onClick={() => router.push(`/payment/result/${latest.id}`)}
-                                >
-                                  View
-                                </Button>
-                              )}
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                <>
+                  {/* Mobile Stacked Card View (block md:hidden) */}
+                  <div className="block md:hidden divide-y divide-border/70">
+                    {filteredOrders.map((o) => (
+                      <OrderMobileCard
+                        key={o.id}
+                        order={o}
+                        copiedKey={copiedKey}
+                        onCopy={copyToClipboard}
+                        onReconcile={handleReconcileSingle}
+                        onView={(attemptId) => router.push(`/payment/result/${attemptId}`)}
+                        onPay={(orderId) => router.push(`/checkout?order_id=${orderId}`)}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Desktop Table View (hidden md:block overflow-x-auto) */}
+                  <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full min-w-[850px] text-left text-sm">
+                      <thead className="bg-muted/40 border-b border-border text-[11px] text-muted-foreground uppercase font-mono">
+                        <tr>
+                          <th className="px-6 py-3 whitespace-nowrap">Order No.</th>
+                          <th className="px-6 py-3 whitespace-nowrap">Title & Reference</th>
+                          <th className="px-6 py-3 whitespace-nowrap">Category</th>
+                          <th className="px-6 py-3 whitespace-nowrap">Amount</th>
+                          <th className="px-6 py-3 whitespace-nowrap">Order Status</th>
+                          <th className="px-6 py-3 whitespace-nowrap">Latest Attempt</th>
+                          <th className="px-6 py-3 text-right whitespace-nowrap">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/70">
+                        {filteredOrders.map((o) => (
+                          <OrderDesktopRow
+                            key={o.id}
+                            order={o}
+                            copiedKey={copiedKey}
+                            onCopy={copyToClipboard}
+                            onReconcile={handleReconcileSingle}
+                            onView={(attemptId) => router.push(`/payment/result/${attemptId}`)}
+                            onPay={(orderId) => router.push(`/checkout?order_id=${orderId}`)}
+                          />
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
@@ -533,46 +934,46 @@ export function PaymentsHub() {
       {activeTab === "webhooks" && (
         <div id="tabpanel-webhooks" role="tabpanel" aria-labelledby="tab-webhooks" className="space-y-6">
           <Card className="shadow-none border-border/90 overflow-hidden">
-            <CardHeader className="flex flex-row items-center justify-between border-b border-border/60 pb-4">
+            <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/60 pb-4">
               <div>
                 <CardTitle className="text-base font-semibold">Incoming PayMongo Webhook Events</CardTitle>
                 <CardDescription className="text-xs">
                   Signed payloads verified with HMAC-SHA256 and deduplicated by provider event ID
                 </CardDescription>
               </div>
-              <span className="text-[11px] font-mono px-2.5 py-1 rounded-full bg-primary text-primary-foreground">
+              <span className="text-[11px] font-mono px-2.5 py-1 rounded-full bg-primary text-primary-foreground shrink-0 w-fit">
                 HMAC-SHA256 Active
               </span>
             </CardHeader>
             <CardContent className="p-0">
               {webhooks.length === 0 ? (
                 <div className="p-8 text-center text-sm text-muted-foreground">
-                  No webhook events received yet. Use the Sandbox tab or initiate a checkout session.
+                  No webhook events received yet. Simulate one in the Checklist tab.
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
+                  <table className="w-full min-w-[700px] text-left text-xs">
                     <thead className="bg-muted/40 border-b border-border text-muted-foreground uppercase font-mono">
                       <tr>
-                        <th className="px-6 py-3">Event ID</th>
-                        <th className="px-6 py-3">Event Type</th>
-                        <th className="px-6 py-3">Status</th>
-                        <th className="px-6 py-3">Received At</th>
-                        <th className="px-6 py-3">Processed At</th>
+                        <th className="px-6 py-3 whitespace-nowrap">Event ID</th>
+                        <th className="px-6 py-3 whitespace-nowrap">Event Type</th>
+                        <th className="px-6 py-3 whitespace-nowrap">Status</th>
+                        <th className="px-6 py-3 whitespace-nowrap">Received At</th>
+                        <th className="px-6 py-3 whitespace-nowrap">Processed At</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/70">
                       {webhooks.map((w) => (
                         <tr key={w.id} className="hover:bg-muted/30">
-                          <td className="px-6 py-3.5 font-mono text-foreground font-medium">
+                          <td className="px-6 py-3.5 font-mono text-foreground font-medium whitespace-nowrap">
                             {w.provider_event_id}
                           </td>
-                          <td className="px-6 py-3.5">
+                          <td className="px-6 py-3.5 whitespace-nowrap">
                             <span className="bg-muted text-foreground font-mono px-2 py-0.5 rounded">
                               {w.event_type}
                             </span>
                           </td>
-                          <td className="px-6 py-3.5">
+                          <td className="px-6 py-3.5 whitespace-nowrap">
                             <span
                               className={`px-2 py-0.5 rounded font-mono font-medium ${
                                 w.processing_status === "processed"
@@ -583,10 +984,10 @@ export function PaymentsHub() {
                               {w.processing_status}
                             </span>
                           </td>
-                          <td className="px-6 py-3.5 text-muted-foreground font-mono">
+                          <td className="px-6 py-3.5 text-muted-foreground font-mono whitespace-nowrap">
                             {new Date(w.received_at).toLocaleString()}
                           </td>
-                          <td className="px-6 py-3.5 text-muted-foreground font-mono">
+                          <td className="px-6 py-3.5 text-muted-foreground font-mono whitespace-nowrap">
                             {w.processed_at ? new Date(w.processed_at).toLocaleString() : "—"}
                           </td>
                         </tr>
@@ -599,41 +1000,66 @@ export function PaymentsHub() {
           </Card>
 
           <Card className="shadow-none border-border/90 overflow-hidden">
-            <CardHeader className="border-b border-border/60 pb-4">
-              <CardTitle className="text-base font-semibold">Fulfillment Outbox Records</CardTitle>
-              <CardDescription className="text-xs">
-                Asynchronous worker records guaranteeing exactly-once ledger synchronization
-              </CardDescription>
+            <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/60 pb-4">
+              <div>
+                <CardTitle className="text-base font-semibold">Fulfillment Outbox Monitor</CardTitle>
+                <CardDescription className="text-xs">
+                  Reliable background queue for downstream ledger updates, receipts, and audit logging
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleProcessOutbox}
+                  disabled={actionLoading || pendingOutboxCount === 0}
+                  className="gap-1.5 text-xs h-7 border-border hover:bg-muted text-foreground"
+                >
+                  <Play className={`w-3 h-3 ${actionLoading ? "animate-spin" : ""}`} />
+                  <span>Drain Outbox Queue ({pendingOutboxCount} pending)</span>
+                </Button>
+                <span className="text-[11px] font-mono px-2.5 py-1 rounded-full bg-accent text-accent-foreground font-semibold shrink-0 w-fit">
+                  Transactional Outbox
+                </span>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               {outbox.length === 0 ? (
                 <div className="p-8 text-center text-sm text-muted-foreground">
-                  Fulfillment outbox is empty.
+                  No outbox queue records found.
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
+                  <table className="w-full min-w-[650px] text-left text-xs">
                     <thead className="bg-muted/40 border-b border-border text-muted-foreground uppercase font-mono">
                       <tr>
-                        <th className="px-6 py-3">Outbox ID</th>
-                        <th className="px-6 py-3">Order ID</th>
-                        <th className="px-6 py-3">Attempt ID</th>
-                        <th className="px-6 py-3">Status</th>
-                        <th className="px-6 py-3">Processed Time</th>
+                        <th className="px-6 py-3 whitespace-nowrap">Outbox ID</th>
+                        <th className="px-6 py-3 whitespace-nowrap">Order ID</th>
+                        <th className="px-6 py-3 whitespace-nowrap">Attempt ID</th>
+                        <th className="px-6 py-3 whitespace-nowrap">Status</th>
+                        <th className="px-6 py-3 whitespace-nowrap">Processed Time</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/70">
                       {outbox.map((item) => (
                         <tr key={item.id} className="hover:bg-muted/30">
-                          <td className="px-6 py-3.5 font-mono">{item.id.slice(0, 8)}...</td>
-                          <td className="px-6 py-3.5 font-mono">{item.order_id.slice(0, 8)}...</td>
-                          <td className="px-6 py-3.5 font-mono">{item.payment_attempt_id.slice(0, 8)}...</td>
-                          <td className="px-6 py-3.5">
-                            <span className="bg-primary text-primary-foreground px-2 py-0.5 rounded font-mono font-medium">
+                          <td className="px-6 py-3.5 font-mono whitespace-nowrap">{item.id.slice(0, 8)}...</td>
+                          <td className="px-6 py-3.5 font-mono whitespace-nowrap">{item.order_id.slice(0, 8)}...</td>
+                          <td className="px-6 py-3.5 font-mono whitespace-nowrap">{item.payment_attempt_id.slice(0, 8)}...</td>
+                          <td className="px-6 py-3.5 whitespace-nowrap">
+                            <span
+                              className={`px-2 py-0.5 rounded font-mono font-medium ${
+                                item.status === "completed"
+                                  ? "bg-primary text-primary-foreground"
+                                  : item.status === "pending"
+                                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30"
+                                  : "bg-destructive text-destructive-foreground"
+                              }`}
+                            >
                               {item.status}
                             </span>
                           </td>
-                          <td className="px-6 py-3.5 text-muted-foreground font-mono">
+                          <td className="px-6 py-3.5 text-muted-foreground font-mono whitespace-nowrap">
                             {item.processed_at ? new Date(item.processed_at).toLocaleString() : "Pending"}
                           </td>
                         </tr>
@@ -934,4 +1360,3 @@ export function PaymentsHub() {
     </div>
   )
 }
-
