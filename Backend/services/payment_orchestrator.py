@@ -366,15 +366,22 @@ class PaymentOrchestrator:
                 from services.email_service import EmailService
                 email_svc = EmailService()
                 if email_svc.is_configured() and order:
-                    meta = order.metadata or {}
-                    customer_email = meta.get("customer_email") or meta.get("email") or os.getenv("DEFAULT_RECEIPT_EMAIL")
+                    meta = order.metadata_dict
+                    customer_email = meta.get("customer_email") or meta.get("email") or meta.get("billing_email") or os.getenv("DEFAULT_RECEIPT_EMAIL")
                     if customer_email:
+                        attempt = db.query(PaymentAttempt).filter(PaymentAttempt.id == item.payment_attempt_id).first()
+                        paid_at_str = "Just now"
+                        if attempt and attempt.paid_at:
+                            paid_at_str = attempt.paid_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+                        elif order.updated_at:
+                            paid_at_str = order.updated_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+
                         receipt_html = email_svc.render_payment_receipt_html(
                             order_number=order.order_number,
                             title=order.title,
                             amount_php=f"{order.amount_minor / 100:,.2f}",
-                            payment_method="PayMongo Hosted Checkout",
-                            paid_at=order.updated_at.strftime("%Y-%m-%d %H:%M:%S UTC") if order.updated_at else "Just now",
+                            payment_method=attempt.payment_method if (attempt and attempt.payment_method) else "PayMongo Hosted Checkout",
+                            paid_at=paid_at_str,
                             reference_id=item.payment_attempt_id,
                         )
                         email_svc.send_email(

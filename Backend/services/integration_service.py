@@ -155,7 +155,7 @@ class IntegrationService:
             password=custom_password,
         )
 
-        user_display = custom_user or self.email_service.user
+        user_display = custom_user if custom_user is not None else self.email_service.user
         masked_user = (
             f"{user_display[:3]}•••@{user_display.split('@')[-1]}"
             if user_display and "@" in user_display

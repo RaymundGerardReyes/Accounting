@@ -36,13 +36,16 @@ class Order(Base):
     payment_attempts = relationship("PaymentAttempt", back_populates="order", cascade="all, delete-orphan")
     fulfillment_records = relationship("FulfillmentOutbox", back_populates="order", cascade="all, delete-orphan")
 
-    def to_dict(self):
-        meta = {}
+    @property
+    def metadata_dict(self):
         if self.metadata_json:
             try:
-                meta = json.loads(self.metadata_json)
+                return json.loads(self.metadata_json)
             except Exception:
-                meta = {}
+                return {}
+        return {}
+
+    def to_dict(self):
         return {
             "id": self.id,
             "user_id": self.user_id,
@@ -54,7 +57,7 @@ class Order(Base):
             "amount": self.amount_minor / 100.0,
             "currency": self.currency,
             "status": self.status,
-            "metadata": meta,
+            "metadata": self.metadata_dict,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

@@ -319,6 +319,11 @@ def list_fulfillment_outbox(db: Session = Depends(get_db)):
     )
     return [i.to_dict() for i in items]
 
+@app.post("/api/v1/admin/fulfillment-outbox/process", summary="Process Pending Fulfillment Outbox Records")
+def trigger_process_fulfillment_outbox(db: Session = Depends(get_db)):
+    processed_count = orchestrator.process_fulfillment_outbox(db)
+    return {"processed_count": processed_count, "status": "completed"}
+
 @app.post("/api/v1/sandbox/simulate-webhook", summary="Simulate Signed PayMongo Webhook")
 async def simulate_webhook(req: SimulateWebhookRequest, db: Session = Depends(get_db)):
     """

@@ -37,10 +37,10 @@ class EmailService:
         Tests the SMTP server handshake and authentication without sending an email.
         Measures round-trip latency in milliseconds.
         """
-        target_host = (host or self.host).strip()
+        target_host = (host if host is not None else self.host).strip()
         target_port = port if port is not None else self.port
-        target_user = (user or self.user).strip()
-        target_pass = (password or self.password).strip()
+        target_user = (user if user is not None else self.user).strip()
+        target_pass = (password if password is not None else self.password).strip()
         tls_flag = use_tls if use_tls is not None else self.use_tls
 
         if not target_user or not target_pass:
