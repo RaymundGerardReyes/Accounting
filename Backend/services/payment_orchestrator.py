@@ -345,8 +345,9 @@ class PaymentOrchestrator:
                         cfg_data = json.load(f)
                     
                     logs = cfg_data.get("auditLogs", [])
+                    max_id = max([l.get("id", 0) for l in logs if isinstance(l.get("id"), int)], default=0)
                     new_log = {
-                        "id": len(logs) + 1,
+                        "id": max_id + 1,
                         "action": f"Payment received: ₱{order.amount_minor / 100:,.2f} for {order.order_number} ({order.title})",
                         "user": "PayMongo Gateway",
                         "time": "Just now",
@@ -359,6 +360,30 @@ class PaymentOrchestrator:
                         json.dump(cfg_data, f, indent=4)
                 except Exception as log_err:
                     print(f"Failed to update audit log in configuration.json: {log_err}")
+
+            # Dispatch email receipt via EmailService if configured
+            try:
+                from services.email_service import EmailService
+                email_svc = EmailService()
+                if email_svc.is_configured() and order:
+                    meta = order.metadata or {}
+                    customer_email = meta.get("customer_email") or meta.get("email") or os.getenv("DEFAULT_RECEIPT_EMAIL")
+                    if customer_email:
+                        receipt_html = email_svc.render_payment_receipt_html(
+                            order_number=order.order_number,
+                            title=order.title,
+                            amount_php=f"{order.amount_minor / 100:,.2f}",
+                            payment_method="PayMongo Hosted Checkout",
+                            paid_at=order.updated_at.strftime("%Y-%m-%d %H:%M:%S UTC") if order.updated_at else "Just now",
+                            reference_id=item.payment_attempt_id,
+                        )
+                        email_svc.send_email(
+                            to_email=customer_email,
+                            subject=f"[Receipt] Payment Confirmation for {order.order_number}",
+                            html_body=receipt_html,
+                        )
+            except Exception as email_err:
+                print(f"Payment receipt email dispatch notice: {email_err}")
 
             item.status = "completed"
             item.processed_at = utc_now()
