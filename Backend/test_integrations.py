@@ -54,6 +54,23 @@ def test_paymongo_probe_unauthorized_key():
         assert probe["status"] == "Unauthorized Key"
 
 
+def test_paymongo_probe_unexpected_status_captures_error_body():
+    svc = IntegrationService()
+    mock_response = MagicMock()
+    mock_response.status_code = 400
+    mock_response.text = '{"errors":[{"code":"parameter_format_invalid","detail":"Bad parameter"}]}'
+
+    with patch("httpx.Client.get", return_value=mock_response) as mock_get:
+        probe = svc.probe_paymongo(custom_secret_key="sk_live_sample_key_12345")
+        assert probe["operational_state"] == "warning"
+        assert probe["status"] == "HTTP 400"
+        assert probe["details"]["error_response"] == mock_response.text
+        # Assert the canonical endpoint was queried
+        mock_get.assert_called_once()
+        args, kwargs = mock_get.call_args
+        assert "/payments?limit=1" in args[0]
+
+
 def test_smtp_probe_unconfigured():
     svc = IntegrationService()
     with patch.dict(os.environ, {"SMTP_USER": "", "SMTP_APP_PASSWORD": ""}):
