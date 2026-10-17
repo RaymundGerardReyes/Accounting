@@ -464,4 +464,301 @@ def test_legacy_configuration_users_persistence():
     assert restore_resp.status_code == 200
 
 
+def test_outbox_process_and_retry_workflow():
+    db = SessionLocal()
+    try:
+        # Create an order with metadata_dict setter
+        order = Order(
+            id=str(uuid.uuid4()),
+            order_number=f"ORD-OUTBOX-{uuid.uuid4().hex[:6]}",
+            title="Outbox Processor Test",
+            category="product_order",
+            reference_code="Product A",
+            amount_minor=50000,
+            status="paid",
+        )
+        order.metadata_dict = {"customer_email": "finance.auditor@acme.com"}
+        db.add(order)
+        db.commit()
+
+        attempt = PaymentAttempt(
+            id=str(uuid.uuid4()),
+            order_id=order.id,
+            provider="paymongo",
+            payment_method="gcash",
+            amount_minor=50000,
+            status="succeeded",
+            idempotency_key=f"outbox_test_{uuid.uuid4().hex}",
+        )
+        db.add(attempt)
+        db.commit()
+
+        # Add pending outbox item
+        outbox_item = FulfillmentOutbox(
+            id=str(uuid.uuid4()),
+            order_id=order.id,
+            payment_attempt_id=attempt.id,
+            event_type="order.paid",
+            status="pending",
+        )
+        db.add(outbox_item)
+        db.commit()
+
+        # Process pending queue
+        proc_resp = client.post("/api/v1/admin/fulfillment-outbox/process")
+        assert proc_resp.status_code == 200
+        data = proc_resp.json()
+        assert data["processed_count"] >= 1
+        assert data["status"] == "completed"
+
+        db.refresh(outbox_item)
+        assert outbox_item.status == "completed"
+        assert outbox_item.processed_at is not None
+
+        # Add a failed outbox record to test retry_failed
+        failed_item = FulfillmentOutbox(
+            id=str(uuid.uuid4()),
+            order_id=order.id,
+            payment_attempt_id=attempt.id,
+            event_type="order.paid",
+            status="failed",
+        )
+        db.add(failed_item)
+        db.commit()
+
+        # Normal process without retry_failed should ignore failed items
+        resp_no_retry = client.post("/api/v1/admin/fulfillment-outbox/process")
+        assert resp_no_retry.status_code == 200
+        db.refresh(failed_item)
+        assert failed_item.status == "failed"
+
+        # Calling with retry_failed=true should re-process it
+        resp_retry = client.post("/api/v1/admin/fulfillment-outbox/process?retry_failed=true")
+        assert resp_retry.status_code == 200
+        assert resp_retry.json()["processed_count"] >= 1
+        db.refresh(failed_item)
+        assert failed_item.status == "completed"
+    finally:
+        db.close()
+
+
+def test_failed_and_expired_recovery_and_new_attempt_workflow():
+    provider = PayMongoProvider()
+    
+    # 1. Create order
+    resp_order = client.post("/api/v1/orders", json={
+        "title": "Recovery Workflow Order",
+        "category": "product_order",
+        "reference_code": "Product C",
+        "quantity": 1
+    })
+    assert resp_order.status_code == 201
+    order_id = resp_order.json()["id"]
+    assert resp_order.json()["status"] == "pending"
+
+    # 2. Attempt 1: Fails via payment.failed webhook
+    att1_resp = client.post(
+        f"/api/v1/orders/{order_id}/payment-attempts",
+        json={"idempotency_key": f"att1_{uuid.uuid4().hex}"}
+    )
+    assert att1_resp.status_code == 201
+    att1_id = att1_resp.json()["id"]
+    att1_prov_id = att1_resp.json()["provider_payment_id"]
+
+    fail_payload = {
+        "data": {
+            "id": f"evt_fail_{uuid.uuid4().hex}",
+            "type": "event",
+            "attributes": {
+                "type": "payment.failed",
+                "data": {
+                    "id": att1_prov_id,
+                    "attributes": {
+                        "failed_code": "INSUFFICIENT_FUNDS",
+                        "failed_message": "Account has insufficient balance.",
+                        "metadata": {"payment_attempt_id": att1_id, "order_id": order_id}
+                    }
+                }
+            }
+        }
+    }
+    raw_fail = json.dumps(fail_payload).encode("utf-8")
+    sig_fail = provider.sign_simulated_payload(raw_fail)
+    wh_fail = client.post(
+        "/api/v1/webhooks/paymongo",
+        content=raw_fail,
+        headers={"Paymongo-Signature": sig_fail, "Content-Type": "application/json"}
+    )
+    assert wh_fail.status_code == 200
+    
+    # Verify Attempt 1 is failed, but Order is still pending
+    poll1 = client.get(f"/api/v1/payments/{att1_id}").json()
+    assert poll1["status"] == "failed"
+    assert poll1["failure_code"] == "INSUFFICIENT_FUNDS"
+    assert poll1["order"]["status"] == "pending"
+
+    # 3. Attempt 2: Expires via checkout_session.expired webhook
+    att2_resp = client.post(
+        f"/api/v1/orders/{order_id}/payment-attempts",
+        json={"idempotency_key": f"att2_{uuid.uuid4().hex}"}
+    )
+    assert att2_resp.status_code == 201
+    att2_id = att2_resp.json()["id"]
+    att2_prov_id = att2_resp.json()["provider_payment_id"]
+
+    exp_payload = {
+        "data": {
+            "id": f"evt_exp_{uuid.uuid4().hex}",
+            "type": "event",
+            "attributes": {
+                "type": "checkout_session.expired",
+                "data": {
+                    "id": att2_prov_id,
+                    "attributes": {
+                        "metadata": {"payment_attempt_id": att2_id, "order_id": order_id}
+                    }
+                }
+            }
+        }
+    }
+    raw_exp = json.dumps(exp_payload).encode("utf-8")
+    sig_exp = provider.sign_simulated_payload(raw_exp)
+    wh_exp = client.post(
+        "/api/v1/webhooks/paymongo",
+        content=raw_exp,
+        headers={"Paymongo-Signature": sig_exp, "Content-Type": "application/json"}
+    )
+    assert wh_exp.status_code == 200
+
+    # Verify Attempt 2 is expired, but Order is still pending
+    poll2 = client.get(f"/api/v1/payments/{att2_id}").json()
+    assert poll2["status"] == "expired"
+    assert poll2["failure_code"] == "SESSION_EXPIRED"
+    assert poll2["order"]["status"] == "pending"
+
+    # 4. Attempt 3: Customer retries and completes payment
+    att3_resp = client.post(
+        f"/api/v1/orders/{order_id}/payment-attempts",
+        json={"idempotency_key": f"att3_{uuid.uuid4().hex}"}
+    )
+    assert att3_resp.status_code == 201
+    att3_id = att3_resp.json()["id"]
+
+    sim_paid = client.post(
+        "/api/v1/sandbox/simulate-webhook",
+        json={"payment_attempt_id": att3_id, "event_type": "checkout_session.payment.paid"}
+    )
+    assert sim_paid.status_code == 200
+    assert sim_paid.json()["result"]["status"] == "succeeded"
+
+    # Verify Order is now paid and latest attempt is att3
+    order_detail = client.get(f"/api/v1/orders/{order_id}").json()
+    assert order_detail["status"] == "paid"
+    assert len(order_detail["attempts"]) == 3
+    assert order_detail["latest_attempt"]["id"] == att3_id
+    assert order_detail["latest_attempt"]["status"] == "succeeded"
+
+    # 5. Subsequent attempt on paid order is rejected
+    att4_resp = client.post(
+        f"/api/v1/orders/{order_id}/payment-attempts",
+        json={"idempotency_key": f"att4_{uuid.uuid4().hex}"}
+    )
+    assert att4_resp.status_code == 400
+    assert "already fully paid" in att4_resp.json()["detail"].lower()
+
+
+def test_reconciliation_terminal_immutability_and_expired():
+    db = SessionLocal()
+    try:
+        order = Order(
+            id=str(uuid.uuid4()),
+            order_number=f"ORD-RECON-{uuid.uuid4().hex[:6]}",
+            title="Reconciliation Terminal Test",
+            category="product_order",
+            reference_code="Product A",
+            amount_minor=10000,
+            status="pending",
+        )
+        db.add(order)
+        db.commit()
+
+        # Terminal failed attempt
+        att_failed = PaymentAttempt(
+            id=str(uuid.uuid4()),
+            order_id=order.id,
+            provider="paymongo",
+            payment_method="card",
+            provider_payment_id=f"cs_sim_{uuid.uuid4().hex[:12]}",
+            amount_minor=10000,
+            status="failed",
+            failure_code="CARD_DECLINED",
+            failure_message="Declined",
+            idempotency_key=f"recon_fail_{uuid.uuid4().hex}",
+        )
+        db.add(att_failed)
+
+        # Terminal expired attempt
+        att_expired = PaymentAttempt(
+            id=str(uuid.uuid4()),
+            order_id=order.id,
+            provider="paymongo",
+            payment_method="gcash",
+            provider_payment_id=f"cs_sim_{uuid.uuid4().hex[:12]}",
+            amount_minor=10000,
+            status="expired",
+            failure_code="SESSION_EXPIRED",
+            idempotency_key=f"recon_exp_{uuid.uuid4().hex}",
+        )
+        db.add(att_expired)
+        db.commit()
+
+        # Reconciling failed attempt returns already_failed
+        recon_f = client.post(f"/api/v1/admin/payments/{att_failed.id}/reconcile")
+        assert recon_f.status_code == 200
+        data_f = recon_f.json()
+        assert data_f["status"] == "failed"
+        assert data_f["action"] == "already_failed"
+        assert data_f["reconciled"] is True
+
+        # Reconciling expired attempt returns already_expired
+        recon_e = client.post(f"/api/v1/admin/payments/{att_expired.id}/reconcile")
+        assert recon_e.status_code == 200
+        data_e = recon_e.json()
+        assert data_e["status"] == "expired"
+        assert data_e["action"] == "already_expired"
+        assert data_e["reconciled"] is True
+    finally:
+        db.close()
+
+
+def test_simulate_webhook_expired_event():
+    resp_order = client.post("/api/v1/orders", json={
+        "title": "Simulate Expired Webhook Order",
+        "category": "product_order",
+        "reference_code": "Product D",
+        "quantity": 1
+    })
+    order_id = resp_order.json()["id"]
+
+    att_resp = client.post(
+        f"/api/v1/orders/{order_id}/payment-attempts",
+        json={"idempotency_key": f"sim_exp_key_{uuid.uuid4().hex}"}
+    )
+    attempt_id = att_resp.json()["id"]
+
+    # Trigger simulation for checkout_session.expired
+    sim_resp = client.post(
+        "/api/v1/sandbox/simulate-webhook",
+        json={"payment_attempt_id": attempt_id, "event_type": "checkout_session.expired"}
+    )
+    assert sim_resp.status_code == 200
+    assert sim_resp.json()["result"]["status"] == "expired"
+
+    # Poll attempt to confirm
+    poll = client.get(f"/api/v1/payments/{attempt_id}").json()
+    assert poll["status"] == "expired"
+    assert poll["failure_code"] == "SESSION_EXPIRED"
+
+
+
 
