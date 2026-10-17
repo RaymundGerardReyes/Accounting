@@ -68,7 +68,7 @@ def get_integration_statuses(db: Session = Depends(get_db)):
 @router.post("/paymongo/test", summary="Test PayMongo API Key & Webhook Secret")
 def test_paymongo_credentials(req: PayMongoTestRequest):
     """
-    Pings https://api.paymongo.com/v1/checkout_sessions to verify API key validity,
+    Pings https://api.paymongo.com/v1/payments to verify API key validity,
     measures network latency, and optionally validates HMAC-SHA256 webhook signing.
     """
     result = integration_service.probe_paymongo(custom_secret_key=req.secret_key)

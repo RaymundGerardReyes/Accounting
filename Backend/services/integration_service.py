@@ -63,7 +63,7 @@ class IntegrationService:
         start = time.perf_counter()
         try:
             with httpx.Client(timeout=6.0) as client:
-                res = client.get(f"{self.paymongo_api_base}/checkout_sessions?limit=1", headers=headers)
+                res = client.get(f"{self.paymongo_api_base}/payments?limit=1", headers=headers)
                 latency_ms = round((time.perf_counter() - start) * 1000, 2)
 
                 if res.status_code == 200:
@@ -117,6 +117,7 @@ class IntegrationService:
                             "has_secret_key": True,
                             "masked_key": masked_key,
                             "http_status": res.status_code,
+                            "error_response": res.text,
                         },
                     }
         except Exception as e:
