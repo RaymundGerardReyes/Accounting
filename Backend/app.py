@@ -320,8 +320,8 @@ def list_fulfillment_outbox(db: Session = Depends(get_db)):
     return [i.to_dict() for i in items]
 
 @app.post("/api/v1/admin/fulfillment-outbox/process", summary="Process Pending Fulfillment Outbox Records")
-def trigger_process_fulfillment_outbox(db: Session = Depends(get_db)):
-    processed_count = orchestrator.process_fulfillment_outbox(db)
+def trigger_process_fulfillment_outbox(retry_failed: bool = False, db: Session = Depends(get_db)):
+    processed_count = orchestrator.process_fulfillment_outbox(db, retry_failed=retry_failed)
     return {"processed_count": processed_count, "status": "completed"}
 
 @app.post("/api/v1/sandbox/simulate-webhook", summary="Simulate Signed PayMongo Webhook")
@@ -357,7 +357,7 @@ async def simulate_webhook(req: SimulateWebhookRequest, db: Session = Depends(ge
                     "id": attempt.provider_payment_id or f"cs_sim_{uuid.uuid4().hex[:12]}",
                     "type": "checkout_session",
                     "attributes": {
-                        "status": "paid" if "paid" in req.event_type else "failed",
+                        "status": "paid" if "paid" in req.event_type else ("expired" if "expired" in req.event_type else ("cancelled" if "cancel" in req.event_type else "failed")),
                         "line_items": [
                             {
                                 "amount": attempt.amount_minor,
@@ -369,8 +369,16 @@ async def simulate_webhook(req: SimulateWebhookRequest, db: Session = Depends(ge
                             "order_id": attempt.order_id,
                             "payment_attempt_id": attempt.id,
                         },
-                        "failed_code": "CARD_DECLINED" if "failed" in req.event_type else None,
-                        "failed_message": "Card was declined by test bank." if "failed" in req.event_type else None,
+                        "failed_code": (
+                            "CARD_DECLINED" if "failed" in req.event_type
+                            else ("SESSION_EXPIRED" if "expired" in req.event_type
+                            else ("SESSION_CANCELLED" if "cancel" in req.event_type else None))
+                        ),
+                        "failed_message": (
+                            "Card was declined by test bank." if "failed" in req.event_type
+                            else ("Checkout session expired before completion." if "expired" in req.event_type
+                            else ("Checkout session was cancelled." if "cancel" in req.event_type else None))
+                        ),
                     },
                 },
             },

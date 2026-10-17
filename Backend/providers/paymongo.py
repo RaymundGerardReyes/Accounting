@@ -137,27 +137,39 @@ class PayMongoProvider(PaymentProvider):
                     failure_code = None
                     failure_message = None
 
-                    # If payments list exists, inspect the latest payment
-                    if payments:
-                        latest_payment = payments[-1]
-                        payment_attrs = latest_payment.get("attributes", {})
-                        p_status = payment_attrs.get("status")
-                        if p_status == "paid":
-                            internal_status = "succeeded"
-                            paid_timestamp = payment_attrs.get("paid_at")
-                            if paid_timestamp:
-                                paid_at = datetime.fromtimestamp(paid_timestamp, tz=timezone.utc)
-                        elif p_status == "failed":
-                            internal_status = "failed"
-                            failure_code = payment_attrs.get("failed_code")
-                            failure_message = payment_attrs.get("failed_message")
+                    # Check if any payment succeeded
+                    paid_payment = next(
+                        (p for p in payments if p.get("attributes", {}).get("status") == "paid"),
+                        None
+                    )
+
+                    if paid_payment:
+                        internal_status = "succeeded"
+                        p_attrs = paid_payment.get("attributes", {})
+                        paid_timestamp = p_attrs.get("paid_at")
+                        if paid_timestamp:
+                            paid_at = datetime.fromtimestamp(paid_timestamp, tz=timezone.utc)
+                        else:
+                            paid_at = datetime.now(timezone.utc)
                     elif session_status == "paid":
                         internal_status = "succeeded"
                         paid_at = datetime.now(timezone.utc)
                     elif session_status == "expired":
                         internal_status = "expired"
+                        failure_code = "SESSION_EXPIRED"
+                        failure_message = "Checkout session expired before payment completion."
                     elif session_status == "cancelled":
                         internal_status = "cancelled"
+                        failure_code = "SESSION_CANCELLED"
+                        failure_message = "Checkout session was cancelled."
+                    elif payments:
+                        latest_payment = payments[-1]
+                        payment_attrs = latest_payment.get("attributes", {})
+                        p_status = payment_attrs.get("status")
+                        if p_status == "failed":
+                            internal_status = "failed"
+                            failure_code = payment_attrs.get("failed_code") or payment_attrs.get("failure_code") or "PAYMENT_FAILED"
+                            failure_message = payment_attrs.get("failed_message") or payment_attrs.get("failure_message") or "Payment processing failed."
 
                     line_items = attrs.get("line_items", [{}])
                     amount_minor = line_items[0].get("amount", 0) if line_items else 0

@@ -45,6 +45,10 @@ class Order(Base):
                 return {}
         return {}
 
+    @metadata_dict.setter
+    def metadata_dict(self, value):
+        self.metadata_json = json.dumps(value or {})
+
     def to_dict(self):
         return {
             "id": self.id,

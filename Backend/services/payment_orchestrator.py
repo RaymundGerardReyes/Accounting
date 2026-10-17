@@ -1,3 +1,4 @@
+import os
 import json
 import uuid
 from datetime import datetime, timezone
@@ -273,8 +274,20 @@ class PaymentOrchestrator:
             "payment.paid",
             "payment_intent.succeeded",
         }
-        failed_event_types = {"payment.failed", "payment_intent.payment_failed"}
-        expired_event_types = {"checkout_session.expired"}
+        failed_event_types = {
+            "payment.failed",
+            "payment_intent.payment_failed",
+            "checkout_session.payment.failed",
+            "source.failed",
+        }
+        expired_event_types = {
+            "checkout_session.expired",
+        }
+        cancelled_event_types = {
+            "payment.canceled",
+            "payment_intent.cancelled",
+            "checkout_session.cancelled",
+        }
 
         terminal_states = {"succeeded", "failed", "cancelled", "expired"}
 
@@ -308,13 +321,22 @@ class PaymentOrchestrator:
             # Rule 1: Never overwrite an existing terminal state
             if attempt.status not in terminal_states:
                 attempt.status = "failed"
-                attempt.failure_code = resource_attrs.get("failed_code", "PAYMENT_FAILED")
-                attempt.failure_message = resource_attrs.get("failed_message", "Payment processing failed.")
+                attempt.failure_code = resource_attrs.get("failed_code") or resource_attrs.get("failure_code") or "PAYMENT_FAILED"
+                attempt.failure_message = resource_attrs.get("failed_message") or resource_attrs.get("failure_message") or "Payment processing failed."
 
         elif event_type in expired_event_types:
             # Rule 1: Never overwrite an existing terminal state
             if attempt.status not in terminal_states:
                 attempt.status = "expired"
+                attempt.failure_code = resource_attrs.get("failed_code") or "SESSION_EXPIRED"
+                attempt.failure_message = resource_attrs.get("failed_message") or "Checkout session expired before completion."
+
+        elif event_type in cancelled_event_types:
+            # Rule 1: Never overwrite an existing terminal state
+            if attempt.status not in terminal_states:
+                attempt.status = "cancelled"
+                attempt.failure_code = resource_attrs.get("failed_code") or "SESSION_CANCELLED"
+                attempt.failure_message = resource_attrs.get("failed_message") or "Payment checkout was cancelled."
 
         webhook_record.processing_status = "processed"
         webhook_record.processed_at = utc_now()
@@ -325,76 +347,100 @@ class PaymentOrchestrator:
 
         return {"received": True, "status": attempt.status, "event_id": provider_event_id}
 
-    def process_fulfillment_outbox(self, db: Session) -> int:
+    def process_fulfillment_outbox(self, db: Session, retry_failed: bool = False) -> int:
         """
         Processes pending fulfillment records, updating Audit Trail in configuration.json and database.
+        Optionally retries failed records if retry_failed is True.
         """
-        pending_outbox = (
-            db.query(FulfillmentOutbox)
-            .filter(FulfillmentOutbox.status == "pending")
-            .all()
-        )
+        query = db.query(FulfillmentOutbox)
+        if retry_failed:
+            target_outbox = (
+                query.filter(FulfillmentOutbox.status.in_(["pending", "failed"]))
+                .order_by(FulfillmentOutbox.created_at.asc())
+                .all()
+            )
+        else:
+            target_outbox = (
+                query.filter(FulfillmentOutbox.status == "pending")
+                .order_by(FulfillmentOutbox.created_at.asc())
+                .all()
+            )
         count = 0
         config_file = DATA_DIR / "configuration.json"
 
-        for item in pending_outbox:
-            order = db.query(Order).filter(Order.id == item.order_id).first()
-            if order and config_file.exists():
-                try:
-                    with open(config_file, "r") as f:
-                        cfg_data = json.load(f)
-                    
-                    logs = cfg_data.get("auditLogs", [])
-                    max_id = max([l.get("id", 0) for l in logs if isinstance(l.get("id"), int)], default=0)
-                    new_log = {
-                        "id": max_id + 1,
-                        "action": f"Payment received: ₱{order.amount_minor / 100:,.2f} for {order.order_number} ({order.title})",
-                        "user": "PayMongo Gateway",
-                        "time": "Just now",
-                        "severity": "success",
-                    }
-                    logs.insert(0, new_log)
-                    cfg_data["auditLogs"] = logs[:20]  # keep top 20
-                    
-                    with open(config_file, "w") as f:
-                        json.dump(cfg_data, f, indent=4)
-                except Exception as log_err:
-                    print(f"Failed to update audit log in configuration.json: {log_err}")
-
-            # Dispatch email receipt via EmailService if configured
+        for item in target_outbox:
             try:
-                from services.email_service import EmailService
-                email_svc = EmailService()
-                if email_svc.is_configured() and order:
-                    meta = order.metadata_dict
-                    customer_email = meta.get("customer_email") or meta.get("email") or meta.get("billing_email") or os.getenv("DEFAULT_RECEIPT_EMAIL")
-                    if customer_email:
-                        attempt = db.query(PaymentAttempt).filter(PaymentAttempt.id == item.payment_attempt_id).first()
-                        paid_at_str = "Just now"
-                        if attempt and attempt.paid_at:
-                            paid_at_str = attempt.paid_at.strftime("%Y-%m-%d %H:%M:%S UTC")
-                        elif order.updated_at:
-                            paid_at_str = order.updated_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+                order = db.query(Order).filter(Order.id == item.order_id).first()
+                if not order:
+                    item.status = "failed"
+                    item.processed_at = utc_now()
+                    continue
 
-                        receipt_html = email_svc.render_payment_receipt_html(
-                            order_number=order.order_number,
-                            title=order.title,
-                            amount_php=f"{order.amount_minor / 100:,.2f}",
-                            payment_method=attempt.payment_method if (attempt and attempt.payment_method) else "PayMongo Hosted Checkout",
-                            paid_at=paid_at_str,
-                            reference_id=item.payment_attempt_id,
-                        )
-                        email_svc.send_email(
-                            to_email=customer_email,
-                            subject=f"[Receipt] Payment Confirmation for {order.order_number}",
-                            html_body=receipt_html,
-                        )
-            except Exception as email_err:
-                print(f"Payment receipt email dispatch notice: {email_err}")
+                if config_file.exists():
+                    try:
+                        with open(config_file, "r") as f:
+                            cfg_data = json.load(f)
+                        
+                        logs = cfg_data.get("auditLogs", [])
+                        max_id = max([l.get("id", 0) for l in logs if isinstance(l.get("id"), int)], default=0)
+                        new_log = {
+                            "id": max_id + 1,
+                            "action": f"Payment received: ₱{order.amount_minor / 100:,.2f} for {order.order_number} ({order.title})",
+                            "user": "PayMongo Gateway",
+                            "time": "Just now",
+                            "severity": "success",
+                        }
+                        logs.insert(0, new_log)
+                        cfg_data["auditLogs"] = logs[:20]  # keep top 20
+                        
+                        with open(config_file, "w") as f:
+                            json.dump(cfg_data, f, indent=4)
+                    except Exception as log_err:
+                        print(f"Failed to update audit log in configuration.json: {log_err}")
 
-            item.status = "completed"
-            item.processed_at = utc_now()
-            count += 1
+                # Dispatch email receipt via EmailService if configured
+                try:
+                    from services.email_service import EmailService
+                    email_svc = EmailService()
+                    if email_svc.is_configured():
+                        meta = order.metadata_dict
+                        customer_email = (
+                            meta.get("customer_email")
+                            or meta.get("email")
+                            or meta.get("billing_email")
+                            or os.getenv("DEFAULT_RECEIPT_EMAIL")
+                        )
+                        if customer_email:
+                            attempt = db.query(PaymentAttempt).filter(PaymentAttempt.id == item.payment_attempt_id).first()
+                            paid_at_str = "Just now"
+                            if attempt and attempt.paid_at:
+                                paid_at_str = attempt.paid_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+                            elif order.updated_at:
+                                paid_at_str = order.updated_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+                            receipt_html = email_svc.render_payment_receipt_html(
+                                order_number=order.order_number,
+                                title=order.title,
+                                amount_php=f"{order.amount_minor / 100:,.2f}",
+                                payment_method=attempt.payment_method if (attempt and attempt.payment_method) else "PayMongo Hosted Checkout",
+                                paid_at=paid_at_str,
+                                reference_id=item.payment_attempt_id,
+                            )
+                            email_svc.send_email(
+                                to_email=customer_email,
+                                subject=f"[Receipt] Payment Confirmation for {order.order_number}",
+                                html_body=receipt_html,
+                            )
+                except Exception as email_err:
+                    print(f"Payment receipt email dispatch notice: {email_err}")
+
+                item.status = "completed"
+                item.processed_at = utc_now()
+                count += 1
+            except Exception as item_err:
+                item.status = "failed"
+                item.processed_at = utc_now()
+                print(f"Failed to process outbox item {item.id}: {item_err}")
 
         db.commit()
         return count
@@ -410,9 +456,14 @@ class PaymentOrchestrator:
         if not attempt.provider_payment_id:
             return {"attempt_id": attempt.id, "status": attempt.status, "reconciled": False, "reason": "No provider_payment_id"}
 
-        # Rule 1: Never revert succeeded
-        if attempt.status == "succeeded":
-            return {"attempt_id": attempt.id, "status": "succeeded", "reconciled": True, "action": "already_succeeded"}
+        # Rule 1: Terminal states (succeeded, failed, expired, cancelled) are immutable
+        if attempt.status in ("succeeded", "failed", "expired", "cancelled"):
+            return {
+                "attempt_id": attempt.id,
+                "status": attempt.status,
+                "reconciled": True,
+                "action": f"already_{attempt.status}",
+            }
 
         provider_status = await self.provider.get_checkout_session(attempt.provider_payment_id)
         changed = False
