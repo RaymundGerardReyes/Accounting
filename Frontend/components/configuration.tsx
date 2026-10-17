@@ -10,8 +10,14 @@ import {
   CheckCircle2,
   Database,
   Edit2,
+  ExternalLink,
+  Key,
+  Loader2,
+  Mail,
   Plus,
+  RefreshCw,
   Save,
+  Send,
   Shield,
   Trash2,
   X,
@@ -69,6 +75,180 @@ export function Configuration({ onBack }: ConfigurationProps) {
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [userForm, setUserForm] = useState({ name: "", email: "", role: "Cost Analyst", status: "Active" })
 
+  // Live Integrations State
+  const [liveIntegrations, setLiveIntegrations] = useState<any[]>([])
+  const [loadingIntegrations, setLoadingIntegrations] = useState(false)
+  const [showPayMongoModal, setShowPayMongoModal] = useState(false)
+  const [showEmailModal, setShowEmailModal] = useState(false)
+
+  // PayMongo Modal State
+  const [paymongoForm, setPaymongoForm] = useState({ secretKey: "", webhookSecret: "" })
+  const [paymongoTesting, setPaymongoTesting] = useState(false)
+  const [paymongoTestResult, setPaymongoTestResult] = useState<any>(null)
+  const [paymongoSaving, setPaymongoSaving] = useState(false)
+  const [paymongoSaveMsg, setPaymongoSaveMsg] = useState<string | null>(null)
+
+  // Google SMTP Modal State
+  const [emailForm, setEmailForm] = useState({
+    host: "smtp.gmail.com",
+    port: 587,
+    user: "",
+    password: "",
+    senderName: "Acme Accounting & Treasury",
+  })
+  const [emailTesting, setEmailTesting] = useState(false)
+  const [emailTestResult, setEmailTestResult] = useState<any>(null)
+  const [testRecipient, setTestRecipient] = useState("")
+  const [emailSending, setEmailSending] = useState(false)
+  const [emailSendResult, setEmailSendResult] = useState<any>(null)
+  const [emailSaving, setEmailSaving] = useState(false)
+  const [emailSaveMsg, setEmailSaveMsg] = useState<string | null>(null)
+
+  const fetchLiveIntegrations = async () => {
+    setLoadingIntegrations(true)
+    try {
+      const response = await fetch("/api/v1/integrations/status")
+      if (response.ok) {
+        const json = await response.json()
+        if (json.integrations) {
+          setLiveIntegrations(json.integrations)
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch live integration statuses:", err)
+    } finally {
+      setLoadingIntegrations(false)
+    }
+  }
+
+  const handleTestPayMongo = async () => {
+    setPaymongoTesting(true)
+    setPaymongoTestResult(null)
+    try {
+      const res = await fetch("/api/v1/integrations/paymongo/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          secret_key: paymongoForm.secretKey || undefined,
+          webhook_secret: paymongoForm.webhookSecret || undefined,
+        }),
+      })
+      const data = await res.json()
+      setPaymongoTestResult(data)
+    } catch (err: any) {
+      setPaymongoTestResult({ success: false, probe: { message: err.message, status: "Network Error" } })
+    } finally {
+      setPaymongoTesting(false)
+    }
+  }
+
+  const handleSavePayMongo = async () => {
+    setPaymongoSaving(true)
+    setPaymongoSaveMsg(null)
+    try {
+      const res = await fetch("/api/v1/integrations/configure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paymongo_secret_key: paymongoForm.secretKey || undefined,
+          paymongo_webhook_secret: paymongoForm.webhookSecret || undefined,
+        }),
+      })
+      if (res.ok) {
+        setPaymongoSaveMsg("Credentials saved to Backend/.env and active in runtime.")
+        await fetchLiveIntegrations()
+        setTimeout(() => setPaymongoSaveMsg(null), 3500)
+      } else {
+        const err = await res.json()
+        setPaymongoSaveMsg(`Save failed: ${err.detail || "Server error"}`)
+      }
+    } catch (err: any) {
+      setPaymongoSaveMsg(`Error: ${err.message}`)
+    } finally {
+      setPaymongoSaving(false)
+    }
+  }
+
+  const handleTestEmail = async () => {
+    setEmailTesting(true)
+    setEmailTestResult(null)
+    try {
+      const res = await fetch("/api/v1/integrations/email/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          host: emailForm.host,
+          port: emailForm.port,
+          user: emailForm.user,
+          password: emailForm.password,
+          send_test_email: false,
+        }),
+      })
+      const data = await res.json()
+      setEmailTestResult(data)
+    } catch (err: any) {
+      setEmailTestResult({ success: false, probe: { message: err.message, status: "Network Error" } })
+    } finally {
+      setEmailTesting(false)
+    }
+  }
+
+  const handleSendTestEmail = async () => {
+    if (!testRecipient) return
+    setEmailSending(true)
+    setEmailSendResult(null)
+    try {
+      const res = await fetch("/api/v1/integrations/email/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          host: emailForm.host,
+          port: emailForm.port,
+          user: emailForm.user,
+          password: emailForm.password,
+          send_test_email: true,
+          recipient: testRecipient,
+        }),
+      })
+      const data = await res.json()
+      setEmailSendResult(data)
+    } catch (err: any) {
+      setEmailSendResult({ success: false, detail: err.message })
+    } finally {
+      setEmailSending(false)
+    }
+  }
+
+  const handleSaveEmail = async () => {
+    setEmailSaving(true)
+    setEmailSaveMsg(null)
+    try {
+      const res = await fetch("/api/v1/integrations/configure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          smtp_host: emailForm.host,
+          smtp_port: emailForm.port,
+          smtp_user: emailForm.user,
+          smtp_app_password: emailForm.password,
+          smtp_sender_name: emailForm.senderName,
+        }),
+      })
+      if (res.ok) {
+        setEmailSaveMsg("Google SMTP credentials saved to Backend/.env.")
+        await fetchLiveIntegrations()
+        setTimeout(() => setEmailSaveMsg(null), 3500)
+      } else {
+        const err = await res.json()
+        setEmailSaveMsg(`Save failed: ${err.detail || "Server error"}`)
+      }
+    } catch (err: any) {
+      setEmailSaveMsg(`Error: ${err.message}`)
+    } finally {
+      setEmailSaving(false)
+    }
+  }
+
   useEffect(() => {
     const fetchConfigData = async () => {
       try {
@@ -89,6 +269,7 @@ export function Configuration({ onBack }: ConfigurationProps) {
     }
 
     fetchConfigData()
+    fetchLiveIntegrations()
   }, [])
 
   const handleSaveConfig = async () => {
@@ -598,9 +779,9 @@ export function Configuration({ onBack }: ConfigurationProps) {
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y divide-border/70">
-              {auditLogs.map((log) => (
+              {auditLogs.map((log, index) => (
                 <div
-                  key={log.id}
+                  key={`${log.id}-${index}-${log.action}`}
                   className="flex items-center justify-between px-6 py-4 hover:bg-muted/30 transition-colors"
                 >
                   <div className="space-y-1">
@@ -626,41 +807,125 @@ export function Configuration({ onBack }: ConfigurationProps) {
         </Card>
       )}
 
-      {/* Integrations Tab */}
+      {/* Integrations Tab with Live Telemetry Probes */}
       {activeTab === "integrations" && (
         <Card className="shadow-none border-border/90 overflow-hidden">
-          <CardHeader className="border-b border-border/60 pb-4">
-            <CardTitle className="text-base font-semibold">Connected Services</CardTitle>
-            <CardDescription className="text-xs">External gateways, databases, and webhook endpoints</CardDescription>
+          <CardHeader className="border-b border-border/60 pb-4 flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-base font-semibold">Connected Services & Live Rails</CardTitle>
+              <CardDescription className="text-xs">Real-time health probes, latency telemetry, and gateway configuration</CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchLiveIntegrations}
+              disabled={loadingIntegrations}
+              className="gap-1.5 text-xs h-8"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingIntegrations ? "animate-spin" : ""}`} />
+              <span>Refresh Telemetry</span>
+            </Button>
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y divide-border/70">
-              {integrations.map((integration) => (
-                <div
-                  key={integration.name}
-                  className="flex items-center justify-between px-6 py-4 hover:bg-muted/30 transition-colors"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-9 h-9 rounded-md bg-muted flex items-center justify-center">
-                      {getIntegrationIcon(integration.name)}
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-sm text-foreground">{integration.name}</h3>
-                      {integration.lastSync !== "N/A" && (
-                        <p className="text-xs text-muted-foreground font-mono mt-0.5">
-                          Last synced: {integration.lastSync}
+              {(liveIntegrations.length > 0 ? liveIntegrations : integrations).map((integration) => {
+                const isConnected =
+                  integration.operational_state === "connected" ||
+                  integration.status?.includes("Active") ||
+                  integration.status?.includes("Connected") ||
+                  integration.status?.includes("Enabled")
+                const isSimulator = integration.operational_state === "simulator"
+                const isError =
+                  integration.operational_state === "error" ||
+                  integration.operational_state === "unreachable" ||
+                  integration.status?.includes("Failed")
+
+                return (
+                  <div
+                    key={integration.name}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between px-6 py-4 hover:bg-muted/30 transition-colors gap-3"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-md bg-muted flex items-center justify-center shrink-0">
+                        {getIntegrationIcon(integration.name)}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold text-sm text-foreground">{integration.name}</h3>
+                          {integration.latency_ms !== undefined && integration.latency_ms > 0 && (
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
+                              {integration.latency_ms}ms
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {integration.message ||
+                            (integration.lastSync !== "N/A"
+                              ? `Last synced: ${integration.lastSync}`
+                              : "Real-time automated sync")}
                         </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 self-end sm:self-center">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`w-2 h-2 rounded-full ${
+                            isError
+                              ? "bg-accent"
+                              : isSimulator
+                              ? "bg-sky-500"
+                              : isConnected
+                              ? "bg-emerald-500"
+                              : "bg-muted-foreground"
+                          }`}
+                        />
+                        <span className="text-xs font-mono font-medium text-foreground">
+                          {integration.status}
+                        </span>
+                      </div>
+                      {integration.name === "PayMongo Payment Gateway" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-xs font-medium"
+                          onClick={() => {
+                            setPaymongoTestResult(null)
+                            setPaymongoSaveMsg(null)
+                            setShowPayMongoModal(true)
+                          }}
+                        >
+                          Configure
+                        </Button>
+                      )}
+                      {integration.name === "Email Notifications" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-xs font-medium"
+                          onClick={() => {
+                            setEmailTestResult(null)
+                            setEmailSendResult(null)
+                            setEmailSaveMsg(null)
+                            setShowEmailModal(true)
+                          }}
+                        >
+                          Configure
+                        </Button>
+                      )}
+                      {integration.name !== "PayMongo Payment Gateway" && integration.name !== "Email Notifications" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 text-xs text-muted-foreground"
+                          onClick={fetchLiveIntegrations}
+                        >
+                          Verify
+                        </Button>
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <span className="text-xs font-mono font-semibold text-foreground">{integration.status}</span>
-                    <Button variant="outline" size="sm" className="h-8 text-xs">
-                      Configure
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </CardContent>
         </Card>
@@ -889,6 +1154,331 @@ export function Configuration({ onBack }: ConfigurationProps) {
                 <Button className="bg-accent text-accent-foreground hover:bg-accent/90" onClick={handleDeleteDept}>
                   Delete Department
                 </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+      {/* PayMongo Gateway Configuration Modal */}
+      {showPayMongoModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-lg border-border shadow-2xl">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-border/60 pb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-md bg-muted flex items-center justify-center">
+                  <CreditCard className="w-4 h-4 text-accent" />
+                </div>
+                <div>
+                  <CardTitle className="text-base font-semibold">PayMongo Payment Gateway</CardTitle>
+                  <CardDescription className="text-xs">Live API Keys & Hosted Checkout Configuration</CardDescription>
+                </div>
+              </div>
+              <Button variant="ghost" size="icon-sm" onClick={() => setShowPayMongoModal(false)}>
+                <X className="w-4 h-4" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-4">
+              <div className="p-3 rounded-md bg-muted/50 border border-border text-xs space-y-1">
+                <p className="font-semibold text-foreground">Operational Information</p>
+                <p className="text-muted-foreground leading-relaxed">
+                  PayMongo Hosted Checkout accepts QRPh, GCash, Maya, Cards, and Online Banking. If keys are omitted, the platform runs in Local Sandbox Simulator mode.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">
+                  Secret Key (<code className="font-mono text-[11px]">PAYMONGO_SECRET_KEY</code>)
+                </label>
+                <input
+                  type="password"
+                  placeholder="sk_live_... or sk_test_..."
+                  value={paymongoForm.secretKey}
+                  onChange={(e) => setPaymongoForm({ ...paymongoForm, secretKey: e.target.value })}
+                  className="w-full px-3 py-2 text-sm font-mono border border-border rounded-md bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Find your keys in the PayMongo Dashboard &rarr; Developers &rarr; API Keys.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">
+                  Webhook Secret (<code className="font-mono text-[11px]">PAYMONGO_WEBHOOK_SECRET</code>)
+                </label>
+                <input
+                  type="password"
+                  placeholder="whsk_..."
+                  value={paymongoForm.webhookSecret}
+                  onChange={(e) => setPaymongoForm({ ...paymongoForm, webhookSecret: e.target.value })}
+                  className="w-full px-3 py-2 text-sm font-mono border border-border rounded-md bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Enforces HMAC-SHA256 signature verification on incoming payment events.
+                </p>
+              </div>
+
+              {/* Test Connection Result */}
+              {paymongoTestResult && (
+                <div
+                  className={`p-3 rounded-md border text-xs space-y-1 ${
+                    paymongoTestResult.success
+                      ? "bg-emerald-500/10 border-emerald-500/30 text-foreground"
+                      : "bg-accent/10 border-accent/30 text-accent"
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 font-semibold">
+                    {paymongoTestResult.success ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-accent shrink-0" />
+                    )}
+                    <span>{paymongoTestResult.probe?.status || "Test Completed"}</span>
+                    {paymongoTestResult.probe?.latency_ms !== undefined && (
+                      <span className="font-mono text-[10px] ml-auto">
+                        {paymongoTestResult.probe.latency_ms}ms
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-normal">
+                    {paymongoTestResult.probe?.message}
+                  </p>
+                  {paymongoTestResult.webhook_check && (
+                    <p className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 mt-1">
+                      &check; {paymongoTestResult.webhook_check.message}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {paymongoSaveMsg && (
+                <div className="p-2.5 rounded-md bg-muted border border-border text-xs text-foreground flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-accent shrink-0" />
+                  <span>{paymongoSaveMsg}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-3 border-t border-border/60">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestPayMongo}
+                  disabled={paymongoTesting}
+                  className="gap-1.5 text-xs"
+                >
+                  {paymongoTesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Key className="w-3.5 h-3.5" />}
+                  <span>Test Connection</span>
+                </Button>
+                <div className="flex gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setShowPayMongoModal(false)}>
+                    Close
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5"
+                    onClick={handleSavePayMongo}
+                    disabled={paymongoSaving}
+                  >
+                    {paymongoSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                    <span>Save to .env</span>
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Google Email SMTP Configuration Modal */}
+      {showEmailModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-lg border-border shadow-2xl">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-border/60 pb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-md bg-muted flex items-center justify-center">
+                  <Mail className="w-4 h-4 text-foreground" />
+                </div>
+                <div>
+                  <CardTitle className="text-base font-semibold">Google Email SMTP Notifications</CardTitle>
+                  <CardDescription className="text-xs">Configure Gmail / Google Workspace for transactional receipts</CardDescription>
+                </div>
+              </div>
+              <Button variant="ghost" size="icon-sm" onClick={() => setShowEmailModal(false)}>
+                <X className="w-4 h-4" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-4 max-h-[80vh] overflow-y-auto">
+              <div className="p-3 rounded-md bg-muted/50 border border-border text-xs space-y-1.5">
+                <p className="font-semibold text-foreground flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5 text-accent" />
+                  <span>Google App Password Required</span>
+                </p>
+                <p className="text-muted-foreground leading-relaxed text-[11px]">
+                  Google accounts require 2-Step Verification and a <strong>16-character App Password</strong>. Standard account passwords will be rejected by Google's SMTP servers.
+                </p>
+                <a
+                  href="https://myaccount.google.com/apppasswords"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] text-accent underline font-medium hover:opacity-80"
+                >
+                  Generate Google App Password <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <label className="block text-xs font-semibold text-foreground mb-1">SMTP Host</label>
+                  <input
+                    type="text"
+                    value={emailForm.host}
+                    onChange={(e) => setEmailForm({ ...emailForm, host: e.target.value })}
+                    className="w-full px-3 py-2 text-sm font-mono border border-border rounded-md bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1">Port</label>
+                  <input
+                    type="number"
+                    value={emailForm.port}
+                    onChange={(e) => setEmailForm({ ...emailForm, port: parseInt(e.target.value) || 587 })}
+                    className="w-full px-3 py-2 text-sm font-mono border border-border rounded-md bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">Sender Email Address</label>
+                <input
+                  type="email"
+                  placeholder="treasury@company.com"
+                  value={emailForm.user}
+                  onChange={(e) => setEmailForm({ ...emailForm, user: e.target.value })}
+                  className="w-full px-3 py-2 text-sm font-mono border border-border rounded-md bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">
+                  Google App Password (16 characters)
+                </label>
+                <input
+                  type="password"
+                  placeholder="xxxx xxxx xxxx xxxx"
+                  value={emailForm.password}
+                  onChange={(e) => setEmailForm({ ...emailForm, password: e.target.value })}
+                  className="w-full px-3 py-2 text-sm font-mono border border-border rounded-md bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">Sender Display Name</label>
+                <input
+                  type="text"
+                  placeholder="Acme Accounting & Treasury"
+                  value={emailForm.senderName}
+                  onChange={(e) => setEmailForm({ ...emailForm, senderName: e.target.value })}
+                  className="w-full px-3 py-2 text-sm border border-border rounded-md bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+
+              {/* Handshake Test Result */}
+              {emailTestResult && (
+                <div
+                  className={`p-3 rounded-md border text-xs space-y-1 ${
+                    emailTestResult.success
+                      ? "bg-emerald-500/10 border-emerald-500/30 text-foreground"
+                      : "bg-accent/10 border-accent/30 text-accent"
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 font-semibold">
+                    {emailTestResult.success ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-accent shrink-0" />
+                    )}
+                    <span>{emailTestResult.probe?.status || "Handshake Tested"}</span>
+                    {emailTestResult.probe?.latency_ms !== undefined && (
+                      <span className="font-mono text-[10px] ml-auto">
+                        {emailTestResult.probe.latency_ms}ms
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-normal">
+                    {emailTestResult.probe?.message}
+                  </p>
+                </div>
+              )}
+
+              {/* Live Test Email Section */}
+              <div className="p-3 rounded-md border border-border bg-card space-y-2">
+                <label className="block text-xs font-semibold text-foreground">
+                  Send Live Verification Email
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    placeholder="recipient@example.com"
+                    value={testRecipient}
+                    onChange={(e) => setTestRecipient(e.target.value)}
+                    className="flex-1 px-3 py-1.5 text-xs font-mono border border-border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSendTestEmail}
+                    disabled={emailSending || !testRecipient}
+                    className="gap-1.5 text-xs h-8 shrink-0"
+                  >
+                    {emailSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    <span>Dispatch</span>
+                  </Button>
+                </div>
+                {emailSendResult && (
+                  <p
+                    className={`text-[11px] font-medium ${
+                      emailSendResult.email_dispatch?.success ? "text-emerald-600 dark:text-emerald-400" : "text-accent"
+                    }`}
+                  >
+                    {emailSendResult.email_dispatch?.message || emailSendResult.detail}
+                  </p>
+                )}
+              </div>
+
+              {emailSaveMsg && (
+                <div className="p-2.5 rounded-md bg-muted border border-border text-xs text-foreground flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-accent shrink-0" />
+                  <span>{emailSaveMsg}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-3 border-t border-border/60">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestEmail}
+                  disabled={emailTesting}
+                  className="gap-1.5 text-xs"
+                >
+                  {emailTesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Shield className="w-3.5 h-3.5" />}
+                  <span>Test Handshake</span>
+                </Button>
+                <div className="flex gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setShowEmailModal(false)}>
+                    Close
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5"
+                    onClick={handleSaveEmail}
+                    disabled={emailSaving}
+                  >
+                    {emailSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                    <span>Save to .env</span>
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
