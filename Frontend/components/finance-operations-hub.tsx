@@ -106,8 +106,14 @@ export function FinanceOperationsHub() {
     "overview" | "advances" | "expenses" | "p2p" | "policies" | "tracker"
   >("overview")
 
-  // Authentication & Actor Context
-  const [currentActorId, setCurrentActorId] = useState<string>("emp_field_01")
+  // Authentication & Actor Context (persisted in dev mode to survive fast-refresh)
+  const [currentActorId, setCurrentActorId] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("accounting_dev_actor_id")
+      if (saved) return saved
+    }
+    return "fin_verifier_01"
+  })
   const [actorProfile, setActorProfile] = useState<any>(null)
   const [availableUsers, setAvailableUsers] = useState<FinanceUser[]>([])
   const [actAsReason, setActAsReason] = useState<string>("Interactive QA review")
@@ -288,6 +294,9 @@ export function FinanceOperationsHub() {
       setActionLoading(true)
       await switchDevActor(currentActorId, newActorId, actAsReason)
       setCurrentActorId(newActorId)
+      if (typeof window !== "undefined") {
+        localStorage.setItem("accounting_dev_actor_id", newActorId)
+      }
       setFeedback({ type: "success", message: `Switched identity to ${newActorId} with full server-bound role resolution.` })
       await loadData(newActorId)
     } catch (err: any) {
@@ -1543,17 +1552,39 @@ export function FinanceOperationsHub() {
                       <span>TIN: {v.tin || "N/A"}</span>
                       <span>{v.payee_type || "supplier"}</span>
                     </div>
-                    {v.verification_status !== "verified" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="w-full h-6 text-[10px] mt-1"
-                        onClick={() => handleVerifyVendor(v.id)}
-                        disabled={actionLoading}
-                      >
-                        Verify Vendor (Distinct CPA)
-                      </Button>
-                    )}
+                    {v.verification_status !== "verified" && (() => {
+                      const roles: string[] = actorProfile?.roles || []
+                      const isVerifier = roles.some((r) =>
+                        ["verifier", "finance_reviewer", "finance_controller"].includes(r)
+                      )
+                      const isCreator = currentActorId === v.created_by_id
+                      const canVerify = isVerifier && !isCreator
+
+                      return (
+                        <div className="space-y-1 mt-1">
+                          <Button
+                            size="sm"
+                            variant={canVerify ? "default" : "outline"}
+                            className="w-full h-6 text-[10px]"
+                            onClick={() => handleVerifyVendor(v.id)}
+                            disabled={actionLoading || !canVerify}
+                          >
+                            {canVerify
+                              ? "Verify Vendor (Distinct CPA)"
+                              : isCreator
+                              ? "SoD: Created by You"
+                              : "Requires Verifier Role"}
+                          </Button>
+                          {!canVerify && (
+                            <p className="text-[9px] text-muted-foreground text-center">
+                              {isCreator
+                                ? "Separate CPA reviewer required"
+                                : "Switch to Diana Lim (Verifier) or Victoria Sy (Controller)"}
+                            </p>
+                          )}
+                        </div>
+                      )
+                    })()}
                   </div>
                 ))}
               </CardContent>
