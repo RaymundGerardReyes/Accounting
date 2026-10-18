@@ -1,8 +1,9 @@
 import pytest
 import json
 import uuid
+from datetime import datetime, timezone
 from fastapi.testclient import TestClient
-from app import app
+from app import app, orchestrator
 from database import Base, engine, SessionLocal
 from models import Order, PaymentAttempt, WebhookEvent, FulfillmentOutbox
 from providers.paymongo import PayMongoProvider
@@ -890,6 +891,216 @@ def test_official_receipt_and_acknowledgement_report_flow():
     assert empty_body_res.status_code == 200
     assert empty_body_res.json()["success"] is True
     assert "@" in empty_body_res.json()["recipient"]
+
+
+def test_realtime_auto_reconciliation_on_poll(monkeypatch):
+    """
+    Verifies that querying GET /api/v1/payments/{id} automatically synchronizes
+    with PayMongo in real-time without requiring the user to manually click 'Reconcile'.
+    """
+    from providers.base import PaymentStatusResult
+
+    # 1. Create an order and attempt
+    order_resp = client.post(
+        "/api/v1/orders",
+        json={
+            "title": "Real-Time Auto-Sync Test Order",
+            "category": "product_order",
+            "reference_code": "PROD-A",
+            "quantity": 1,
+        }
+    )
+    order_id = order_resp.json()["id"]
+
+    att_resp = client.post(
+        f"/api/v1/orders/{order_id}/payment-attempts",
+        json={"payment_method": "qrph"}
+    )
+    attempt_id = att_resp.json()["id"]
+    provider_pm_id = att_resp.json()["provider_payment_id"]
+
+    # Verify attempt is initially 'requires_action'
+    assert att_resp.json()["status"] == "requires_action"
+
+    # 2. Simulate PayMongo provider returning 'succeeded' upon gateway query
+    async def mock_get_checkout_session(session_id: str):
+        return PaymentStatusResult(
+            provider_payment_id=session_id,
+            status="succeeded",
+            paid_at=datetime.now(timezone.utc),
+            amount_minor=25000,
+            currency="PHP",
+            payment_method="qrph",
+            raw_response={"id": session_id, "mock": True},
+        )
+
+    monkeypatch.setattr(orchestrator.provider, "get_checkout_session", mock_get_checkout_session)
+
+    # 3. Query with auto_reconcile=false: attempt remains 'requires_action'
+    poll_no_sync = client.get(f"/api/v1/payments/{attempt_id}?auto_reconcile=false")
+    assert poll_no_sync.status_code == 200
+    assert poll_no_sync.json()["status"] == "requires_action"
+
+    # 4. Query with auto_reconcile=true (simulating the default frontend poll)
+    poll_resp = client.get(f"/api/v1/payments/{attempt_id}?auto_reconcile=true")
+    assert poll_resp.status_code == 200
+    data = poll_resp.json()
+
+    # 5. Invariant: Status must automatically become 'succeeded' and receipt issued in real time!
+    assert data["status"] == "succeeded"
+    assert data["order"]["status"] == "paid"
+    assert "receipt" in data
+    assert data["receipt"]["official_receipt_number"] is not None
+    assert data["receipt"]["payment_method_code"] == "qrph"
+
+
+def test_statutory_tax_engine_and_accounting_ledger_honesty():
+    """
+    Validates Philippine tax engine under BIR RMC No. 77-2024 (VATable 12%, VAT-Exempt,
+    Zero-Rated, Non-VAT), neutral card brand normalization, and honest ledger status derivation.
+    """
+    from services.receipt_service import (
+        build_receipt_and_acknowledgement,
+        generate_receipt_pdf_bytes,
+        get_payment_method_info,
+    )
+
+    # 1. Neutral Card Normalization
+    card_neutral = get_payment_method_info("card")
+    assert card_neutral["category"] == "Card"
+    assert card_neutral["short_label"] == "Card"
+    assert "VISA" not in card_neutral["label"]
+
+    card_mc = get_payment_method_info("card_mastercard_5555")
+    assert "MASTERCARD" in card_mc["label"]
+    assert "5555" in card_mc["label"]
+
+    card_visa = get_payment_method_info("card_visa_4242")
+    assert "VISA" in card_visa["label"]
+    assert "4242" in card_visa["label"]
+
+    # 2. VAT-Exempt Order Flow
+    resp_exempt = client.post("/api/v1/orders", json={
+        "title": "VAT-Exempt Solar Panels",
+        "category": "product_order",
+        "reference_code": "Product A",
+        "quantity": 1,
+        "metadata": {"tax_classification": "vat_exempt"}
+    })
+    assert resp_exempt.status_code == 201
+    order_exempt_id = resp_exempt.json()["id"]
+
+    att_exempt = client.post(
+        f"/api/v1/orders/{order_exempt_id}/payment-attempts",
+        json={"payment_method": "gcash", "idempotency_key": f"exempt_{uuid.uuid4().hex}"}
+    ).json()
+
+    # Simulate paid webhook
+    client.post("/api/v1/sandbox/simulate-webhook", json={
+        "payment_attempt_id": att_exempt["id"],
+        "event_type": "checkout_session.payment.paid",
+        "payment_method": "gcash"
+    })
+
+    receipt_exempt = client.get(f"/api/v1/payments/{att_exempt['id']}/receipt").json()
+    assert receipt_exempt["tax_classification"] == "vat_exempt"
+    assert receipt_exempt["tax_rate_label"] == "0% (Exempt)"
+    assert receipt_exempt["vat_amount_php"] == "0.00"
+    assert receipt_exempt["vat_exempt_sales_php"] == receipt_exempt["amount_php"]
+    assert receipt_exempt["ledger_status"] == "PENDING LEDGER POSTING"
+    assert receipt_exempt["sha256_audit_digest"] == receipt_exempt["verification_hash"]
+
+    # Verify PDF generation for VAT-Exempt
+    pdf_exempt = generate_receipt_pdf_bytes(receipt_exempt)
+    assert pdf_exempt.startswith(b"%PDF-1.4")
+    assert b"%%EOF" in pdf_exempt
+
+    # 3. Zero-Rated Order Flow
+    resp_zero = client.post("/api/v1/orders", json={
+        "title": "Zero-Rated Export Services",
+        "category": "product_order",
+        "reference_code": "Product B",
+        "quantity": 1,
+        "metadata": {"tax_classification": "zero_rated"}
+    })
+    order_zero_id = resp_zero.json()["id"]
+
+    att_zero = client.post(
+        f"/api/v1/orders/{order_zero_id}/payment-attempts",
+        json={"payment_method": "paymaya", "idempotency_key": f"zero_{uuid.uuid4().hex}"}
+    ).json()
+
+    client.post("/api/v1/sandbox/simulate-webhook", json={
+        "payment_attempt_id": att_zero["id"],
+        "event_type": "checkout_session.payment.paid",
+        "payment_method": "paymaya"
+    })
+
+    receipt_zero = client.get(f"/api/v1/payments/{att_zero['id']}/receipt").json()
+    assert receipt_zero["tax_classification"] == "zero_rated"
+    assert receipt_zero["tax_rate_label"] == "0% (Zero-Rated)"
+    assert receipt_zero["vat_amount_php"] == "0.00"
+    assert receipt_zero["zero_rated_sales_php"] == receipt_zero["amount_php"]
+
+    pdf_zero = generate_receipt_pdf_bytes(receipt_zero)
+    assert pdf_zero.startswith(b"%PDF-1.4")
+
+    # 4. Non-VAT Order Flow
+    resp_nonvat = client.post("/api/v1/orders", json={
+        "title": "Non-VAT Agricultural Supplies",
+        "category": "product_order",
+        "reference_code": "Product C",
+        "quantity": 1,
+        "metadata": {"tax_classification": "non_vat"}
+    })
+    order_nonvat_id = resp_nonvat.json()["id"]
+
+    att_nonvat = client.post(
+        f"/api/v1/orders/{order_nonvat_id}/payment-attempts",
+        json={"payment_method": "qrph", "idempotency_key": f"nonvat_{uuid.uuid4().hex}"}
+    ).json()
+
+    client.post("/api/v1/sandbox/simulate-webhook", json={
+        "payment_attempt_id": att_nonvat["id"],
+        "event_type": "checkout_session.payment.paid",
+        "payment_method": "qrph"
+    })
+
+    receipt_nonvat = client.get(f"/api/v1/payments/{att_nonvat['id']}/receipt").json()
+    assert receipt_nonvat["tax_classification"] == "non_vat"
+    assert receipt_nonvat["tax_rate_label"] == "Non-VAT"
+    assert receipt_nonvat["vat_amount_php"] == "0.00"
+    assert receipt_nonvat["non_vat_sales_php"] == receipt_nonvat["amount_php"]
+
+    pdf_nonvat = generate_receipt_pdf_bytes(receipt_nonvat)
+    assert pdf_nonvat.startswith(b"%PDF-1.4")
+
+    # 5. Ledger Posting Honesty
+    # Verify an order marked posted in metadata reflects POSTED TO ACME GENERAL LEDGER
+    resp_gl = client.post("/api/v1/orders", json={
+        "title": "GL Posted Order",
+        "category": "product_order",
+        "reference_code": "Product A",
+        "quantity": 1,
+        "metadata": {"ledger_posted": True, "journal_entry_id": "JE-202610-999"}
+    })
+    order_gl_id = resp_gl.json()["id"]
+    att_gl = client.post(
+        f"/api/v1/orders/{order_gl_id}/payment-attempts",
+        json={"payment_method": "card", "idempotency_key": f"gl_{uuid.uuid4().hex}"}
+    ).json()
+
+    client.post("/api/v1/sandbox/simulate-webhook", json={
+        "payment_attempt_id": att_gl["id"],
+        "event_type": "checkout_session.payment.paid",
+        "payment_method": "card"
+    })
+
+    receipt_gl = client.get(f"/api/v1/payments/{att_gl['id']}/receipt").json()
+    assert receipt_gl["ledger_status"] == "POSTED TO ACME GENERAL LEDGER"
+    assert "POSTED TO ACME GENERAL LEDGER" in receipt_gl["acknowledgement_status"]
+
+
 
 
 
