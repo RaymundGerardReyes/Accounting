@@ -271,6 +271,103 @@ def _resolve_source_dict(source: Dict[str, Any]) -> Optional[str]:
     return stype
 
 
+def format_philippine_phone(raw_phone: Optional[str]) -> Optional[str]:
+    """
+    Normalizes and formats Philippine mobile numbers into standard '+63 9XX XXX XXXX' format.
+    Accepts: '+639171234567', '09171234567', '9171234567', '+63 917 123 4567', '0917-123-4567'.
+    """
+    if not raw_phone:
+        return None
+    raw_str = str(raw_phone).strip()
+    digits = "".join(c for c in raw_str if c.isdigit())
+
+    if digits.startswith("63") and len(digits) == 12:
+        return f"+63 {digits[2:5]} {digits[5:8]} {digits[8:12]}"
+    elif digits.startswith("09") and len(digits) == 11:
+        return f"+63 {digits[1:4]} {digits[4:7]} {digits[7:11]}"
+    elif digits.startswith("9") and len(digits) == 10:
+        return f"+63 {digits[0:3]} {digits[3:6]} {digits[6:10]}"
+
+    return raw_str
+
+
+def extract_customer_info_from_paymongo(
+    resource_attrs: Dict[str, Any],
+    fallback_meta: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Optional[str]]:
+    """
+    Extracts customer billing information (name, email, phone) from PayMongo checkout_session,
+    payment, or webhook attributes, falling back to existing order metadata.
+    """
+    meta = fallback_meta or {}
+    cust_name = None
+    cust_email = None
+    cust_phone = None
+
+    if isinstance(resource_attrs, dict):
+        # 1. Top-level billing attribute
+        billing = resource_attrs.get("billing")
+        if isinstance(billing, dict):
+            cust_name = billing.get("name")
+            cust_email = billing.get("email")
+            cust_phone = billing.get("phone")
+
+        # 2. Nested payments array
+        payments = resource_attrs.get("payments")
+        if isinstance(payments, list) and len(payments) > 0:
+            for p in payments:
+                if isinstance(p, dict):
+                    p_attrs = p.get("attributes", p)
+                    if isinstance(p_attrs, dict):
+                        p_billing = p_attrs.get("billing")
+                        if isinstance(p_billing, dict):
+                            cust_name = cust_name or p_billing.get("name")
+                            cust_email = cust_email or p_billing.get("email")
+                            cust_phone = cust_phone or p_billing.get("phone")
+
+        # 3. Customer object
+        customer = resource_attrs.get("customer")
+        if isinstance(customer, dict):
+            first = str(customer.get("first_name", "")).strip()
+            last = str(customer.get("last_name", "")).strip()
+            full = f"{first} {last}".strip()
+            cust_name = cust_name or (full if full else None)
+            cust_email = cust_email or customer.get("email")
+            cust_phone = cust_phone or customer.get("phone")
+
+        # 4. Metadata overrides
+        res_meta = resource_attrs.get("metadata")
+        if isinstance(res_meta, dict):
+            cust_name = cust_name or res_meta.get("customer_name") or res_meta.get("name")
+            cust_email = cust_email or res_meta.get("customer_email") or res_meta.get("email")
+            cust_phone = cust_phone or res_meta.get("customer_phone") or res_meta.get("phone")
+
+    final_name = (
+        (cust_name and cust_name.strip())
+        or meta.get("customer_name")
+        or meta.get("name")
+        or "Valued Customer"
+    )
+    final_email = (
+        (cust_email and cust_email.strip())
+        or meta.get("customer_email")
+        or meta.get("email")
+        or meta.get("billing_email")
+    )
+    final_phone = format_philippine_phone(
+        (cust_phone and str(cust_phone).strip())
+        or meta.get("customer_phone")
+        or meta.get("customer_mobile")
+        or meta.get("phone")
+    )
+
+    return {
+        "customer_name": final_name,
+        "customer_email": final_email,
+        "customer_phone": final_phone,
+    }
+
+
 # ==============================================================================
 # 2. Official Receipt & Acknowledgement Report Builder
 # ==============================================================================
@@ -507,6 +604,13 @@ def build_receipt_and_acknowledgement(
         "sent_at": None,
         "message": "Ready for SMTP dispatch",
     }
+    cust_info = extract_customer_info_from_paymongo(
+        meta.get("latest_provider_attrs") or {},
+        fallback_meta=meta,
+    )
+    customer_name = cust_info.get("customer_name") or "Valued Customer"
+    customer_email = cust_info.get("customer_email") or meta.get("customer_email") or meta.get("email") or meta.get("billing_email")
+    customer_phone = format_philippine_phone(cust_info.get("customer_phone") or meta.get("customer_phone") or meta.get("phone"))
 
     pdf_filename = f"Acme_OR_ACK_{order.order_number}.pdf"
 
@@ -572,7 +676,14 @@ def build_receipt_and_acknowledgement(
         "pdf_url": f"/api/v1/payments/{attempt.id}/receipt/pdf",
         "pdf_download_url": f"/api/v1/payments/{attempt.id}/receipt/pdf?download=1",
         "smtp_delivery": resolved_smtp,
-        "customer_email": meta.get("customer_email") or meta.get("email") or meta.get("billing_email"),
+        "customer": {
+            "name": customer_name,
+            "email": customer_email or "Not Provided",
+            "phone": customer_phone or "Not Provided",
+        },
+        "customer_name": customer_name,
+        "customer_email": customer_email,
+        "customer_phone": customer_phone,
         "line_items": line_items,
         "tax_compliance_note": "Electronic Payment Settlement Record. Pursuant to BIR RMC No. 77-2024, official commercial VAT Invoices are issued by Corporate Accounting upon customer tax identification verification.",
     }
@@ -685,18 +796,24 @@ def generate_receipt_pdf_bytes(receipt: Dict[str, Any]) -> bytes:
     tax_note = f"{receipt.get('tax_classification_label', '12% VAT Inclusive')}  |  Fee: PHP 0.00"
     text(404, 556, tax_note[:36], "F1", 7.5, 0.40, 0.44, 0.52)
 
-    # Left-side key-value rows
+    # Left-side key-value rows including customer billing details
+    cust_name = str(receipt.get("customer_name") or "Valued Customer")
+    cust_email = str(receipt.get("customer_email") or "Not Provided")
+    cust_phone = str(receipt.get("customer_phone") or "Not Provided")
+
     rows_left = [
         ("Order / Invoice Ref:", str(receipt.get("order_number", ""))),
-        ("Order Title:", str(receipt.get("order_title", ""))[:42]),
-        ("Category / Cost Center:", f"{receipt.get('category_label', '')} ({receipt.get('reference_code', '')})"),
+        ("Order Title:", str(receipt.get("order_title", ""))[:38]),
+        ("Customer / Payer:", f"{cust_name[:24]} ({cust_phone})"),
+        ("Email Address:", f"{cust_email[:34]}"),
+        ("Category / Code:", f"{receipt.get('category_label', '')} ({receipt.get('reference_code', '')})"),
         ("Settlement Date (PHT):", str(receipt.get("paid_at_manila", ""))),
     ]
-    y_cursor = 606
+    y_cursor = 612
     for lbl, val in rows_left:
-        text(42, y_cursor, lbl, "F2", 8.5, 0.38, 0.42, 0.48)
-        text(155, y_cursor, val, "F1", 8.8, 0.08, 0.09, 0.12)
-        y_cursor -= 16
+        text(42, y_cursor, lbl, "F2", 8.0, 0.38, 0.42, 0.48)
+        text(155, y_cursor, val, "F1", 8.2, 0.08, 0.09, 0.12)
+        y_cursor -= 14
 
     # 4. Payment Method & PayMongo Channel Verification Matrix
     rect_fill(36, 444, 540, 92, 0.97, 0.98, 1.00)
@@ -795,12 +912,13 @@ def generate_receipt_pdf_bytes(receipt: Dict[str, Any]) -> bytes:
     smtp_info = receipt.get("smtp_delivery") or {}
     smtp_recipient = smtp_info.get("recipient") or os.getenv("SMTP_USER") or "Configured Portal Account"
 
+    cust_display = f"{cust_name[:24]} ({cust_phone})" if cust_phone != "Not Provided" else cust_name[:28]
     ack_lines = [
         ("Acknowledgement Report ID:", f"{receipt.get('acknowledgement_number', '')}  |  Ledger: {receipt.get('ledger_status', 'PENDING POSTING')}"),
+        ("Customer & Payer Record:", f"{cust_display}  |  {cust_email[:32]}"),
         ("Outbox Delivery & Audit:", f"Outbox Status: {str(receipt.get('outbox_status', 'completed')).upper()}  |  Rail: PayMongo Verified"),
         ("Portal Copy Synchronization:", f"Available in Acme Portal (/payment/result/{receipt.get('payment_attempt_id', '')})"),
         ("SMTP Email Dispatch Target:", f"{smtp_recipient}  (Attachment: {receipt.get('pdf_filename', '')})"),
-        ("UTC Settlement Timestamp:", str(receipt.get("paid_at_utc", ""))),
         ("SHA-256 Audit Digest:", str(receipt.get("verification_hash", ""))),
     ]
     ay = 244

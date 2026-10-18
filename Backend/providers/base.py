@@ -20,6 +20,9 @@ class PaymentStatusResult:
     failure_code: Optional[str] = None
     failure_message: Optional[str] = None
     payment_method: Optional[str] = None
+    customer_name: Optional[str] = None
+    customer_email: Optional[str] = None
+    customer_phone: Optional[str] = None
     raw_response: Optional[Dict[str, Any]] = None
 
 class PaymentProvider(ABC):

@@ -173,6 +173,20 @@ class PaymentOrchestrator:
 
         try:
             # Call PayMongo provider (or sandbox simulator)
+            meta_dict = order.metadata_dict if hasattr(order, "metadata_dict") else {}
+            session_metadata = {
+                "payment_attempt_id": attempt.id,
+                "payment_method": normalized_pm,
+                "order_id": order.id,
+                "order_number": order.order_number,
+            }
+            if meta_dict.get("customer_name"):
+                session_metadata["customer_name"] = meta_dict["customer_name"]
+            if meta_dict.get("customer_email"):
+                session_metadata["customer_email"] = meta_dict["customer_email"]
+            if meta_dict.get("customer_phone"):
+                session_metadata["customer_phone"] = meta_dict["customer_phone"]
+
             session_result = await self.provider.create_checkout_session(
                 order_id=order.id,
                 order_number=order.order_number,
@@ -182,7 +196,7 @@ class PaymentOrchestrator:
                 success_url=success_url,
                 cancel_url=cancel_url,
                 payment_methods=["qrph", "gcash", "paymaya", "dob", "card"],
-                metadata={"payment_attempt_id": attempt.id, "payment_method": normalized_pm},
+                metadata=session_metadata,
             )
 
             attempt.provider_payment_id = session_result.provider_payment_id
@@ -286,6 +300,22 @@ class PaymentOrchestrator:
 
         # 5. Apply State Machine Rules
         order = db.query(Order).filter(Order.id == attempt.order_id).first()
+
+        # Extract and persist customer billing info into order metadata
+        from services.receipt_service import extract_customer_info_from_paymongo
+        cust_info = extract_customer_info_from_paymongo(resource_attrs, order.metadata_dict if order else None)
+        if order:
+            o_meta = dict(order.metadata_dict or {})
+            if cust_info.get("customer_name") and cust_info["customer_name"] != "Valued Customer":
+                o_meta["customer_name"] = cust_info["customer_name"]
+            if cust_info.get("customer_email") and not o_meta.get("customer_email"):
+                o_meta["customer_email"] = cust_info["customer_email"]
+            if cust_info.get("customer_phone") and not o_meta.get("customer_phone"):
+                o_meta["customer_phone"] = cust_info["customer_phone"]
+            o_meta["latest_provider_attrs"] = resource_attrs
+            order.metadata_dict = o_meta
+            db.add(order)
+
         paid_event_types = {
             "checkout_session.payment.paid",
             "payment.paid",
@@ -335,11 +365,26 @@ class PaymentOrchestrator:
                 db.add(outbox_entry)
 
         elif event_type in failed_event_types:
+            # Check if failure is due to expired source
+            failed_code_val = resource_attrs.get("failed_code") or resource_attrs.get("failure_code") or "PAYMENT_FAILED"
+            failed_msg_val = resource_attrs.get("failed_message") or resource_attrs.get("failure_message") or "Payment processing failed."
+            is_source_expired = (
+                "expired" in str(failed_code_val).lower()
+                or "expired" in str(failed_msg_val).lower()
+                or "has expired status" in str(failed_msg_val).lower()
+            )
+
             # Rule 1: Never overwrite an existing terminal state
             if attempt.status not in terminal_states:
-                attempt.status = "failed"
-                attempt.failure_code = resource_attrs.get("failed_code") or resource_attrs.get("failure_code") or "PAYMENT_FAILED"
-                attempt.failure_message = resource_attrs.get("failed_message") or resource_attrs.get("failure_message") or "Payment processing failed."
+                if is_source_expired:
+                    attempt.status = "expired"
+                    attempt.failure_code = "SOURCE_EXPIRED"
+                    attempt.failure_message = failed_msg_val or "Payment source has expired. Please initiate a fresh checkout session."
+                    attempt.checkout_url = None
+                else:
+                    attempt.status = "failed"
+                    attempt.failure_code = failed_code_val
+                    attempt.failure_message = failed_msg_val
 
         elif event_type in expired_event_types:
             # Rule 1: Never overwrite an existing terminal state
@@ -347,6 +392,7 @@ class PaymentOrchestrator:
                 attempt.status = "expired"
                 attempt.failure_code = resource_attrs.get("failed_code") or "SESSION_EXPIRED"
                 attempt.failure_message = resource_attrs.get("failed_message") or "Checkout session expired before completion."
+                attempt.checkout_url = None
 
         elif event_type in cancelled_event_types:
             # Rule 1: Never overwrite an existing terminal state
@@ -354,6 +400,7 @@ class PaymentOrchestrator:
                 attempt.status = "cancelled"
                 attempt.failure_code = resource_attrs.get("failed_code") or "SESSION_CANCELLED"
                 attempt.failure_message = resource_attrs.get("failed_message") or "Payment checkout was cancelled."
+                attempt.checkout_url = None
 
         webhook_record.processing_status = "processed"
         webhook_record.processed_at = utc_now()
@@ -548,10 +595,24 @@ class PaymentOrchestrator:
         provider_status = await self.provider.get_checkout_session(attempt.provider_payment_id)
         changed = False
 
+        order = db.query(Order).filter(Order.id == attempt.order_id).first()
+        if order and (provider_status.customer_name or provider_status.customer_email or provider_status.customer_phone):
+            o_meta = dict(order.metadata_dict or {})
+            if provider_status.customer_name and provider_status.customer_name != "Valued Customer":
+                o_meta["customer_name"] = provider_status.customer_name
+            if provider_status.customer_email and not o_meta.get("customer_email"):
+                o_meta["customer_email"] = provider_status.customer_email
+            if provider_status.customer_phone and not o_meta.get("customer_phone"):
+                o_meta["customer_phone"] = provider_status.customer_phone
+            if provider_status.raw_response and isinstance(provider_status.raw_response, dict):
+                attrs = provider_status.raw_response.get("attributes", provider_status.raw_response)
+                o_meta["latest_provider_attrs"] = attrs
+            order.metadata_dict = o_meta
+            db.add(order)
+
         if provider_status.status == "succeeded":
             if provider_status.payment_method:
                 attempt.payment_method = provider_status.payment_method
-            order = db.query(Order).filter(Order.id == attempt.order_id).first()
             if order and order.status == "paid" and attempt.status != "succeeded":
                 attempt.status = "duplicate_paid_review"
                 attempt.paid_at = provider_status.paid_at or utc_now()
@@ -575,6 +636,8 @@ class PaymentOrchestrator:
             attempt.status = provider_status.status
             attempt.failure_code = provider_status.failure_code
             attempt.failure_message = provider_status.failure_message
+            if provider_status.status in ("expired", "cancelled"):
+                attempt.checkout_url = None
             changed = True
 
         db.commit()

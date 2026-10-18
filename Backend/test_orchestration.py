@@ -1101,6 +1101,100 @@ def test_statutory_tax_engine_and_accounting_ledger_honesty():
     assert "POSTED TO ACME GENERAL LEDGER" in receipt_gl["acknowledgement_status"]
 
 
+def test_customer_billing_info_and_expired_source_guardrails():
+    from services.receipt_service import generate_receipt_pdf_bytes
+    # 1. Create order with customer details
+    resp_order = client.post("/api/v1/orders", json={
+        "title": "Corporate Packaging Materials",
+        "category": "product_order",
+        "reference_code": "Product D",
+        "quantity": 2,
+        "customer_name": "Maria Santos",
+        "customer_email": "maria.santos@example.com",
+        "customer_phone": "09171234567"
+    })
+    assert resp_order.status_code == 201
+    order_data = resp_order.json()
+    order_id = order_data["id"]
+    assert order_data["metadata"]["customer_name"] == "Maria Santos"
+    assert order_data["metadata"]["customer_email"] == "maria.santos@example.com"
+    assert order_data["metadata"]["customer_phone"] == "+63 917 123 4567"
+
+    # 2. Initiate payment attempt
+    att_resp = client.post(
+        f"/api/v1/orders/{order_id}/payment-attempts",
+        json={
+            "payment_method": "gcash",
+            "idempotency_key": f"cust_exp_{uuid.uuid4().hex}"
+        }
+    )
+    assert att_resp.status_code == 201
+    att_data = att_resp.json()
+    att_id = att_data["id"]
+    provider_id = att_data["provider_payment_id"]
+
+    # 3. Simulate payment completion
+    client.post("/api/v1/sandbox/simulate-webhook", json={
+        "payment_attempt_id": att_id,
+        "event_type": "checkout_session.payment.paid",
+        "payment_method": "gcash"
+    })
+
+    # 4. Verify receipt API returns formatted customer information
+    receipt_resp = client.get(f"/api/v1/payments/{att_id}/receipt")
+    assert receipt_resp.status_code == 200
+    receipt = receipt_resp.json()
+    assert "customer" in receipt
+    assert receipt["customer"]["name"] == "Maria Santos"
+    assert receipt["customer"]["email"] == "maria.santos@example.com"
+    assert receipt["customer"]["phone"] == "+63 917 123 4567"
+
+    # 5. Verify PDF generation includes customer details without errors
+    pdf_bytes = generate_receipt_pdf_bytes(receipt)
+    assert pdf_bytes.startswith(b"%PDF-1.4")
+    assert b"Maria Santos" in pdf_bytes
+    assert b"maria.santos@example.com" in pdf_bytes
+
+    # 6. Test Expired Source / Session guardrails
+    # Create another attempt and simulate source expiration
+    resp_order2 = client.post("/api/v1/orders", json={
+        "title": "Expired Source Simulation Order",
+        "category": "product_order",
+        "reference_code": "Product A",
+        "quantity": 1
+    })
+    assert resp_order2.status_code == 201
+    order2_id = resp_order2.json()["id"]
+
+    att2_resp = client.post(
+        f"/api/v1/orders/{order2_id}/payment-attempts",
+        json={"payment_method": "qrph", "idempotency_key": f"exp_guard_{uuid.uuid4().hex}"}
+    )
+    assert att2_resp.status_code == 201
+    att2_id = att2_resp.json()["id"]
+    att2_slug = att2_resp.json()["provider_payment_id"]  # e.g. cs_sim_...
+
+    # Trigger source expired webhook simulation
+    sim_exp = client.post("/api/v1/sandbox/simulate-webhook", json={
+        "payment_attempt_id": att2_id,
+        "event_type": "checkout_session.expired"
+    })
+    assert sim_exp.status_code == 200
+    assert sim_exp.json()["result"]["status"] == "expired"
+
+    # Query status via 24-character hex slug (stripping cs_ if present)
+    clean_slug = att2_slug.replace("cs_", "")
+    status_slug_resp = client.get(f"/api/v1/payments/{clean_slug}?auto_reconcile=false")
+    assert status_slug_resp.status_code == 200
+    slug_data = status_slug_resp.json()
+    assert slug_data["status"] == "expired"
+    assert slug_data["failure_code"] in ["SOURCE_EXPIRED", "SESSION_EXPIRED"]
+    assert slug_data["checkout_url"] is None
+    assert slug_data["session_expired"] is True
+    assert slug_data["can_retry"] is True
+
+
+
 
 
 

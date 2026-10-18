@@ -67,13 +67,20 @@ class PayMongoProvider(PaymentProvider):
         # If live/test secret key is provided, call real PayMongo API
         if not self.is_simulator:
             headers = self._get_auth_header()
+            billing_name = (metadata.get("customer_name") if metadata else None) or "Customer"
+            billing_email = (metadata.get("customer_email") if metadata else None) or os.getenv("SMTP_USER", "").strip() or "customer@example.com"
+            billing_phone = metadata.get("customer_phone") if metadata else None
+            billing_obj = {
+                "name": billing_name,
+                "email": billing_email,
+            }
+            if billing_phone:
+                billing_obj["phone"] = billing_phone
+
             payload = {
                 "data": {
                     "attributes": {
-                        "billing": {
-                            "name": "Customer",
-                            "email": os.getenv("SMTP_USER", "").strip() or "customer@example.com",
-                        },
+                        "billing": billing_obj,
                         "send_email_receipt": True,
                         "show_description": True,
                         "show_line_items": True,
@@ -163,6 +170,28 @@ class PayMongoProvider(PaymentProvider):
                     failure_code = None
                     failure_message = None
 
+                    # Check if session itself is expired or cancelled
+                    is_expired = session_status == "expired"
+                    is_cancelled = session_status == "cancelled"
+
+                    # Check payments array for expired source or failed payment
+                    if not is_expired and payments:
+                        for p in payments:
+                            if isinstance(p, dict):
+                                p_attrs = p.get("attributes", p)
+                                p_status = str(p_attrs.get("status", "")).lower()
+                                p_code = str(p_attrs.get("failed_code") or p_attrs.get("failure_code") or "").lower()
+                                p_msg = str(p_attrs.get("failed_message") or p_attrs.get("failure_message") or "").lower()
+                                if p_status == "expired" or "expired" in p_code or "expired" in p_msg:
+                                    is_expired = True
+                                    failure_code = "SOURCE_EXPIRED"
+                                    failure_message = (
+                                        p_attrs.get("failed_message")
+                                        or p_attrs.get("failure_message")
+                                        or "Payment source or checkout session has expired. Please initiate a fresh checkout session."
+                                    )
+                                    break
+
                     # Check if any payment succeeded
                     paid_payment = next(
                         (p for p in payments if p.get("attributes", {}).get("status") == "paid"),
@@ -180,11 +209,11 @@ class PayMongoProvider(PaymentProvider):
                     elif session_status == "paid":
                         internal_status = "succeeded"
                         paid_at = datetime.now(timezone.utc)
-                    elif session_status == "expired":
+                    elif is_expired:
                         internal_status = "expired"
-                        failure_code = "SESSION_EXPIRED"
-                        failure_message = "Checkout session expired before payment completion."
-                    elif session_status == "cancelled":
+                        failure_code = failure_code or "SESSION_EXPIRED"
+                        failure_message = failure_message or "Checkout session expired before payment completion."
+                    elif is_cancelled:
                         internal_status = "cancelled"
                         failure_code = "SESSION_CANCELLED"
                         failure_message = "Checkout session was cancelled."
@@ -197,8 +226,9 @@ class PayMongoProvider(PaymentProvider):
                             failure_code = payment_attrs.get("failed_code") or payment_attrs.get("failure_code") or "PAYMENT_FAILED"
                             failure_message = payment_attrs.get("failed_message") or payment_attrs.get("failure_message") or "Payment processing failed."
 
-                    from services.receipt_service import extract_payment_method_from_paymongo
+                    from services.receipt_service import extract_payment_method_from_paymongo, extract_customer_info_from_paymongo
                     resolved_pm = extract_payment_method_from_paymongo(attrs)
+                    cust_info = extract_customer_info_from_paymongo(attrs)
 
                     line_items = attrs.get("line_items", [{}])
                     amount_minor = line_items[0].get("amount", 0) if line_items else 0
@@ -213,7 +243,24 @@ class PayMongoProvider(PaymentProvider):
                         failure_code=failure_code,
                         failure_message=failure_message,
                         payment_method=resolved_pm,
+                        customer_name=cust_info.get("customer_name"),
+                        customer_email=cust_info.get("customer_email"),
+                        customer_phone=cust_info.get("customer_phone"),
                         raw_response=data,
+                    )
+            except httpx.HTTPStatusError as http_err:
+                err_text = http_err.response.text
+                print(f"PayMongo get_checkout_session HTTP {http_err.response.status_code}: {err_text}")
+                if "has expired status" in err_text or "expired" in err_text.lower():
+                    return PaymentStatusResult(
+                        provider_payment_id=provider_payment_id,
+                        status="expired",
+                        paid_at=None,
+                        amount_minor=0,
+                        currency="PHP",
+                        failure_code="SOURCE_EXPIRED",
+                        failure_message="Payment source has expired. Please initiate a fresh checkout session.",
+                        raw_response={"error": err_text},
                     )
             except Exception as e:
                 print(f"PayMongo get_checkout_session notice (falling back to simulator state): {e}")
@@ -225,6 +272,8 @@ class PayMongoProvider(PaymentProvider):
             paid_at=None,
             amount_minor=0,
             currency="PHP",
+            customer_name="Valued Customer",
+            customer_email=os.getenv("DEFAULT_RECEIPT_EMAIL") or os.getenv("SMTP_USER"),
             raw_response={"id": provider_payment_id, "simulator": True},
         )
 

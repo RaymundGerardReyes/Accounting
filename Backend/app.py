@@ -159,6 +159,9 @@ class CreateOrderRequest(BaseModel):
     reference_code: str = Field(..., description="Product name or department slug")
     quantity: int = Field(1, ge=1, description="Quantity for products")
     amount_minor: Optional[int] = Field(None, description="Authoritative minor amount in centavos")
+    customer_name: Optional[str] = Field(None, description="Customer or payer name")
+    customer_email: Optional[str] = Field(None, description="Customer receipt email")
+    customer_phone: Optional[str] = Field(None, description="Customer contact or mobile number")
     metadata: Optional[Dict[str, Any]] = None
 
 class CreatePaymentAttemptRequest(BaseModel):
@@ -166,6 +169,9 @@ class CreatePaymentAttemptRequest(BaseModel):
     payment_method: str = Field("hosted_checkout", description="Payment method channel")
     success_url: Optional[str] = None
     cancel_url: Optional[str] = None
+    customer_name: Optional[str] = None
+    customer_email: Optional[str] = None
+    customer_phone: Optional[str] = None
 
 class SimulateWebhookRequest(BaseModel):
     payment_attempt_id: str
@@ -199,6 +205,14 @@ def list_orders(status: Optional[str] = None, db: Session = Depends(get_db)):
 @app.post("/api/v1/orders", summary="Create New Order or Invoice", status_code=status.HTTP_201_CREATED)
 def create_order(req: CreateOrderRequest, db: Session = Depends(get_db)):
     try:
+        meta = dict(req.metadata or {})
+        if req.customer_name:
+            meta["customer_name"] = req.customer_name
+        if req.customer_email:
+            meta["customer_email"] = req.customer_email
+        if req.customer_phone:
+            meta["customer_phone"] = req.customer_phone
+
         order = orchestrator.create_order(
             db=db,
             title=req.title,
@@ -206,7 +220,7 @@ def create_order(req: CreateOrderRequest, db: Session = Depends(get_db)):
             reference_code=req.reference_code,
             amount_minor=req.amount_minor,
             quantity=req.quantity,
-            metadata=req.metadata,
+            metadata=meta,
         )
         return order.to_dict()
     except Exception as e:
@@ -237,6 +251,25 @@ async def create_payment_attempt(
 ):
     idempotency_key = req.idempotency_key or x_idempotency_key or str(uuid.uuid4())
     try:
+        # Update customer details in order metadata if provided
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if order:
+            o_meta = dict(order.metadata_dict or {})
+            updated_o = False
+            if req.customer_name:
+                o_meta["customer_name"] = req.customer_name
+                updated_o = True
+            if req.customer_email:
+                o_meta["customer_email"] = req.customer_email
+                updated_o = True
+            if req.customer_phone:
+                o_meta["customer_phone"] = req.customer_phone
+                updated_o = True
+            if updated_o:
+                order.metadata_dict = o_meta
+                db.add(order)
+                db.commit()
+
         attempt = await orchestrator.initiate_payment_attempt(
             db=db,
             order_id=order_id,
@@ -255,7 +288,7 @@ def _resolve_payment_attempt_and_order(db: Session, identifier: str) -> tuple[Op
     """
     Authoritatively resolves a payment attempt and its associated order by any valid reference:
     - Exact Payment Attempt ID (UUID)
-    - PayMongo Checkout Session / Payment ID (cs_...)
+    - PayMongo Checkout Session / Payment ID (cs_... or raw 24-hex session token)
     - Order ID (UUID)
     - Order Number (ORD-...)
     """
@@ -269,8 +302,12 @@ def _resolve_payment_attempt_and_order(db: Session, identifier: str) -> tuple[Op
         order = db.query(Order).filter(Order.id == attempt.order_id).first()
         return attempt, order
 
-    # 2. Match attempt by provider_payment_id (e.g. cs_633306eb5b337f661a7ab7ea)
+    # 2. Match attempt by provider_payment_id (e.g. cs_633306eb5b337f661a7ab7ea or 633306eb5b337f661a7ab7ea)
     attempt = db.query(PaymentAttempt).filter(PaymentAttempt.provider_payment_id == clean_id).first()
+    if not attempt and not clean_id.startswith("cs_"):
+        attempt = db.query(PaymentAttempt).filter(PaymentAttempt.provider_payment_id == f"cs_{clean_id}").first()
+    if not attempt and len(clean_id) >= 8:
+        attempt = db.query(PaymentAttempt).filter(PaymentAttempt.provider_payment_id.like(f"%{clean_id}%")).first()
     if attempt:
         order = db.query(Order).filter(Order.id == attempt.order_id).first()
         return attempt, order
@@ -372,6 +409,19 @@ async def get_payment_status(
 
     res = attempt.to_dict()
     res["order"] = order.to_dict() if order else None
+    if attempt.status == "expired":
+        res["session_expired"] = True
+        res["can_retry"] = True
+        res["checkout_url"] = None
+
+    if order:
+        o_meta = order.metadata_dict or {}
+        res["customer"] = {
+            "name": o_meta.get("customer_name") or "Valued Customer",
+            "email": o_meta.get("customer_email") or o_meta.get("email"),
+            "phone": o_meta.get("customer_phone") or o_meta.get("phone"),
+        }
+
     if attempt.status == "succeeded" and order:
         meta = order.metadata_dict
         receipt_rec = meta.get("receipt_records", {}).get(attempt.id) or meta.get("latest_receipt")
