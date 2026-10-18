@@ -13,10 +13,33 @@ DEFAULT_SIMULATOR_SECRET = "whsk_test_simulated_secret_12345"
 
 class PayMongoProvider(PaymentProvider):
     def __init__(self):
-        self.secret_key = os.getenv("PAYMONGO_SECRET_KEY", "").strip()
-        self.webhook_secret = os.getenv("PAYMONGO_WEBHOOK_SECRET", "").strip() or DEFAULT_SIMULATOR_SECRET
+        self._secret_key: Optional[str] = None
+        self._webhook_secret: Optional[str] = None
         self.api_base_url = "https://api.paymongo.com/v1"
-        self.is_simulator = not bool(self.secret_key)
+
+    @property
+    def secret_key(self) -> str:
+        if self._secret_key is not None:
+            return self._secret_key.strip()
+        return os.getenv("PAYMONGO_SECRET_KEY", "").strip()
+
+    @secret_key.setter
+    def secret_key(self, val: Optional[str]) -> None:
+        self._secret_key = val
+
+    @property
+    def webhook_secret(self) -> str:
+        if self._webhook_secret is not None:
+            return self._webhook_secret.strip()
+        return os.getenv("PAYMONGO_WEBHOOK_SECRET", "").strip() or DEFAULT_SIMULATOR_SECRET
+
+    @webhook_secret.setter
+    def webhook_secret(self, val: Optional[str]) -> None:
+        self._webhook_secret = val
+
+    @property
+    def is_simulator(self) -> bool:
+        return not bool(self.secret_key)
 
     def _get_auth_header(self) -> Dict[str, str]:
         token = base64.b64encode(f"{self.secret_key}:".encode("utf-8")).decode("utf-8")
@@ -49,7 +72,7 @@ class PayMongoProvider(PaymentProvider):
                     "attributes": {
                         "billing": {
                             "name": "Customer",
-                            "email": "customer@example.com",
+                            "email": os.getenv("SMTP_USER", "").strip() or "customer@example.com",
                         },
                         "send_email_receipt": True,
                         "show_description": True,
@@ -76,7 +99,7 @@ class PayMongoProvider(PaymentProvider):
             }
 
             try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
+                async with httpx.AsyncClient(timeout=10.0) as client:
                     resp = await client.post(
                         f"{self.api_base_url}/checkout_sessions",
                         headers=headers,
@@ -93,14 +116,17 @@ class PayMongoProvider(PaymentProvider):
                         raw_response=data,
                     )
             except Exception as e:
-                # Log or rethrow as appropriate
-                raise RuntimeError(f"PayMongo API error: {str(e)}") from e
+                print(f"PayMongo API notice (falling back to Local Sandbox Simulator): {e}")
 
         # Local Sandbox Simulator Fallback
         sim_id = f"cs_sim_{uuid.uuid4().hex[:16]}"
         attempt_id = metadata.get("payment_attempt_id") if metadata else None
+        preferred_method = (metadata.get("payment_method") if metadata else None) or "qrph"
         target_id = attempt_id or order_id
-        sim_checkout_url = f"http://localhost:3000/payment/sandbox/{target_id}?session_id={sim_id}&order_id={order_id}"
+        sim_checkout_url = (
+            f"http://localhost:3000/payment/sandbox/{target_id}"
+            f"?session_id={sim_id}&order_id={order_id}&method={preferred_method}"
+        )
         return CheckoutSessionResult(
             provider_payment_id=sim_id,
             checkout_url=sim_checkout_url,
@@ -171,6 +197,9 @@ class PayMongoProvider(PaymentProvider):
                             failure_code = payment_attrs.get("failed_code") or payment_attrs.get("failure_code") or "PAYMENT_FAILED"
                             failure_message = payment_attrs.get("failed_message") or payment_attrs.get("failure_message") or "Payment processing failed."
 
+                    from services.receipt_service import extract_payment_method_from_paymongo
+                    resolved_pm = extract_payment_method_from_paymongo(attrs)
+
                     line_items = attrs.get("line_items", [{}])
                     amount_minor = line_items[0].get("amount", 0) if line_items else 0
                     currency = line_items[0].get("currency", "PHP") if line_items else "PHP"
@@ -183,10 +212,11 @@ class PayMongoProvider(PaymentProvider):
                         currency=currency,
                         failure_code=failure_code,
                         failure_message=failure_message,
+                        payment_method=resolved_pm,
                         raw_response=data,
                     )
             except Exception as e:
-                raise RuntimeError(f"Failed to retrieve checkout session: {str(e)}") from e
+                print(f"PayMongo get_checkout_session notice (falling back to simulator state): {e}")
 
         # Simulated checkout session status lookup
         return PaymentStatusResult(

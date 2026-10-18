@@ -9,6 +9,14 @@ from sqlalchemy.exc import IntegrityError
 from models import Order, PaymentAttempt, WebhookEvent, FulfillmentOutbox, utc_now
 from providers.base import PaymentProvider
 from providers.paymongo import PayMongoProvider
+from services.receipt_service import (
+    get_payment_method_info,
+    extract_payment_method_from_paymongo,
+    build_receipt_and_acknowledgement,
+    persist_receipt_on_order,
+    generate_receipt_pdf_bytes,
+    resolve_recipient_email,
+)
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
@@ -144,12 +152,16 @@ class PaymentOrchestrator:
         if not cancel_url:
             cancel_url = f"http://localhost:3000/checkout?order_id={order.id}&status=cancelled"
 
+        # Normalize payment method
+        pm_info = get_payment_method_info(payment_method)
+        normalized_pm = pm_info["code"]
+
         # Create record in 'pending' state
         attempt = PaymentAttempt(
             id=str(uuid.uuid4()),
             order_id=order.id,
             provider="paymongo",
-            payment_method=payment_method,
+            payment_method=normalized_pm,
             amount_minor=order.amount_minor,
             currency=order.currency,
             status="pending",
@@ -170,7 +182,7 @@ class PaymentOrchestrator:
                 success_url=success_url,
                 cancel_url=cancel_url,
                 payment_methods=["qrph", "gcash", "paymaya", "dob", "card"],
-                metadata={"payment_attempt_id": attempt.id},
+                metadata={"payment_attempt_id": attempt.id, "payment_method": normalized_pm},
             )
 
             attempt.provider_payment_id = session_result.provider_payment_id
@@ -266,6 +278,11 @@ class PaymentOrchestrator:
             webhook_record.processing_status = "ignored"
             db.commit()
             return {"received": True, "status": "unmatched_attempt", "event_id": provider_event_id}
+
+        # Extract & normalize payment method from PayMongo webhook
+        extracted_pm = extract_payment_method_from_paymongo(resource_attrs, fallback=attempt.payment_method)
+        if extracted_pm:
+            attempt.payment_method = extracted_pm
 
         # 5. Apply State Machine Rules
         order = db.query(Order).filter(Order.id == attempt.order_id).first()
@@ -398,41 +415,104 @@ class PaymentOrchestrator:
                     except Exception as log_err:
                         print(f"Failed to update audit log in configuration.json: {log_err}")
 
-                # Dispatch email receipt via EmailService if configured
+                # Generate authoritative Official Receipt & Acknowledgement Report and dispatch via SMTP
                 try:
                     from services.email_service import EmailService
-                    email_svc = EmailService()
-                    if email_svc.is_configured():
-                        meta = order.metadata_dict
-                        customer_email = (
-                            meta.get("customer_email")
-                            or meta.get("email")
-                            or meta.get("billing_email")
-                            or os.getenv("DEFAULT_RECEIPT_EMAIL")
-                        )
-                        if customer_email:
-                            attempt = db.query(PaymentAttempt).filter(PaymentAttempt.id == item.payment_attempt_id).first()
-                            paid_at_str = "Just now"
-                            if attempt and attempt.paid_at:
-                                paid_at_str = attempt.paid_at.strftime("%Y-%m-%d %H:%M:%S UTC")
-                            elif order.updated_at:
-                                paid_at_str = order.updated_at.strftime("%Y-%m-%d %H:%M:%S UTC")
 
-                            receipt_html = email_svc.render_payment_receipt_html(
-                                order_number=order.order_number,
-                                title=order.title,
-                                amount_php=f"{order.amount_minor / 100:,.2f}",
-                                payment_method=attempt.payment_method if (attempt and attempt.payment_method) else "PayMongo Hosted Checkout",
-                                paid_at=paid_at_str,
-                                reference_id=item.payment_attempt_id,
-                            )
-                            email_svc.send_email(
-                                to_email=customer_email,
-                                subject=f"[Receipt] Payment Confirmation for {order.order_number}",
-                                html_body=receipt_html,
-                            )
-                except Exception as email_err:
-                    print(f"Payment receipt email dispatch notice: {email_err}")
+                    attempt = db.query(PaymentAttempt).filter(PaymentAttempt.id == item.payment_attempt_id).first()
+                    if not attempt:
+                        attempt = (
+                            db.query(PaymentAttempt)
+                            .filter(PaymentAttempt.order_id == order.id)
+                            .order_by(PaymentAttempt.created_at.desc())
+                            .first()
+                        )
+
+                    if attempt:
+                        meta = order.metadata_dict if hasattr(order, "metadata_dict") else {}
+                        customer_email = resolve_recipient_email(meta)
+
+                        receipt_data = build_receipt_and_acknowledgement(
+                            order=order,
+                            attempt=attempt,
+                            outbox_status="completed",
+                        )
+
+                        smtp_delivery_result = {
+                            "status": "skipped",
+                            "recipient": customer_email,
+                            "sent_at": None,
+                            "message": "SMTP not configured or recipient email not found",
+                        }
+
+                        email_svc = EmailService()
+                        if email_svc.is_configured() and customer_email:
+                            try:
+                                pdf_bytes = generate_receipt_pdf_bytes(receipt_data)
+                                pdf_filename = receipt_data["pdf_filename"]
+                                paid_at_str = receipt_data.get("paid_at_manila") or "Just now"
+
+                                receipt_html = email_svc.render_payment_receipt_html(
+                                    order_number=order.order_number,
+                                    title=order.title,
+                                    amount_php=receipt_data["amount_php"],
+                                    payment_method=receipt_data["payment_method_label"],
+                                    paid_at=paid_at_str,
+                                    reference_id=item.payment_attempt_id,
+                                    official_receipt_number=receipt_data["official_receipt_number"],
+                                    acknowledgement_number=receipt_data["acknowledgement_number"],
+                                    provider_payment_id=receipt_data["provider_payment_id"],
+                                    vatable_sales_php=receipt_data["vatable_sales_php"],
+                                    vat_amount_php=receipt_data["vat_amount_php"],
+                                    verification_hash=receipt_data["verification_hash"],
+                                    pdf_filename=pdf_filename,
+                                    payment_rail=receipt_data["payment_rail"],
+                                )
+
+                                attachments = [
+                                    {
+                                        "filename": pdf_filename,
+                                        "content": pdf_bytes,
+                                        "subtype": "pdf",
+                                    }
+                                ]
+
+                                dispatch_res = email_svc.send_email(
+                                    to_email=customer_email,
+                                    subject=f"[Official Receipt & Acknowledgement] Payment Confirmed - {order.order_number}",
+                                    html_body=receipt_html,
+                                    attachments=attachments,
+                                )
+
+                                if dispatch_res.get("success"):
+                                    smtp_delivery_result = {
+                                        "status": "sent",
+                                        "recipient": customer_email,
+                                        "sent_at": utc_now().isoformat(),
+                                        "message": dispatch_res.get("message", "Dispatched with PDF attachment"),
+                                        "latency_ms": dispatch_res.get("latency_ms", 0),
+                                    }
+                                else:
+                                    smtp_delivery_result = {
+                                        "status": "failed",
+                                        "recipient": customer_email,
+                                        "sent_at": None,
+                                        "message": dispatch_res.get("message", "Dispatch failed"),
+                                        "details": dispatch_res.get("details"),
+                                    }
+                            except Exception as email_err:
+                                smtp_delivery_result = {
+                                    "status": "failed",
+                                    "recipient": customer_email,
+                                    "sent_at": None,
+                                    "message": str(email_err),
+                                }
+                                print(f"Payment receipt email dispatch notice: {email_err}")
+
+                        receipt_data["smtp_delivery"] = smtp_delivery_result
+                        persist_receipt_on_order(db, order, attempt, receipt_data)
+                except Exception as outbox_receipt_err:
+                    print(f"Outbox receipt generation notice: {outbox_receipt_err}")
 
                 item.status = "completed"
                 item.processed_at = utc_now()
@@ -469,6 +549,8 @@ class PaymentOrchestrator:
         changed = False
 
         if provider_status.status == "succeeded":
+            if provider_status.payment_method:
+                attempt.payment_method = provider_status.payment_method
             order = db.query(Order).filter(Order.id == attempt.order_id).first()
             if order and order.status == "paid" and attempt.status != "succeeded":
                 attempt.status = "duplicate_paid_review"

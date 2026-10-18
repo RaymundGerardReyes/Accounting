@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Response, Depends, HTTPException, Header, status
+from fastapi import FastAPI, Request, Response, Depends, HTTPException, Header, status, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -171,6 +171,10 @@ class SimulateWebhookRequest(BaseModel):
     payment_attempt_id: str
     event_type: str = Field("checkout_session.payment.paid", description="Webhook event type")
     duplicate: bool = Field(False, description="Whether to simulate duplicate event ID")
+    payment_method: Optional[str] = Field(None, description="Simulated payment method channel (e.g. qrph, card_visa, gcash, maya, dob_bpi)")
+
+class ResendReceiptEmailRequest(BaseModel):
+    to_email: Optional[str] = Field(None, description="Recipient email address for receipt dispatch")
 
 @app.get("/api/v1/orders", summary="List Orders & Invoices")
 def list_orders(status: Optional[str] = None, db: Session = Depends(get_db)):
@@ -247,15 +251,304 @@ async def create_payment_attempt(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Orchestration failure: {str(e)}")
 
+def _resolve_payment_attempt_and_order(db: Session, identifier: str) -> tuple[Optional[PaymentAttempt], Optional[Order]]:
+    """
+    Authoritatively resolves a payment attempt and its associated order by any valid reference:
+    - Exact Payment Attempt ID (UUID)
+    - PayMongo Checkout Session / Payment ID (cs_...)
+    - Order ID (UUID)
+    - Order Number (ORD-...)
+    """
+    if not identifier:
+        return None, None
+    clean_id = str(identifier).strip()
+
+    # 1. Match attempt by exact ID
+    attempt = db.query(PaymentAttempt).filter(PaymentAttempt.id == clean_id).first()
+    if attempt:
+        order = db.query(Order).filter(Order.id == attempt.order_id).first()
+        return attempt, order
+
+    # 2. Match attempt by provider_payment_id (e.g. cs_633306eb5b337f661a7ab7ea)
+    attempt = db.query(PaymentAttempt).filter(PaymentAttempt.provider_payment_id == clean_id).first()
+    if attempt:
+        order = db.query(Order).filter(Order.id == attempt.order_id).first()
+        return attempt, order
+
+    # 3. Match attempt by order_id
+    attempt = (
+        db.query(PaymentAttempt)
+        .filter(PaymentAttempt.order_id == clean_id)
+        .order_by(PaymentAttempt.created_at.desc())
+        .first()
+    )
+    if attempt:
+        order = db.query(Order).filter(Order.id == attempt.order_id).first()
+        return attempt, order
+
+    # 4. Match attempt by order_number (e.g. ORD-202610-0427)
+    order = db.query(Order).filter(Order.order_number == clean_id).first()
+    if order:
+        attempt = (
+            db.query(PaymentAttempt)
+            .filter(PaymentAttempt.order_id == order.id)
+            .order_by(PaymentAttempt.created_at.desc())
+            .first()
+        )
+        return attempt, order
+
+    # 5. Check if identifier is Order ID directly
+    order = db.query(Order).filter(Order.id == clean_id).first()
+    if order:
+        attempt = (
+            db.query(PaymentAttempt)
+            .filter(PaymentAttempt.order_id == order.id)
+            .order_by(PaymentAttempt.created_at.desc())
+            .first()
+        )
+        return attempt, order
+
+    return None, None
+
 @app.get("/api/v1/payments/{payment_id}", summary="Poll Payment Status")
 def get_payment_status(payment_id: str, db: Session = Depends(get_db)):
-    attempt = db.query(PaymentAttempt).filter(PaymentAttempt.id == payment_id).first()
-    if not attempt:
+    attempt, order = _resolve_payment_attempt_and_order(db, payment_id)
+    if not attempt and not order:
         raise HTTPException(status_code=404, detail="Payment attempt not found.")
-    order = db.query(Order).filter(Order.id == attempt.order_id).first()
+
+    if not attempt and order:
+        res = {
+            "id": f"att_ord_{order.id[:8]}",
+            "order_id": order.id,
+            "provider": "paymongo",
+            "payment_method": "hosted_checkout",
+            "status": "succeeded" if order.status == "paid" else "pending",
+            "amount_minor": order.amount_minor,
+            "currency": order.currency,
+            "order": order.to_dict(),
+        }
+        if order.status == "paid":
+            from services.receipt_service import build_receipt_and_acknowledgement, persist_receipt_on_order
+            synth_att = PaymentAttempt(
+                id=res["id"],
+                order_id=order.id,
+                payment_method="hosted_checkout",
+                status="succeeded",
+                amount_minor=order.amount_minor,
+                currency=order.currency,
+            )
+            receipt_rec = build_receipt_and_acknowledgement(order, synth_att)
+            persist_receipt_on_order(db, order, synth_att, receipt_rec)
+            res["receipt"] = receipt_rec
+        return res
+
     res = attempt.to_dict()
     res["order"] = order.to_dict() if order else None
+    if attempt.status == "succeeded" and order:
+        meta = order.metadata_dict
+        receipt_rec = meta.get("receipt_records", {}).get(attempt.id) or meta.get("latest_receipt")
+        if not receipt_rec:
+            from services.receipt_service import build_receipt_and_acknowledgement, persist_receipt_on_order
+            receipt_rec = build_receipt_and_acknowledgement(order, attempt)
+            persist_receipt_on_order(db, order, attempt, receipt_rec)
+        res["receipt"] = receipt_rec
     return res
+
+@app.get("/api/v1/payments/{payment_id}/receipt", summary="Get Official Receipt & Acknowledgement Data")
+def get_payment_receipt(payment_id: str, db: Session = Depends(get_db)):
+    attempt, order = _resolve_payment_attempt_and_order(db, payment_id)
+    if not attempt and not order:
+        raise HTTPException(status_code=404, detail="Payment attempt not found.")
+    if not order and attempt:
+        order = db.query(Order).filter(Order.id == attempt.order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Associated order not found.")
+    if (attempt and attempt.status != "succeeded") and order.status != "paid":
+        raise HTTPException(
+            status_code=400,
+            detail="Official Receipt & Acknowledgement Report is only issued for succeeded payments.",
+        )
+
+    if not attempt:
+        attempt = PaymentAttempt(
+            id=f"att_ord_{order.id[:8]}",
+            order_id=order.id,
+            payment_method="hosted_checkout",
+            status="succeeded",
+            amount_minor=order.amount_minor,
+            currency=order.currency,
+        )
+
+    from services.receipt_service import build_receipt_and_acknowledgement, persist_receipt_on_order
+    meta = order.metadata_dict
+    receipt_data = meta.get("receipt_records", {}).get(attempt.id) or meta.get("latest_receipt")
+    if not receipt_data:
+        receipt_data = build_receipt_and_acknowledgement(order, attempt)
+        persist_receipt_on_order(db, order, attempt, receipt_data)
+    return receipt_data
+
+@app.get("/api/v1/payments/{payment_id}/receipt/pdf", summary="Download or Stream Official Receipt PDF")
+def get_payment_receipt_pdf(payment_id: str, download: bool = False, db: Session = Depends(get_db)):
+    attempt, order = _resolve_payment_attempt_and_order(db, payment_id)
+    if not attempt and not order:
+        raise HTTPException(status_code=404, detail="Payment attempt not found.")
+    if not order and attempt:
+        order = db.query(Order).filter(Order.id == attempt.order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Associated order not found.")
+    if (attempt and attempt.status != "succeeded") and order.status != "paid":
+        raise HTTPException(
+            status_code=400,
+            detail="Official Receipt & Acknowledgement Report is only available for succeeded payments.",
+        )
+
+    if not attempt:
+        attempt = PaymentAttempt(
+            id=f"att_ord_{order.id[:8]}",
+            order_id=order.id,
+            payment_method="hosted_checkout",
+            status="succeeded",
+            amount_minor=order.amount_minor,
+            currency=order.currency,
+        )
+
+    from services.receipt_service import build_receipt_and_acknowledgement, generate_receipt_pdf_bytes, persist_receipt_on_order
+    meta = order.metadata_dict
+    receipt_data = meta.get("receipt_records", {}).get(attempt.id) or meta.get("latest_receipt")
+    if not receipt_data:
+        receipt_data = build_receipt_and_acknowledgement(order, attempt)
+        persist_receipt_on_order(db, order, attempt, receipt_data)
+
+    pdf_bytes = generate_receipt_pdf_bytes(receipt_data)
+    filename = receipt_data.get("pdf_filename") or f"Acme_OR_ACK_{order.order_number}.pdf"
+    disposition_type = "attachment" if download else "inline"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'{disposition_type}; filename="{filename}"',
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
+
+@app.post("/api/v1/payments/{payment_id}/receipt/email", summary="Resend Official Receipt & Acknowledgement via SMTP")
+def resend_payment_receipt_email(
+    payment_id: str,
+    req: Optional[ResendReceiptEmailRequest] = Body(None),
+    db: Session = Depends(get_db),
+):
+    attempt, order = _resolve_payment_attempt_and_order(db, payment_id)
+    if not attempt and not order:
+        raise HTTPException(status_code=404, detail="Payment attempt not found.")
+    if not order and attempt:
+        order = db.query(Order).filter(Order.id == attempt.order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Associated order not found.")
+    if (attempt and attempt.status != "succeeded") and order.status != "paid":
+        raise HTTPException(status_code=400, detail="Cannot dispatch receipt for non-succeeded payment attempt.")
+
+    if not attempt:
+        attempt = PaymentAttempt(
+            id=f"att_ord_{order.id[:8]}",
+            order_id=order.id,
+            payment_method="hosted_checkout",
+            status="succeeded",
+            amount_minor=order.amount_minor,
+            currency=order.currency,
+        )
+
+    from services.email_service import EmailService
+    from services.receipt_service import (
+        build_receipt_and_acknowledgement,
+        generate_receipt_pdf_bytes,
+        persist_receipt_on_order,
+        resolve_recipient_email,
+    )
+    from models import utc_now
+
+    email_svc = EmailService()
+    if not email_svc.is_configured():
+        raise HTTPException(status_code=503, detail="SMTP notification service is not configured with valid credentials.")
+
+    meta = order.metadata_dict
+    recipient = (req.to_email.strip() if req and req.to_email and req.to_email.strip() else None) or resolve_recipient_email(meta)
+    if not recipient:
+        raise HTTPException(status_code=400, detail="No valid recipient email address could be resolved.")
+
+    receipt_data = meta.get("receipt_records", {}).get(attempt.id) or meta.get("latest_receipt")
+    if not receipt_data:
+        receipt_data = build_receipt_and_acknowledgement(order, attempt)
+
+    pdf_bytes = generate_receipt_pdf_bytes(receipt_data)
+    pdf_filename = receipt_data["pdf_filename"]
+
+    receipt_html = email_svc.render_payment_receipt_html(
+        order_number=order.order_number,
+        title=order.title,
+        amount_php=receipt_data["amount_php"],
+        payment_method=receipt_data["payment_method_label"],
+        paid_at=receipt_data.get("paid_at_manila") or "Just now",
+        reference_id=attempt.id,
+        official_receipt_number=receipt_data["official_receipt_number"],
+        acknowledgement_number=receipt_data["acknowledgement_number"],
+        provider_payment_id=receipt_data["provider_payment_id"],
+        vatable_sales_php=receipt_data["vatable_sales_php"],
+        vat_amount_php=receipt_data["vat_amount_php"],
+        verification_hash=receipt_data["verification_hash"],
+        pdf_filename=pdf_filename,
+        payment_rail=receipt_data["payment_rail"],
+    )
+
+    attachments = [{"filename": pdf_filename, "content": pdf_bytes, "subtype": "pdf"}]
+    dispatch_res = email_svc.send_email(
+        to_email=recipient,
+        subject=f"[Official Receipt & Acknowledgement] Payment Confirmed - {order.order_number}",
+        html_body=receipt_html,
+        attachments=attachments,
+    )
+
+    smtp_info = {
+        "status": "sent" if dispatch_res.get("success") else "failed",
+        "recipient": recipient,
+        "sent_at": utc_now().isoformat() if dispatch_res.get("success") else None,
+        "message": dispatch_res.get("message", "Dispatched"),
+        "latency_ms": dispatch_res.get("latency_ms", 0),
+        "details": dispatch_res.get("details"),
+    }
+    receipt_data["smtp_delivery"] = smtp_info
+    persist_receipt_on_order(db, order, attempt, receipt_data)
+
+    if not dispatch_res.get("success"):
+        raise HTTPException(status_code=502, detail=f"Failed to dispatch email: {dispatch_res.get('message')}")
+
+    return {
+        "success": True,
+        "message": f"Official Receipt & Acknowledgement PDF successfully dispatched to {recipient}",
+        "recipient": recipient,
+        "smtp_delivery": smtp_info,
+        "receipt": receipt_data,
+    }
+
+@app.get("/api/v1/orders/{order_id}/receipt", summary="Get Order Official Receipt Data")
+def get_order_receipt(order_id: str, db: Session = Depends(get_db)):
+    attempt, order = _resolve_payment_attempt_and_order(db, order_id)
+    if not order:
+        order = db.query(Order).filter((Order.id == order_id) | (Order.order_number == order_id)).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found.")
+    target_id = attempt.id if attempt else order.id
+    return get_payment_receipt(target_id, db)
+
+@app.get("/api/v1/orders/{order_id}/receipt/pdf", summary="Download Order Official Receipt PDF")
+def get_order_receipt_pdf(order_id: str, download: bool = False, db: Session = Depends(get_db)):
+    attempt, order = _resolve_payment_attempt_and_order(db, order_id)
+    if not order:
+        order = db.query(Order).filter((Order.id == order_id) | (Order.order_number == order_id)).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found.")
+    target_id = attempt.id if attempt else order.id
+    return get_payment_receipt_pdf(target_id, download=download, db=db)
 
 @app.post("/api/v1/webhooks/paymongo", summary="PayMongo Webhook Receiver")
 async def paymongo_webhook(
@@ -346,6 +639,15 @@ async def simulate_webhook(req: SimulateWebhookRequest, db: Session = Depends(ge
     order = db.query(Order).filter(Order.id == attempt.order_id).first()
     event_id = "evt_sim_fixed_duplicate" if req.duplicate else f"evt_sim_{uuid.uuid4().hex[:12]}"
 
+    pm_code = req.payment_method or attempt.payment_method or "hosted_checkout"
+    from services.receipt_service import get_payment_method_info
+    pm_info = get_payment_method_info(pm_code)
+    resolved_pm_code = pm_info["code"]
+
+    if req.payment_method:
+        attempt.payment_method = resolved_pm_code
+        db.commit()
+
     payload_dict = {
         "data": {
             "id": event_id,
@@ -358,6 +660,7 @@ async def simulate_webhook(req: SimulateWebhookRequest, db: Session = Depends(ge
                     "type": "checkout_session",
                     "attributes": {
                         "status": "paid" if "paid" in req.event_type else ("expired" if "expired" in req.event_type else ("cancelled" if "cancel" in req.event_type else "failed")),
+                        "payment_method_used": resolved_pm_code,
                         "line_items": [
                             {
                                 "amount": attempt.amount_minor,
@@ -368,6 +671,7 @@ async def simulate_webhook(req: SimulateWebhookRequest, db: Session = Depends(ge
                         "metadata": {
                             "order_id": attempt.order_id,
                             "payment_attempt_id": attempt.id,
+                            "payment_method": resolved_pm_code,
                         },
                         "failed_code": (
                             "CARD_DECLINED" if "failed" in req.event_type
