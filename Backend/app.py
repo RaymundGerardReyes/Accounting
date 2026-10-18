@@ -310,11 +310,39 @@ def _resolve_payment_attempt_and_order(db: Session, identifier: str) -> tuple[Op
 
     return None, None
 
-@app.get("/api/v1/payments/{payment_id}", summary="Poll Payment Status")
-def get_payment_status(payment_id: str, db: Session = Depends(get_db)):
+@app.get("/api/v1/payments/{payment_id}", summary="Poll & Auto-Reconcile Payment Status")
+async def get_payment_status(
+    payment_id: str,
+    auto_reconcile: bool = True,
+    db: Session = Depends(get_db),
+):
     attempt, order = _resolve_payment_attempt_and_order(db, payment_id)
     if not attempt and not order:
         raise HTTPException(status_code=404, detail="Payment attempt not found.")
+
+    # Proactive real-time gateway synchronization:
+    # If attempt is in a non-terminal state and has a provider session ID, automatically reconcile with PayMongo
+    if (
+        auto_reconcile
+        and attempt
+        and attempt.provider_payment_id
+        and attempt.status not in ("succeeded", "failed", "cancelled", "expired")
+    ):
+        try:
+            await orchestrator.reconcile_payment_attempt(db, attempt.id)
+            db.refresh(attempt)
+            if order:
+                db.refresh(order)
+        except Exception as sync_err:
+            print(f"Auto-sync reconciliation check note: {sync_err}")
+
+    # Synchronize attempt if order was already confirmed paid
+    if order and order.status == "paid" and attempt and attempt.status not in ("succeeded", "duplicate_paid_review"):
+        attempt.status = "succeeded"
+        if not attempt.paid_at:
+            attempt.paid_at = order.updated_at or utc_now()
+        db.commit()
+        db.refresh(attempt)
 
     if not attempt and order:
         res = {

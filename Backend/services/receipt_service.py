@@ -32,11 +32,11 @@ PAYMENT_METHOD_CATALOG: Dict[str, Dict[str, str]] = {
         "rail": "InstaPay / PESONet National QR (QR Ph)",
     },
     "card": {
-        "code": "card_visa",
-        "label": "Card (VISA)",
-        "short_label": "Card (VISA)",
+        "code": "card",
+        "label": "Card (Debit / Credit)",
+        "short_label": "Card",
         "category": "Card",
-        "rail": "VISA / Mastercard 3D Secure Card Rail",
+        "rail": "Card Payment Rail (Visa / Mastercard / JCB)",
     },
     "card_visa": {
         "code": "card_visa",
@@ -110,10 +110,10 @@ PAYMENT_METHOD_CATALOG: Dict[str, Dict[str, str]] = {
     },
     "hosted_checkout": {
         "code": "hosted_checkout",
-        "label": "PayMongo Multi-Channel (QR Ph / Card VISA / GCash / Maya / BPI)",
-        "short_label": "QR Ph / Card VISA / GCash / Maya / BPI",
+        "label": "PayMongo Multi-Channel (QR Ph / Card / GCash / Maya / BPI)",
+        "short_label": "Multi-Channel Checkout",
         "category": "All Channels",
-        "rail": "PayMongo Hosted Checkout (QR Ph, VISA, GCash, Maya, BPI)",
+        "rail": "PayMongo Hosted Checkout (QR Ph, Card, GCash, Maya, BPI)",
     },
 }
 
@@ -121,7 +121,7 @@ PAYMENT_METHOD_CATALOG: Dict[str, Dict[str, str]] = {
 def get_payment_method_info(raw_method: Optional[str]) -> Dict[str, str]:
     """
     Resolves any raw payment method string into structured channel metadata.
-    Handles dynamic card suffixes like 'card_visa_4242'.
+    Handles dynamic card suffixes like 'card_visa_4242' and neutral card fallbacks.
     """
     if not raw_method:
         return PAYMENT_METHOD_CATALOG["hosted_checkout"]
@@ -132,19 +132,37 @@ def get_payment_method_info(raw_method: Optional[str]) -> Dict[str, str]:
 
     if cleaned.startswith("card"):
         parts = cleaned.split("_")
-        brand = "VISA"
+        brand = "Card"
         last4 = None
-        if len(parts) >= 2 and parts[1]:
+        if len(parts) == 2:
+            if parts[1].isdigit():
+                last4 = parts[1]
+                brand = "Card"
+            elif parts[1].lower() in ("visa", "mastercard", "jcb", "amex"):
+                brand = parts[1].upper()
+            else:
+                brand = parts[1].title()
+        elif len(parts) >= 3:
             brand = parts[1].upper()
-        if len(parts) >= 3 and parts[2].isdigit():
-            last4 = parts[2]
-        label = f"Card ({brand} •••• {last4})" if last4 else f"Card ({brand})"
+            if parts[2].isdigit():
+                last4 = parts[2]
+
+        if last4:
+            label = f"Card ({brand} •••• {last4})" if brand != "Card" else f"Card (•••• {last4})"
+            short_label = f"{brand} •••• {last4}"
+        elif brand != "Card":
+            label = f"Card ({brand})"
+            short_label = brand
+        else:
+            label = "Card (Debit / Credit)"
+            short_label = "Card"
+
         return {
             "code": cleaned,
             "label": label,
-            "short_label": label,
+            "short_label": short_label,
             "category": "Card",
-            "rail": f"{brand} 3D Secure Card Rail",
+            "rail": f"{brand if brand != 'Card' else 'Debit / Credit'} 3D Secure Card Rail",
         }
 
     if "qr" in cleaned:
@@ -212,7 +230,7 @@ def extract_payment_method_from_paymongo(
     if isinstance(pm_used, str) and pm_used.strip():
         pm_clean = pm_used.strip().lower()
         if pm_clean == "card":
-            return "card_visa"
+            return "card"
         if pm_clean == "dob":
             return "dob_bpi"
         if pm_clean == "maya":
@@ -234,11 +252,15 @@ def _resolve_source_dict(source: Dict[str, Any]) -> Optional[str]:
     if not stype:
         return None
     if stype == "card":
-        brand = str(source.get("brand") or "visa").strip().lower()
+        brand = str(source.get("brand") or "").strip().lower()
         last4 = str(source.get("last4") or "").strip()
-        if last4 and last4.isdigit():
+        if brand and last4 and last4.isdigit():
             return f"card_{brand}_{last4}"
-        return f"card_{brand}"
+        if brand:
+            return f"card_{brand}"
+        if last4 and last4.isdigit():
+            return f"card_{last4}"
+        return "card"
     if stype in ("dob", "online_banking", "brankas"):
         bank = str(source.get("provider") or source.get("bank_code") or source.get("bank") or "bpi").strip().lower()
         if "ubp" in bank or "union" in bank:
@@ -327,8 +349,48 @@ def build_receipt_and_acknowledgement(
 
     amount_minor = int(getattr(attempt, "amount_minor", None) or getattr(order, "amount_minor", 0) or 0)
     amount_php_val = amount_minor / 100.0
-    vatable_minor = int(round(amount_minor / 1.12))
-    vat_minor = amount_minor - vatable_minor
+
+    # Tax classification & statutory tax calculation (BIR RMC No. 77-2024 compliance)
+    tax_class = str(
+        meta.get("tax_classification")
+        or meta.get("tax_type")
+        or ("vatable" if getattr(order, "category", "") == "product_order" else "vatable")
+    ).strip().lower()
+
+    non_vat_minor = 0
+    if tax_class in ("exempt", "vat_exempt"):
+        tax_classification = "vat_exempt"
+        tax_classification_label = "VAT-Exempt Sales"
+        tax_rate_label = "0% (Exempt)"
+        vatable_minor = 0
+        vat_minor = 0
+        vat_exempt_minor = amount_minor
+        zero_rated_minor = 0
+    elif tax_class in ("zero", "zero_rated"):
+        tax_classification = "zero_rated"
+        tax_classification_label = "Zero-Rated Sales (0% VAT)"
+        tax_rate_label = "0% (Zero-Rated)"
+        vatable_minor = 0
+        vat_minor = 0
+        vat_exempt_minor = 0
+        zero_rated_minor = amount_minor
+    elif tax_class in ("non_vat", "nonvat"):
+        tax_classification = "non_vat"
+        tax_classification_label = "Non-VAT Sales"
+        tax_rate_label = "Non-VAT"
+        vatable_minor = 0
+        vat_minor = 0
+        vat_exempt_minor = 0
+        zero_rated_minor = 0
+        non_vat_minor = amount_minor
+    else:
+        tax_classification = "vatable"
+        tax_classification_label = "VATable Sales (12% Inclusive)"
+        tax_rate_label = "12%"
+        vatable_minor = int(round(amount_minor / 1.12))
+        vat_minor = amount_minor - vatable_minor
+        vat_exempt_minor = 0
+        zero_rated_minor = 0
 
     quantity = int(meta.get("quantity", 1) or 1)
     unit_price_val = amount_php_val / max(1, quantity)
@@ -336,40 +398,108 @@ def build_receipt_and_acknowledgement(
     hash_input = f"{or_number}|{ack_number}|{order_num_str}|{att_id}|{amount_minor}|{utc_dt.isoformat()}"
     verification_hash = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
 
-    # Determine active state across the 5 PayMongo checkout channels
-    is_multi = pm_code == "hosted_checkout"
+    # Determine card badge dynamically
+    card_badge = "Card"
+    if "mastercard" in pm_code:
+        card_badge = "Mastercard"
+    elif "visa" in pm_code:
+        card_badge = "VISA"
+    elif "jcb" in pm_code:
+        card_badge = "JCB"
+
+    card_ch_code = "card_visa" if "visa" in pm_code else ("card_mastercard" if "mastercard" in pm_code else "card")
+    is_channel_confirmed = pm_code != "hosted_checkout"
+
+    # Only mark channel as selected if provider data actually confirmed it (do not select all for hosted checkout)
     supported_channels = [
         {
             "code": "qrph",
             "name": "Scan GQRPh code to pay",
             "badge": "QR Ph",
-            "selected": pm_code == "qrph" or is_multi,
+            "selected": pm_code == "qrph",
+            "settled": pm_code == "qrph",
         },
         {
-            "code": "card_visa",
-            "name": "Card (VISA / Mastercard)",
-            "badge": "VISA",
-            "selected": pm_code.startswith("card") or is_multi,
+            "code": card_ch_code,
+            "name": "Debit / Credit Card (Visa / Mastercard)",
+            "badge": card_badge,
+            "selected": pm_code.startswith("card"),
+            "settled": pm_code.startswith("card"),
         },
         {
             "code": "gcash",
             "name": "E-Wallet (GCash)",
             "badge": "GCash",
-            "selected": pm_code in ("gcash", "gcash_maya") or is_multi,
+            "selected": pm_code in ("gcash", "gcash_maya"),
+            "settled": pm_code in ("gcash", "gcash_maya"),
         },
         {
             "code": "paymaya",
             "name": "E-Wallet (Maya)",
             "badge": "Maya",
-            "selected": pm_code in ("paymaya", "maya", "gcash_maya") or is_multi,
+            "selected": pm_code in ("paymaya", "maya", "gcash_maya"),
+            "settled": pm_code in ("paymaya", "maya", "gcash_maya"),
         },
         {
             "code": "dob_bpi",
             "name": "Online Banking (BPI)",
             "badge": "BPI",
-            "selected": pm_code.startswith("dob") or pm_code == "bpi" or is_multi,
+            "selected": pm_code.startswith("dob") or pm_code == "bpi",
+            "settled": pm_code.startswith("dob") or pm_code == "bpi",
         },
     ]
+
+    # Resolve provider payment ID without synthesizing fake cs_ IDs
+    real_provider_payment_id = getattr(attempt, "provider_payment_id", None)
+    provider_pm_id = real_provider_payment_id or f"att_{str(att_id)[:16]}"
+
+    # Derive real outbox status from persisted records
+    actual_outbox_status = outbox_status
+    att_outbox = getattr(attempt, "fulfillment_records", None)
+    if att_outbox and len(att_outbox) > 0:
+        actual_outbox_status = att_outbox[0].status
+    elif getattr(order, "fulfillment_records", None) and len(order.fulfillment_records) > 0:
+        actual_outbox_status = order.fulfillment_records[0].status
+
+    # Derive ledger status from persisted accounting records (do not claim GL posted without proof)
+    ledger_posted = bool(
+        meta.get("ledger_posted")
+        or meta.get("gl_posted")
+        or meta.get("journal_entry_id")
+        or meta.get("posted_to_gl")
+    )
+    if ledger_posted:
+        ledger_status = "POSTED TO ACME GENERAL LEDGER"
+        ack_status = "VERIFIED & POSTED TO ACME GENERAL LEDGER"
+    elif getattr(order, "status", None) == "paid" or getattr(attempt, "status", None) == "succeeded":
+        ledger_status = "PENDING LEDGER POSTING"
+        ack_status = "VERIFIED & PENDING GENERAL LEDGER POSTING"
+    else:
+        ledger_status = "UNSETTLED"
+        ack_status = "AWAITING SETTLEMENT"
+
+    payment_status = (
+        "PAYMENT CONFIRMED"
+        if (getattr(order, "status", None) == "paid" or getattr(attempt, "status", None) == "succeeded")
+        else "PAYMENT PENDING"
+    )
+    receipt_status = "RECEIPT GENERATED"
+
+    # Line items
+    raw_line_items = meta.get("line_items")
+    if isinstance(raw_line_items, list) and len(raw_line_items) > 0:
+        line_items = raw_line_items
+    else:
+        line_items = [
+            {
+                "reference_code": getattr(order, "reference_code", "PROD-001"),
+                "title": getattr(order, "title", "Settlement Item"),
+                "quantity": quantity,
+                "unit_price_php": f"{unit_price_val:,.2f}",
+                "amount_php": f"{amount_php_val:,.2f}",
+                "tax_classification": tax_classification,
+            }
+        ]
 
     resolved_smtp = smtp_delivery or existing.get("smtp_delivery") or {
         "status": "pending",
@@ -384,6 +514,7 @@ def build_receipt_and_acknowledgement(
         "official_receipt_number": or_number,
         "acknowledgement_number": ack_number,
         "document_title": "Official Receipt & Treasury Acknowledgement Report",
+        "document_type": "Payment Acknowledgement Receipt",
         "issuer": {
             "company_name": "Acme Manufacturing Inc.",
             "department": "Corporate Accounting & Treasury Operations",
@@ -400,32 +531,50 @@ def build_receipt_and_acknowledgement(
         "unit_price_php": f"{unit_price_val:,.2f}",
         "payment_attempt_id": attempt.id,
         "provider": "PayMongo Philippines",
-        "provider_payment_id": attempt.provider_payment_id or f"cs_{attempt.id[:16]}",
+        "provider_payment_id": provider_pm_id,
         "payment_method_code": pm_code,
         "payment_method_label": pm_info["label"],
         "payment_method_short": pm_info["short_label"],
         "payment_method_category": pm_info["category"],
         "payment_rail": pm_info["rail"],
+        "payment_method_confirmed": is_channel_confirmed,
         "supported_channels": supported_channels,
         "amount_minor": amount_minor,
         "currency": attempt.currency or "PHP",
         "amount_php": f"{amount_php_val:,.2f}",
+        "tax_classification": tax_classification,
+        "tax_classification_label": tax_classification_label,
+        "tax_rate_label": tax_rate_label,
         "vatable_sales_minor": vatable_minor,
         "vatable_sales_php": f"{vatable_minor / 100.0:,.2f}",
         "vat_amount_minor": vat_minor,
         "vat_amount_php": f"{vat_minor / 100.0:,.2f}",
+        "vat_exempt_sales_minor": vat_exempt_minor,
+        "vat_exempt_sales_php": f"{vat_exempt_minor / 100.0:,.2f}",
+        "zero_rated_sales_minor": zero_rated_minor,
+        "zero_rated_sales_php": f"{zero_rated_minor / 100.0:,.2f}",
+        "non_vat_sales_minor": non_vat_minor,
+        "non_vat_sales_php": f"{non_vat_minor / 100.0:,.2f}",
         "gateway_fee_php": "0.00",
         "paid_at_iso": utc_dt.isoformat(),
         "paid_at_manila": manila_dt.strftime("%b %d, %Y, %I:%M:%S %p PHT"),
         "paid_at_utc": utc_dt.strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "acknowledgement_status": "VERIFIED & POSTED TO ACME GENERAL LEDGER",
-        "outbox_status": outbox_status,
+        "payment_status": payment_status,
+        "receipt_status": receipt_status,
+        "ledger_status": ledger_status,
+        "acknowledgement_status": ack_status,
+        "outbox_status": actual_outbox_status,
         "verification_hash": verification_hash,
+        "sha256_audit_digest": verification_hash,
+        "audit_digest_type": "SHA-256",
         "portal_copy_available": True,
         "pdf_filename": pdf_filename,
         "pdf_url": f"/api/v1/payments/{attempt.id}/receipt/pdf",
         "pdf_download_url": f"/api/v1/payments/{attempt.id}/receipt/pdf?download=1",
         "smtp_delivery": resolved_smtp,
+        "customer_email": meta.get("customer_email") or meta.get("email") or meta.get("billing_email"),
+        "line_items": line_items,
+        "tax_compliance_note": "Electronic Payment Settlement Record. Pursuant to BIR RMC No. 77-2024, official commercial VAT Invoices are issued by Corporate Accounting upon customer tax identification verification.",
     }
 
 
@@ -520,20 +669,21 @@ def generate_receipt_pdf_bytes(receipt: Dict[str, Any]) -> bytes:
     text(225, 676, "ACKNOWLEDGEMENT REPORT NO.", "F2", 7.5, 0.40, 0.44, 0.52)
     text(225, 660, str(receipt.get("acknowledgement_number", "")), "F4", 10.5, 0.05, 0.09, 0.16)
 
-    # Status Badge Box
-    rect_fill(430, 658, 134, 26, 0.06, 0.46, 0.34)
-    text(444, 667, "PAID & VERIFIED", "F2", 9.5, 1.0, 1.0, 1.0)
+    # Status Badge Box (Green #12A579 for success state)
+    rect_fill(430, 658, 134, 26, 0.071, 0.647, 0.475)
+    text(444, 667, "PAID & CONFIRMED", "F2", 9.5, 1.0, 1.0, 1.0)
 
     # 3. Section I: Official Receipt & Settlement Summary
-    text(36, 632, "SECTION I - OFFICIAL RECEIPT & SETTLEMENT SUMMARY", "F2", 9.5, 0.06, 0.09, 0.16)
+    text(36, 632, "SECTION I - PAYMENT ACKNOWLEDGEMENT & SETTLEMENT SUMMARY", "F2", 9.5, 0.06, 0.09, 0.16)
     line(36, 626, 576, 626, 0.10, 0.15, 0.25, 1.2)
 
     # Amount Box on Right & Core Details on Left
-    rect_fill(390, 546, 186, 72, 0.94, 0.99, 0.96)
-    rect_stroke(390, 546, 186, 72, 0.16, 0.65, 0.45, 1.0)
-    text(404, 600, "TOTAL AMOUNT PAID (PHP)", "F2", 8.0, 0.06, 0.42, 0.28)
-    text(404, 576, f"PHP {receipt.get('amount_php', '0.00')}", "F2", 18.0, 0.04, 0.32, 0.22)
-    text(404, 556, "12% VAT Inclusive  |  Fee: PHP 0.00", "F1", 7.5, 0.30, 0.40, 0.35)
+    rect_fill(390, 546, 186, 72, 0.96, 0.97, 0.98)
+    rect_stroke(390, 546, 186, 72, 0.82, 0.84, 0.88, 1.0)
+    text(404, 600, "TOTAL AMOUNT PAID (PHP)", "F2", 8.0, 0.35, 0.39, 0.46)
+    text(404, 576, f"PHP {receipt.get('amount_php', '0.00')}", "F2", 18.0, 0.06, 0.09, 0.16)
+    tax_note = f"{receipt.get('tax_classification_label', '12% VAT Inclusive')}  |  Fee: PHP 0.00"
+    text(404, 556, tax_note[:36], "F1", 7.5, 0.40, 0.44, 0.52)
 
     # Left-side key-value rows
     rows_left = [
@@ -569,7 +719,7 @@ def generate_receipt_pdf_bytes(receipt: Dict[str, Any]) -> bytes:
         is_sel = bool(ch.get("selected"))
         box_w = 98
         if is_sel:
-            rect_fill(ch_x, 450, box_w, 14, 0.08, 0.45, 0.32)
+            rect_fill(ch_x, 450, box_w, 14, 0.071, 0.647, 0.475)
             text(ch_x + 5, 454, f"[X] {ch.get('badge', '')}", "F2", 7.2, 1.0, 1.0, 1.0)
         else:
             rect_fill(ch_x, 450, box_w, 14, 0.91, 0.93, 0.96)
@@ -577,7 +727,7 @@ def generate_receipt_pdf_bytes(receipt: Dict[str, Any]) -> bytes:
         ch_x += 104
 
     # 5. Itemized Accounting & Tax Breakdown Table
-    text(36, 424, "SECTION II - ITEMIZED ORDER & TAX BREAKDOWN (BIR / CPA COMPLIANT)", "F2", 9.5, 0.06, 0.09, 0.16)
+    text(36, 424, "SECTION II - ITEMIZED ORDER & TAX BREAKDOWN", "F2", 9.5, 0.06, 0.09, 0.16)
     line(36, 418, 576, 418, 0.10, 0.15, 0.25, 1.2)
 
     # Table Header
@@ -597,13 +747,37 @@ def generate_receipt_pdf_bytes(receipt: Dict[str, Any]) -> bytes:
     text(410, 382, f"PHP {receipt.get('unit_price_php', '0.00')}", "F3", 8.0, 0.10, 0.12, 0.16)
     text(495, 382, f"PHP {receipt.get('amount_php', '0.00')}", "F4", 8.5, 0.06, 0.09, 0.16)
 
-    # Breakdown Summary Rows
-    breakdown_rows = [
-        ("Vatable Sales (Net of 12% VAT):", f"PHP {receipt.get('vatable_sales_php', '0.00')}", "F1"),
-        ("12% Value-Added Tax (VAT):", f"PHP {receipt.get('vat_amount_php', '0.00')}", "F1"),
-        ("PayMongo Gateway Processing Fee:", f"PHP {receipt.get('gateway_fee_php', '0.00')} (Covered)", "F1"),
-        ("TOTAL AMOUNT SETTLED & RECEIPTED:", f"PHP {receipt.get('amount_php', '0.00')}", "F2"),
-    ]
+    # Breakdown Summary Rows adapted to tax classification
+    tax_c = receipt.get("tax_classification", "vatable")
+    if tax_c == "vat_exempt":
+        breakdown_rows = [
+            ("VAT-Exempt Sales (Net of VAT):", f"PHP {receipt.get('vat_exempt_sales_php', receipt.get('amount_php', '0.00'))}", "F1"),
+            ("Value-Added Tax (0% Exempt):", "PHP 0.00", "F1"),
+            ("PayMongo Gateway Processing Fee:", f"PHP {receipt.get('gateway_fee_php', '0.00')} (Covered)", "F1"),
+            ("TOTAL AMOUNT SETTLED & RECEIPTED:", f"PHP {receipt.get('amount_php', '0.00')}", "F2"),
+        ]
+    elif tax_c == "zero_rated":
+        breakdown_rows = [
+            ("Zero-Rated Sales (0% VAT):", f"PHP {receipt.get('zero_rated_sales_php', receipt.get('amount_php', '0.00'))}", "F1"),
+            ("Value-Added Tax (0%):", "PHP 0.00", "F1"),
+            ("PayMongo Gateway Processing Fee:", f"PHP {receipt.get('gateway_fee_php', '0.00')} (Covered)", "F1"),
+            ("TOTAL AMOUNT SETTLED & RECEIPTED:", f"PHP {receipt.get('amount_php', '0.00')}", "F2"),
+        ]
+    elif tax_c == "non_vat":
+        breakdown_rows = [
+            ("Non-VAT Sales:", f"PHP {receipt.get('non_vat_sales_php', receipt.get('amount_php', '0.00'))}", "F1"),
+            ("Value-Added Tax (Non-VAT):", "PHP 0.00", "F1"),
+            ("PayMongo Gateway Processing Fee:", f"PHP {receipt.get('gateway_fee_php', '0.00')} (Covered)", "F1"),
+            ("TOTAL AMOUNT SETTLED & RECEIPTED:", f"PHP {receipt.get('amount_php', '0.00')}", "F2"),
+        ]
+    else:
+        breakdown_rows = [
+            ("Vatable Sales (Net of 12% VAT):", f"PHP {receipt.get('vatable_sales_php', '0.00')}", "F1"),
+            ("12% Value-Added Tax (VAT):", f"PHP {receipt.get('vat_amount_php', '0.00')}", "F1"),
+            ("PayMongo Gateway Processing Fee:", f"PHP {receipt.get('gateway_fee_php', '0.00')} (Covered)", "F1"),
+            ("TOTAL AMOUNT SETTLED & RECEIPTED:", f"PHP {receipt.get('amount_php', '0.00')}", "F2"),
+        ]
+
     by = 356
     for b_lbl, b_val, b_font in breakdown_rows:
         text(310, by, b_lbl, b_font, 8.5, 0.25, 0.28, 0.34)
@@ -612,7 +786,7 @@ def generate_receipt_pdf_bytes(receipt: Dict[str, Any]) -> bytes:
         by -= 16
 
     # 6. Section III: Treasury & Portal Acknowledgement Report
-    text(36, 274, "SECTION III - TREASURY ACKNOWLEDGEMENT REPORT & PORTAL SYNCHRONIZATION", "F2", 9.5, 0.06, 0.09, 0.16)
+    text(36, 274, "SECTION III - TREASURY ACKNOWLEDGEMENT REPORT & AUDIT TRAIL", "F2", 9.5, 0.06, 0.09, 0.16)
     line(36, 268, 576, 268, 0.10, 0.15, 0.25, 1.2)
 
     rect_fill(36, 148, 540, 112, 0.96, 0.97, 0.98)
@@ -622,12 +796,12 @@ def generate_receipt_pdf_bytes(receipt: Dict[str, Any]) -> bytes:
     smtp_recipient = smtp_info.get("recipient") or os.getenv("SMTP_USER") or "Configured Portal Account"
 
     ack_lines = [
-        ("Acknowledgement Report ID:", f"{receipt.get('acknowledgement_number', '')}  |  Ledger Status: {receipt.get('acknowledgement_status', '')}"),
-        ("Webhook & Outbox Integrity:", f"HMAC-SHA256 Signed PayMongo Confirmation  |  Outbox Status: {str(receipt.get('outbox_status', 'completed')).upper()}"),
+        ("Acknowledgement Report ID:", f"{receipt.get('acknowledgement_number', '')}  |  Ledger: {receipt.get('ledger_status', 'PENDING POSTING')}"),
+        ("Outbox Delivery & Audit:", f"Outbox Status: {str(receipt.get('outbox_status', 'completed')).upper()}  |  Rail: PayMongo Verified"),
         ("Portal Copy Synchronization:", f"Available in Acme Portal (/payment/result/{receipt.get('payment_attempt_id', '')})"),
         ("SMTP Email Dispatch Target:", f"{smtp_recipient}  (Attachment: {receipt.get('pdf_filename', '')})"),
         ("UTC Settlement Timestamp:", str(receipt.get("paid_at_utc", ""))),
-        ("SHA-256 Audit Verification:", str(receipt.get("verification_hash", ""))),
+        ("SHA-256 Audit Digest:", str(receipt.get("verification_hash", ""))),
     ]
     ay = 244
     for a_lbl, a_val in ack_lines:
@@ -638,11 +812,11 @@ def generate_receipt_pdf_bytes(receipt: Dict[str, Any]) -> bytes:
     # 7. Official Certification & Footer
     rect_fill(36, 72, 540, 62, 0.99, 0.99, 1.00)
     rect_stroke(36, 72, 540, 62, 0.84, 0.86, 0.90, 0.6)
-    text(48, 118, "CERTIFICATION OF PAYMENT ACKNOWLEDGEMENT & OFFICIAL RECEIPT", "F2", 8.0, 0.10, 0.15, 0.25)
+    text(48, 118, "CERTIFICATION OF PAYMENT ACKNOWLEDGEMENT & AUDIT TRAIL", "F2", 8.0, 0.10, 0.15, 0.25)
     text(
         48,
         104,
-        "This document certifies that the above transaction was authoritatively verified via PayMongo Philippines",
+        "This document confirms electronic payment settlement via PayMongo Philippines for internal treasury records.",
         "F1",
         7.8,
         0.35,
@@ -652,7 +826,7 @@ def generate_receipt_pdf_bytes(receipt: Dict[str, Any]) -> bytes:
     text(
         48,
         92,
-        "and posted to the Acme General Ledger. Both the SMTP PDF attachment and Portal Copy share identical",
+        "Official commercial VAT Invoices are issued separately pursuant to BIR RMC No. 77-2024 upon tax profile verification.",
         "F1",
         7.8,
         0.35,
@@ -662,7 +836,7 @@ def generate_receipt_pdf_bytes(receipt: Dict[str, Any]) -> bytes:
     text(
         48,
         80,
-        "cryptographic SHA-256 audit digests for internal control and CPA verification.",
+        "Both the SMTP PDF attachment and Portal Copy share identical cryptographic SHA-256 audit digests for internal control.",
         "F1",
         7.8,
         0.35,
