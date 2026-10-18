@@ -9,11 +9,9 @@ import {
   Smartphone,
   CreditCard,
   Building2,
-  ShieldAlert,
   CheckCircle2,
   XCircle,
   Clock,
-  ArrowRight,
   Loader2,
 } from "lucide-react"
 import { fetchOrder, pollPaymentStatus, Order, formatPhpFromMinor, simulateWebhook } from "@/lib/payment-api"
@@ -114,19 +112,18 @@ export default function SandboxPage({ params }: SandboxProps) {
           router.push(`/payment/return?order_id=${order.id}&payment_id=${resolvedAttemptId}`)
         }, 800)
       } else {
-        // Redirect first, send webhook after 3 seconds in the background to test polling
-        setStatusMessage("Redirecting browser first (testing polling race condition)...")
+        // Redirect first, send webhook after 3 seconds in the background to test real-time polling
+        setStatusMessage("Redirecting browser first (testing real-time polling sync)...")
         setTimeout(async () => {
           try {
             await simulateWebhook(resolvedAttemptId, eventType, false, method)
           } catch (e) {
-            console.error("Delayed webhook error:", e)
+            console.error("Delayed webhook simulation failed:", e)
           }
         }, 3000)
-
         setTimeout(() => {
           router.push(`/payment/return?order_id=${order.id}&payment_id=${resolvedAttemptId}`)
-        }, 500)
+        }, 800)
       }
     } catch (err: any) {
       console.error("Sandbox simulation error:", err)
@@ -144,45 +141,45 @@ export default function SandboxPage({ params }: SandboxProps) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
-      <Card className="max-w-xl w-full border-slate-800 bg-slate-900 shadow-2xl">
-        <CardHeader className="border-b border-slate-800 pb-4">
+    <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-4">
+      <Card className="max-w-xl w-full border-border bg-card shadow-lg">
+        <CardHeader className="border-b border-border pb-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-xs font-mono text-emerald-400 uppercase tracking-wider font-semibold">
+              <span className="w-2.5 h-2.5 rounded-full bg-accent animate-pulse" />
+              <span className="text-xs font-mono text-accent uppercase tracking-wider font-semibold">
                 PayMongo Local Sandbox Simulator
               </span>
             </div>
-            <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-mono">
+            <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded font-mono">
               Session: {sessionId.slice(0, 14)}...
             </span>
           </div>
-          <CardTitle className="text-xl text-white mt-2">
+          <CardTitle className="text-xl text-foreground font-bold mt-2 tracking-tight">
             Simulate PayMongo Hosted Checkout
           </CardTitle>
-          <CardDescription className="text-slate-400">
+          <CardDescription className="text-muted-foreground">
             {order ? `${order.title} (${order.order_number})` : "Simulated Order"}
           </CardDescription>
         </CardHeader>
 
         <CardContent className="space-y-6 pt-6">
           {/* Amount banner */}
-          <div className="p-4 rounded-lg bg-slate-800/80 border border-slate-700/60 flex justify-between items-center">
+          <div className="p-4 rounded-lg bg-muted/40 border border-border flex justify-between items-center">
             <div>
-              <p className="text-xs text-slate-400">Total Payable Amount</p>
-              <p className="text-2xl font-bold text-emerald-400">
+              <p className="text-xs text-muted-foreground">Total Payable Amount</p>
+              <p className="text-2xl font-bold text-foreground font-mono tabular-nums">
                 {order ? formatPhpFromMinor(order.amount_minor) : "₱0.00"}
               </p>
             </div>
-            <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded">
+            <span className="text-xs bg-muted text-foreground border border-border px-2.5 py-1 rounded font-mono">
               PHP Currency
             </span>
           </div>
 
           {/* Simulated Payment Channel Picker */}
           <div>
-            <label id="payment-channel-label" className="text-xs font-semibold text-slate-300 block mb-2 uppercase tracking-wide">
+            <label id="payment-channel-label" className="text-xs font-semibold text-foreground block mb-2 uppercase tracking-wide">
               1. Choose Simulated Payment Channel
             </label>
             <div role="radiogroup" aria-labelledby="payment-channel-label" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -202,10 +199,10 @@ export default function SandboxPage({ params }: SandboxProps) {
                     role="radio"
                     aria-checked={isSelected}
                     onClick={() => setMethod(c.id as any)}
-                    className={`flex items-center gap-2 p-3 rounded-lg border text-left text-xs transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                    className={`flex items-center gap-2 p-3 rounded-lg border text-left text-xs transition-colors focus:outline-none focus:ring-2 focus:ring-accent ${
                       isSelected
-                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-300 font-semibold"
-                        : "border-slate-800 bg-slate-800/40 text-slate-300 hover:bg-slate-800"
+                        ? "border-primary bg-primary text-primary-foreground font-semibold"
+                        : "border-border bg-card text-muted-foreground hover:bg-muted/40 hover:text-foreground"
                     }`}
                   >
                     <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
@@ -218,7 +215,7 @@ export default function SandboxPage({ params }: SandboxProps) {
 
           {/* Simulated Race Condition / Timing */}
           <div>
-            <label id="timing-label" className="text-xs font-semibold text-slate-300 block mb-2 uppercase tracking-wide">
+            <label id="timing-label" className="text-xs font-semibold text-foreground block mb-2 uppercase tracking-wide">
               2. Test Race Condition / Timing
             </label>
             <div role="radiogroup" aria-labelledby="timing-label" className="grid grid-cols-2 gap-2 text-xs">
@@ -227,49 +224,49 @@ export default function SandboxPage({ params }: SandboxProps) {
                 role="radio"
                 aria-checked={webhookTiming === "before_redirect"}
                 onClick={() => setWebhookTiming("before_redirect")}
-                className={`p-3 rounded-lg border text-left transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                className={`p-3 rounded-lg border text-left transition-colors focus:outline-none focus:ring-2 focus:ring-accent ${
                   webhookTiming === "before_redirect"
-                    ? "border-emerald-500 bg-emerald-500/10 text-emerald-300 font-semibold"
-                    : "border-slate-800 bg-slate-800/40 text-slate-400 hover:bg-slate-800"
+                    ? "border-primary bg-primary text-primary-foreground font-semibold"
+                    : "border-border bg-card text-muted-foreground hover:bg-muted/40 hover:text-foreground"
                 }`}
               >
-                <div className="font-medium text-white mb-1">Webhook First (Normal)</div>
-                <div className="text-[11px] text-slate-400">Webhook arrives before redirect</div>
+                <div className="font-medium mb-1">Webhook First (Normal)</div>
+                <div className="text-[11px] opacity-80">Webhook arrives before redirect</div>
               </button>
               <button
                 type="button"
                 role="radio"
                 aria-checked={webhookTiming === "after_redirect"}
                 onClick={() => setWebhookTiming("after_redirect")}
-                className={`p-3 rounded-lg border text-left transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                className={`p-3 rounded-lg border text-left transition-colors focus:outline-none focus:ring-2 focus:ring-accent ${
                   webhookTiming === "after_redirect"
-                    ? "border-emerald-500 bg-emerald-500/10 text-emerald-300 font-semibold"
-                    : "border-slate-800 bg-slate-800/40 text-slate-400 hover:bg-slate-800"
+                    ? "border-primary bg-primary text-primary-foreground font-semibold"
+                    : "border-border bg-card text-muted-foreground hover:bg-muted/40 hover:text-foreground"
                 }`}
               >
-                <div className="font-medium text-white mb-1">Redirect First (Polling)</div>
-                <div className="text-[11px] text-slate-400">Redirect arrives 3s before webhook</div>
+                <div className="font-medium mb-1">Redirect First (Real-Time Polling)</div>
+                <div className="text-[11px] opacity-80">Redirect arrives before webhook</div>
               </button>
             </div>
           </div>
 
           {statusMessage && (
-            <div className="p-3 rounded-lg bg-emerald-950 border border-emerald-800 text-xs text-emerald-300 flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+            <div className="p-3 rounded-lg bg-muted/40 border border-border text-xs text-foreground flex items-center gap-2 font-mono">
+              <Loader2 className="w-4 h-4 animate-spin shrink-0 text-accent" />
               <span>{statusMessage}</span>
             </div>
           )}
         </CardContent>
 
-        <CardFooter className="flex flex-col gap-2 border-t border-slate-800 pt-4">
+        <CardFooter className="flex flex-col gap-2 border-t border-border pt-4">
           <Button
             type="button"
             disabled={processing}
             onClick={() => handleSimulatePayment("paid")}
-            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-5 gap-2"
+            className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-5 gap-2"
           >
             <CheckCircle2 className="w-4 h-4" />
-            <span>Authorize & Complete Payment (Succeed)</span>
+            <span>Authorize &amp; Complete Payment (Succeed)</span>
           </Button>
 
           <div className="grid grid-cols-2 gap-2 w-full">
@@ -278,7 +275,7 @@ export default function SandboxPage({ params }: SandboxProps) {
               variant="outline"
               disabled={processing}
               onClick={() => handleSimulatePayment("failed")}
-              className="border-slate-700 bg-transparent text-red-400 hover:bg-red-950/30 hover:border-red-600 text-xs gap-1.5"
+              className="border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/20 text-xs gap-1.5"
             >
               <XCircle className="w-3.5 h-3.5" />
               <span>Simulate Decline</span>
@@ -288,7 +285,7 @@ export default function SandboxPage({ params }: SandboxProps) {
               variant="outline"
               disabled={processing}
               onClick={() => handleSimulatePayment("expired")}
-              className="border-slate-700 bg-transparent text-amber-400 hover:bg-amber-950/30 hover:border-amber-600 text-xs gap-1.5"
+              className="border-border bg-muted/30 text-foreground hover:bg-muted text-xs gap-1.5"
             >
               <Clock className="w-3.5 h-3.5" />
               <span>Simulate Expiry</span>
@@ -299,4 +296,3 @@ export default function SandboxPage({ params }: SandboxProps) {
     </div>
   )
 }
-

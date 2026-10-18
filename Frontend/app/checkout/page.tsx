@@ -133,7 +133,7 @@ function CheckoutContent() {
         </div>
 
         {isCancelled && (
-          <div className="p-4 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-600 flex items-center gap-3">
+          <div className="p-4 rounded-lg bg-accent/10 border border-accent/20 text-accent flex items-center gap-3">
             <AlertCircle className="w-5 h-5 shrink-0" />
             <p className="text-sm">
               Your previous checkout attempt was cancelled. You can review your details and try again whenever you are ready.
