@@ -30,11 +30,20 @@ export default function SandboxPage({ params }: SandboxProps) {
   const sessionId = searchParams.get("session_id") || "cs_sim_demo"
   const router = useRouter()
 
+  const searchMethod = searchParams.get("method")
+  const initialMethod = (
+    searchMethod === "card" || searchMethod === "card_visa" ? "card_visa"
+    : searchMethod === "gcash" ? "gcash"
+    : searchMethod === "maya" || searchMethod === "paymaya" ? "maya"
+    : searchMethod === "dob" || searchMethod === "dob_bpi" || searchMethod === "bpi" ? "dob_bpi"
+    : "qrph"
+  )
+
   const [order, setOrder] = useState<Order | null>(null)
   const [attemptId, setAttemptId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
-  const [method, setMethod] = useState<"qrph" | "gcash" | "maya" | "card">("qrph")
+  const [method, setMethod] = useState<"qrph" | "card_visa" | "gcash" | "maya" | "dob_bpi">(initialMethod)
   const [webhookTiming, setWebhookTiming] = useState<"before_redirect" | "after_redirect">("before_redirect")
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
 
@@ -99,7 +108,7 @@ export default function SandboxPage({ params }: SandboxProps) {
     try {
       if (webhookTiming === "before_redirect") {
         // Send webhook first
-        await simulateWebhook(resolvedAttemptId, eventType)
+        await simulateWebhook(resolvedAttemptId, eventType, false, method)
         setStatusMessage("Signed webhook processed! Redirecting to return URL...")
         setTimeout(() => {
           router.push(`/payment/return?order_id=${order.id}&payment_id=${resolvedAttemptId}`)
@@ -109,7 +118,7 @@ export default function SandboxPage({ params }: SandboxProps) {
         setStatusMessage("Redirecting browser first (testing polling race condition)...")
         setTimeout(async () => {
           try {
-            await simulateWebhook(resolvedAttemptId, eventType)
+            await simulateWebhook(resolvedAttemptId, eventType, false, method)
           } catch (e) {
             console.error("Delayed webhook error:", e)
           }
@@ -176,12 +185,13 @@ export default function SandboxPage({ params }: SandboxProps) {
             <label id="payment-channel-label" className="text-xs font-semibold text-slate-300 block mb-2 uppercase tracking-wide">
               1. Choose Simulated Payment Channel
             </label>
-            <div role="radiogroup" aria-labelledby="payment-channel-label" className="grid grid-cols-2 gap-2">
+            <div role="radiogroup" aria-labelledby="payment-channel-label" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {[
-                { id: "qrph", name: "QR Ph National QR", icon: QrCode },
-                { id: "gcash", name: "GCash Wallet", icon: Smartphone },
-                { id: "maya", name: "Maya Wallet", icon: Smartphone },
-                { id: "card", name: "Credit / Debit Card", icon: CreditCard },
+                { id: "qrph", name: "Scan GQRPh code to pay (QR Ph)", icon: QrCode },
+                { id: "card_visa", name: "Card (VISA 3D Secure)", icon: CreditCard },
+                { id: "gcash", name: "E-Wallet (GCash)", icon: Smartphone },
+                { id: "maya", name: "E-Wallet (Maya)", icon: Smartphone },
+                { id: "dob_bpi", name: "Online Banking (BPI)", icon: Building2 },
               ].map((c) => {
                 const Icon = c.icon
                 const isSelected = method === c.id

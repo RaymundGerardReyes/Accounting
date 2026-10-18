@@ -24,6 +24,8 @@ import {
   ExternalLink,
   Play,
   RotateCcw,
+  Receipt,
+  Download,
 } from "lucide-react"
 import {
   fetchOrders,
@@ -34,6 +36,7 @@ import {
   fetchFulfillmentOutbox,
   processFulfillmentOutbox,
   simulateWebhook,
+  getReceiptPdfUrl,
   Order,
   WebhookEventRecord,
   FulfillmentOutboxRecord,
@@ -204,6 +207,17 @@ function OrderMobileCard({ order, copiedKey, onCopy, onReconcile, onView, onPay 
             onClick={() => onReconcile(latest.id)}
           >
             Reconcile
+          </Button>
+        )}
+        {(order.status === "paid" || latest?.status === "succeeded") && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-xs h-8 flex-1 min-w-[90px] whitespace-nowrap text-emerald-600 border-emerald-600/30 hover:bg-emerald-500/10 gap-1"
+            onClick={() => onView(latest?.id || order.id)}
+          >
+            <Receipt className="w-3.5 h-3.5" />
+            <span>Receipt</span>
           </Button>
         )}
         {latest && (
@@ -429,6 +443,17 @@ function OrderDesktopRow({ order, copiedKey, onCopy, onReconcile, onView, onPay 
               Reconcile
             </Button>
           )}
+          {(order.status === "paid" || latest?.status === "succeeded") && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-8 shrink-0 whitespace-nowrap text-emerald-600 border-emerald-600/30 hover:bg-emerald-500/10 gap-1"
+              onClick={() => onView(latest?.id || order.id)}
+            >
+              <Receipt className="w-3.5 h-3.5" />
+              <span>Receipt</span>
+            </Button>
+          )}
           {latest && (
             <Button
               variant="ghost"
@@ -556,6 +581,28 @@ function OutboxMobileCard({ item, copiedKey, onCopy, onViewAttempt }: OutboxItem
           {item.processed_at ? new Date(item.processed_at).toLocaleString() : "Pending"}
         </span>
       </div>
+
+      <div className="flex items-center gap-2 pt-2 border-t border-border/40">
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-xs h-8 flex-1 text-emerald-600 border-emerald-600/30 hover:bg-emerald-500/10 gap-1.5"
+          onClick={() => onViewAttempt(item.payment_attempt_id)}
+        >
+          <Receipt className="w-3.5 h-3.5" />
+          <span>View Receipt</span>
+        </Button>
+        <a
+          href={getReceiptPdfUrl(item.payment_attempt_id, true)}
+          download
+          className="inline-flex"
+          title="Download PDF"
+        >
+          <Button variant="ghost" size="sm" className="text-xs h-8 px-2.5 text-muted-foreground hover:text-foreground">
+            <Download className="w-4 h-4" />
+          </Button>
+        </a>
+      </div>
     </div>
   )
 }
@@ -647,6 +694,29 @@ function OutboxDesktopRow({ item, copiedKey, onCopy, onViewAttempt }: OutboxItem
       <td className="px-6 py-3.5 text-muted-foreground font-mono text-xs whitespace-nowrap">
         {item.processed_at ? new Date(item.processed_at).toLocaleString() : "Pending"}
       </td>
+      <td className="px-6 py-3.5 text-right whitespace-nowrap">
+        <div className="inline-flex items-center gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-xs h-7 px-2.5 text-emerald-600 border-emerald-600/30 hover:bg-emerald-500/10 gap-1"
+            onClick={() => onViewAttempt(item.payment_attempt_id)}
+          >
+            <Receipt className="w-3 h-3" />
+            <span>Receipt</span>
+          </Button>
+          <a
+            href={getReceiptPdfUrl(item.payment_attempt_id, true)}
+            download
+            className="inline-flex"
+            title="Download PDF Receipt"
+          >
+            <Button variant="ghost" size="sm" className="text-xs h-7 px-2 text-muted-foreground hover:text-foreground">
+              <Download className="w-3.5 h-3.5" />
+            </Button>
+          </a>
+        </div>
+      </td>
     </tr>
   )
 }
@@ -716,6 +786,7 @@ export function PaymentsHub() {
   const [orders, setOrders] = useState<Order[]>([])
   const [webhooks, setWebhooks] = useState<WebhookEventRecord[]>([])
   const [outbox, setOutbox] = useState<FulfillmentOutboxRecord[]>([])
+  const [simulatedChannel, setSimulatedChannel] = useState<"qrph" | "card_visa" | "gcash" | "maya" | "dob_bpi">("qrph")
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
@@ -905,9 +976,9 @@ export function PaymentsHub() {
           }`
         )
       } else if (type === "paid") {
-        await simulateWebhook(targetAttempt.id, "checkout_session.payment.paid", false)
+        await simulateWebhook(targetAttempt.id, "checkout_session.payment.paid", false, simulatedChannel)
         setFeedbackMessage(
-          "Simulated signed 'checkout_session.payment.paid' webhook processed. Order marked paid."
+          `Simulated signed 'checkout_session.payment.paid' webhook processed via ${simulatedChannel.toUpperCase()}. Official Receipt & Acknowledgement PDF generated & dispatched.`
         )
       } else if (type === "failed") {
         await simulateWebhook(targetAttempt.id, "payment.failed", false)
@@ -1376,6 +1447,7 @@ export function PaymentsHub() {
                           <th className="px-6 py-3 whitespace-nowrap">Event Type</th>
                           <th className="px-6 py-3 whitespace-nowrap">Status</th>
                           <th className="px-6 py-3 whitespace-nowrap">Processed Time</th>
+                          <th className="px-6 py-3 whitespace-nowrap text-right">Receipt / Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border/70">
@@ -1408,14 +1480,47 @@ export function PaymentsHub() {
                 Trigger HMAC-signed webhook simulations to verify payment state machine invariants live
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-                <Button
-                  variant="outline"
-                  onClick={() => handleSimulateWebhookEvent("paid")}
-                  disabled={actionLoading}
-                  className="gap-1.5 h-auto py-3.5 px-4 text-left flex-col items-start border-border hover:border-foreground"
-                >
+            <CardContent className="space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-foreground uppercase tracking-wide block mb-2">
+                  1. Select Payment Method Rail for Simulation:
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                  {[
+                    { id: "qrph", name: "Scan GQRPh code to pay", badge: "QR Ph" },
+                    { id: "card_visa", name: "Card (VISA 3D Secure)", badge: "VISA" },
+                    { id: "gcash", name: "E-Wallet (GCash)", badge: "GCash" },
+                    { id: "maya", name: "E-Wallet (Maya)", badge: "Maya" },
+                    { id: "dob_bpi", name: "Online Banking (BPI)", badge: "BPI" },
+                  ].map((ch) => (
+                    <button
+                      key={ch.id}
+                      type="button"
+                      onClick={() => setSimulatedChannel(ch.id as any)}
+                      className={`p-2.5 rounded-lg border text-left text-xs transition-colors flex flex-col justify-between ${
+                        simulatedChannel === ch.id
+                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-semibold"
+                          : "border-border bg-card text-muted-foreground hover:bg-muted/40"
+                      }`}
+                    >
+                      <span className="font-bold">{ch.badge}</span>
+                      <span className="text-[10px] opacity-80 truncate">{ch.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-foreground uppercase tracking-wide block mb-2">
+                  2. Trigger Simulation:
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={() => handleSimulateWebhookEvent("paid")}
+                    disabled={actionLoading}
+                    className="gap-1.5 h-auto py-3.5 px-4 text-left flex-col items-start border-border hover:border-foreground"
+                  >
                   <div className="flex items-center gap-1.5 font-semibold text-foreground text-xs">
                     <CheckCircle2 className="w-4 h-4 text-foreground" />
                     <span>Simulate Paid Webhook</span>
@@ -1483,7 +1588,8 @@ export function PaymentsHub() {
                   </span>
                 </Button>
               </div>
-            </CardContent>
+            </div>
+          </CardContent>
           </Card>
 
           <Card className="shadow-none border-border/90">
