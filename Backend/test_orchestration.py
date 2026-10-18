@@ -760,5 +760,137 @@ def test_simulate_webhook_expired_event():
     assert poll["failure_code"] == "SESSION_EXPIRED"
 
 
+def test_payment_method_normalization_and_catalog():
+    from services.receipt_service import get_payment_method_info, extract_payment_method_from_paymongo
+
+    # Test normalization of channels
+    assert get_payment_method_info("qrph")["code"] == "qrph"
+    assert get_payment_method_info("card")["category"] == "Card"
+    assert get_payment_method_info("card_visa")["code"] == "card_visa"
+    assert get_payment_method_info("gcash")["code"] == "gcash"
+    assert get_payment_method_info("maya")["code"] == "paymaya"
+    assert get_payment_method_info("dob_bpi")["code"] == "dob_bpi"
+    assert get_payment_method_info("bpi")["code"] == "dob_bpi"
+
+    # Test dynamic card format
+    card_info = get_payment_method_info("card_visa_4242")
+    assert "4242" in card_info["label"]
+    assert card_info["category"] == "Card"
+
+    # Test extract from PayMongo payload
+    attrs_qr = {"payments": [{"attributes": {"status": "paid", "source": {"type": "qrph"}}}]}
+    assert extract_payment_method_from_paymongo(attrs_qr) == "qrph"
+
+    attrs_gcash = {"payment_method_used": "gcash"}
+    assert extract_payment_method_from_paymongo(attrs_gcash) == "gcash"
+
+
+def test_official_receipt_and_acknowledgement_report_flow():
+    # 1. Create order
+    resp_order = client.post("/api/v1/orders", json={
+        "title": "Official Receipt Validation Order",
+        "category": "product_order",
+        "reference_code": "Product A",
+        "quantity": 2,
+        "metadata": {"customer_email": "raymundgerardrestaca@gmail.com"}
+    })
+    assert resp_order.status_code == 201
+    order_id = resp_order.json()["id"]
+
+    # 2. Initiate payment attempt with GCash
+    att_resp = client.post(
+        f"/api/v1/orders/{order_id}/payment-attempts",
+        json={"payment_method": "gcash", "idempotency_key": f"or_test_{uuid.uuid4().hex}"}
+    )
+    assert att_resp.status_code == 201
+    attempt_id = att_resp.json()["id"]
+    assert att_resp.json()["payment_method"] == "gcash"
+
+    # 3. Simulate paid webhook with GCash channel
+    sim_resp = client.post(
+        "/api/v1/sandbox/simulate-webhook",
+        json={
+            "payment_attempt_id": attempt_id,
+            "event_type": "checkout_session.payment.paid",
+            "payment_method": "gcash"
+        }
+    )
+    assert sim_resp.status_code == 200
+    assert sim_resp.json()["result"]["status"] == "succeeded"
+
+    # 4. Check poll status includes receipt data
+    poll_resp = client.get(f"/api/v1/payments/{attempt_id}")
+    assert poll_resp.status_code == 200
+    poll_data = poll_resp.json()
+    assert poll_data["status"] == "succeeded"
+    assert "receipt" in poll_data
+    receipt = poll_data["receipt"]
+    assert receipt["official_receipt_number"].startswith("OR-")
+    assert receipt["acknowledgement_number"].startswith("ACK-")
+    assert receipt["document_title"] == "Official Receipt & Treasury Acknowledgement Report"
+    assert receipt["payment_method_code"] == "gcash"
+    assert len(receipt["supported_channels"]) == 5
+    # GCash channel must be selected
+    gcash_ch = next(c for c in receipt["supported_channels"] if c["code"] == "gcash")
+    assert gcash_ch["selected"] is True
+
+    # 5. Fetch Receipt JSON Endpoint
+    r_resp = client.get(f"/api/v1/payments/{attempt_id}/receipt")
+    assert r_resp.status_code == 200
+    r_data = r_resp.json()
+    assert r_data["official_receipt_number"] == receipt["official_receipt_number"]
+    assert r_data["verification_hash"] is not None
+
+    # 6. Fetch Order Receipt Convenience Endpoint
+    ord_r_resp = client.get(f"/api/v1/orders/{order_id}/receipt")
+    assert ord_r_resp.status_code == 200
+    assert ord_r_resp.json()["order_number"] == poll_data["order"]["order_number"]
+
+    # 7. Fetch PDF Stream Endpoint
+    pdf_resp = client.get(f"/api/v1/payments/{attempt_id}/receipt/pdf")
+    assert pdf_resp.status_code == 200
+    assert pdf_resp.headers["content-type"] == "application/pdf"
+    assert "inline" in pdf_resp.headers["content-disposition"]
+    assert pdf_resp.content.startswith(b"%PDF-1.4")
+    assert b"%%EOF" in pdf_resp.content
+
+    # 8. Fetch PDF Download Stream Endpoint
+    pdf_dl_resp = client.get(f"/api/v1/payments/{attempt_id}/receipt/pdf?download=1")
+    assert pdf_dl_resp.status_code == 200
+    assert "attachment" in pdf_dl_resp.headers["content-disposition"]
+
+    # 9. Test Resend Receipt Email Endpoint with custom email
+    email_res = client.post(
+        f"/api/v1/payments/{attempt_id}/receipt/email",
+        json={"to_email": "raymundgerardrestaca@gmail.com"}
+    )
+    assert email_res.status_code == 200
+    assert email_res.json()["success"] is True
+    assert email_res.json()["recipient"] == "raymundgerardrestaca@gmail.com"
+
+    # 10. Test Multi-Reference Resolution: Query by Provider Checkout Session ID (cs_...)
+    provider_pm_id = poll_data["provider_payment_id"]
+    cs_receipt_resp = client.get(f"/api/v1/payments/{provider_pm_id}/receipt")
+    assert cs_receipt_resp.status_code == 200
+    assert cs_receipt_resp.json()["official_receipt_number"] == receipt["official_receipt_number"]
+
+    # 11. Test Multi-Reference Resolution: Query PDF by Provider Checkout Session ID
+    cs_pdf_resp = client.get(f"/api/v1/payments/{provider_pm_id}/receipt/pdf")
+    assert cs_pdf_resp.status_code == 200
+    assert cs_pdf_resp.content.startswith(b"%PDF-1.4")
+
+    # 12. Test Multi-Reference Resolution: Query by Order Number (ORD-...)
+    order_num = poll_data["order"]["order_number"]
+    ord_num_resp = client.get(f"/api/v1/payments/{order_num}/receipt")
+    assert ord_num_resp.status_code == 200
+    assert ord_num_resp.json()["order_number"] == order_num
+
+    # 13. Test Resend Email Endpoint with empty body (uses resolved default email)
+    empty_body_res = client.post(f"/api/v1/payments/{attempt_id}/receipt/email", json={})
+    assert empty_body_res.status_code == 200
+    assert empty_body_res.json()["success"] is True
+    assert "@" in empty_body_res.json()["recipient"]
+
+
 
 
