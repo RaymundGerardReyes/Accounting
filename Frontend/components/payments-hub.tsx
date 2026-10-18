@@ -76,8 +76,13 @@ function OrderMobileCard({ order, copiedKey, onCopy, onReconcile, onView, onPay 
 
       <div>
         <div className="font-semibold text-foreground text-sm">{order.title}</div>
-        <div className="text-xs text-muted-foreground font-mono mt-0.5">
-          {order.reference_code}
+        <div className="text-xs text-muted-foreground font-mono mt-0.5 flex items-center gap-1.5 flex-wrap">
+          <span>{order.reference_code}</span>
+          {(order.metadata?.customer_name || order.metadata?.customer_phone) && (
+            <span className="text-[11px] text-muted-foreground font-sans">
+              &middot; {order.metadata.customer_name || "Customer"}{order.metadata.customer_phone ? ` (${order.metadata.customer_phone})` : ""}
+            </span>
+          )}
         </div>
       </div>
 

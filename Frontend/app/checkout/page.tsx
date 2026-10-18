@@ -21,8 +21,8 @@ import { CheckoutButton } from "@/components/checkout-button"
 function CheckoutContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
-  const orderId = searchParams.get("order_id") || searchParams.get("orderId")
-  const isCancelled = searchParams.get("cancelled") === "true"
+  const orderId = searchParams?.get("order_id") || searchParams?.get("orderId") || null
+  const isCancelled = searchParams?.get("cancelled") === "true"
 
   const [order, setOrder] = useState<Order | null>(null)
   const [loading, setLoading] = useState(true)

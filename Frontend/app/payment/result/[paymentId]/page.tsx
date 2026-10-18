@@ -26,6 +26,7 @@ import {
   Smartphone,
   Building2,
   FileText,
+  User,
 } from "lucide-react"
 import {
   pollPaymentStatus,
@@ -226,7 +227,7 @@ export default function PaymentResultPage({ params }: PageProps) {
                   <XCircle className="w-12 h-12" />
                 </div>
               )}
-              {(status === "expired" || status === "cancelled") && (
+              {(status === "expired" || status === "cancelled" || payment.failure_code === "SOURCE_EXPIRED" || payment.session_expired) && (
                 <div className="p-3 rounded-full bg-accent/10 text-accent border border-accent/30">
                   <AlertTriangle className="w-12 h-12" />
                 </div>
@@ -240,7 +241,7 @@ export default function PaymentResultPage({ params }: PageProps) {
 
             <CardTitle className="text-2xl font-bold text-foreground">
               {status === "failed" && "Payment Failed"}
-              {status === "expired" && "Payment Session Expired"}
+              {(status === "expired" || payment.failure_code === "SOURCE_EXPIRED" || payment.session_expired) && "Payment Session Expired"}
               {status === "cancelled" && "Payment Cancelled"}
               {(status === "pending" || status === "requires_action" || status === "processing") &&
                 "Awaiting Payment Settlement"}
@@ -249,7 +250,8 @@ export default function PaymentResultPage({ params }: PageProps) {
 
             <CardDescription className="text-sm mt-1 max-w-lg mx-auto text-muted-foreground">
               {status === "failed" && (failure_message || "The payment transaction could not be completed.")}
-              {status === "expired" && "The checkout window closed before completion. Please initiate a new session."}
+              {(status === "expired" || payment.failure_code === "SOURCE_EXPIRED" || payment.session_expired) &&
+                "The PayMongo checkout session or payment source has timed out. Payment channels (QR Ph, Card, GCash, Maya, Online Banking) are locked on expired sessions. Please click below to generate an active checkout session."}
               {status === "cancelled" && "The payment was cancelled by user request."}
               {(status === "pending" || status === "requires_action" || status === "processing") &&
                 "Real-time synchronization is monitoring PayMongo for authoritative settlement confirmation."}
@@ -319,12 +321,12 @@ export default function PaymentResultPage({ params }: PageProps) {
               </Button>
             )}
 
-            {(status === "failed" || status === "expired" || status === "cancelled") && order && (
+            {(status === "failed" || status === "expired" || status === "cancelled" || payment.failure_code === "SOURCE_EXPIRED" || payment.session_expired) && order && (
               <Button
-                className="w-full sm:flex-1 bg-accent text-accent-foreground hover:bg-accent/90 font-medium"
+                className="w-full sm:flex-1 bg-accent text-accent-foreground hover:bg-accent/90 font-medium cursor-pointer"
                 onClick={() => router.push(`/checkout?order_id=${order.id}`)}
               >
-                {status === "expired" ? "Start New Checkout" : "Try Again"}
+                {(status === "expired" || payment.failure_code === "SOURCE_EXPIRED" || payment.session_expired) ? "Start New Checkout" : "Try Again"}
               </Button>
             )}
           </CardFooter>
@@ -556,6 +558,40 @@ export default function PaymentResultPage({ params }: PageProps) {
                   </div>
                 </div>
 
+                {/* Verified Customer & Payer Information */}
+                <div className="p-4 rounded-lg bg-muted/20 border border-border text-xs space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-border/60">
+                    <span className="text-xs font-semibold text-foreground uppercase tracking-wider flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-accent" />
+                      <span>Customer &amp; Payer Information</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-muted-foreground uppercase bg-muted/60 px-2 py-0.5 rounded">
+                      Verified Payer Record
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <span className="text-muted-foreground block text-[11px]">Customer / Payer Name</span>
+                      <span className="font-semibold text-foreground text-xs mt-0.5 block">
+                        {receipt.customer?.name || receipt.customer_name || "Valued Customer"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground block text-[11px]">Email Address</span>
+                      <span className="font-mono text-foreground text-xs mt-0.5 block truncate" title={receipt.customer?.email || receipt.customer_email || "Not Provided"}>
+                        {receipt.customer?.email || receipt.customer_email || "Not Provided"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground block text-[11px]">Mobile Phone / GCash No.</span>
+                      <span className="font-mono text-foreground text-xs mt-0.5 block">
+                        {receipt.customer?.phone || receipt.customer_phone || "Not Provided"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Itemized Particulars Table with Tabular Numerals and Wrapped Descriptions */}
                 <div className="border border-border rounded-lg overflow-hidden text-xs">
                   <div className="bg-muted/40 px-3.5 py-2 font-semibold text-foreground grid grid-cols-12 gap-2 text-[11px] border-b border-border">
@@ -715,6 +751,12 @@ export default function PaymentResultPage({ params }: PageProps) {
                   <span className="text-muted-foreground block text-[10px] uppercase">Payment Attempt ID</span>
                   <span className="text-foreground select-all break-all mt-0.5 block">
                     {receipt.payment_attempt_id}
+                  </span>
+                </div>
+                <div className="sm:col-span-2">
+                  <span className="text-muted-foreground block text-[10px] uppercase">Customer &amp; Payer Record</span>
+                  <span className="font-mono text-foreground text-xs select-all mt-0.5 block">
+                    {receipt.customer?.name || receipt.customer_name || "Valued Customer"} &middot; {receipt.customer?.email || receipt.customer_email || "No Email"} &middot; {receipt.customer?.phone || receipt.customer_phone || "No Phone"}
                   </span>
                 </div>
                 <div className="sm:col-span-2">

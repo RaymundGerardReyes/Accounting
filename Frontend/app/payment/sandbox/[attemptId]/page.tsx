@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect, use } from "react"
+import React, { useState, useEffect, use, Suspense } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -20,15 +20,15 @@ interface SandboxProps {
   params: Promise<{ attemptId: string }>
 }
 
-export default function SandboxPage({ params }: SandboxProps) {
+function SandboxContent({ params }: SandboxProps) {
   const resolvedParams = use(params)
   const targetId = resolvedParams.attemptId
   const searchParams = useSearchParams()
-  const queryOrderId = searchParams.get("order_id")
-  const sessionId = searchParams.get("session_id") || "cs_sim_demo"
+  const queryOrderId = searchParams?.get("order_id") || null
+  const sessionId = searchParams?.get("session_id") || "cs_sim_demo"
   const router = useRouter()
 
-  const searchMethod = searchParams.get("method")
+  const searchMethod = searchParams?.get("method") || null
   const initialMethod = (
     searchMethod === "card" || searchMethod === "card_visa" ? "card_visa"
     : searchMethod === "gcash" ? "gcash"
@@ -294,5 +294,13 @@ export default function SandboxPage({ params }: SandboxProps) {
         </CardFooter>
       </Card>
     </div>
+  )
+}
+
+export default function SandboxPage({ params }: SandboxProps) {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-sm">Loading Simulator...</div>}>
+      <SandboxContent params={params} />
+    </Suspense>
   )
 }

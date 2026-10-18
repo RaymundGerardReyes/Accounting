@@ -9,8 +9,8 @@ import { fetchOrder, fetchOrders } from "@/lib/payment-api"
 function ReturnContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
-  const orderId = searchParams.get("order_id") || searchParams.get("orderId")
-  const paymentId = searchParams.get("payment_id") || searchParams.get("paymentId")
+  const orderId = searchParams?.get("order_id") || searchParams?.get("orderId") || null
+  const paymentId = searchParams?.get("payment_id") || searchParams?.get("paymentId") || null
 
   const [message, setMessage] = useState("Connecting to PayMongo Orchestrator...")
   const [error, setError] = useState<string | null>(null)
