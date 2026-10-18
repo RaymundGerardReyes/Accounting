@@ -16,6 +16,7 @@ from services.receipt_service import (
     persist_receipt_on_order,
     generate_receipt_pdf_bytes,
     resolve_recipient_email,
+    format_philippine_phone,
 )
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -92,6 +93,10 @@ class PaymentOrchestrator:
         prefix = "ORD" if category == "product_order" else "INV"
         order_number = f"{prefix}-{datetime.now().strftime('%Y%m')}-{order_count:04d}"
 
+        meta = dict(metadata or {})
+        if meta.get("customer_phone"):
+            meta["customer_phone"] = format_philippine_phone(meta["customer_phone"]) or meta["customer_phone"]
+
         order = Order(
             id=str(uuid.uuid4()),
             user_id=user_id,
@@ -102,7 +107,7 @@ class PaymentOrchestrator:
             amount_minor=amount_minor,
             currency="PHP",
             status="pending",
-            metadata_json=json.dumps(metadata or {}),
+            metadata_json=json.dumps(meta),
         )
         db.add(order)
         db.commit()

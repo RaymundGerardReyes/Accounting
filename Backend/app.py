@@ -205,13 +205,14 @@ def list_orders(status: Optional[str] = None, db: Session = Depends(get_db)):
 @app.post("/api/v1/orders", summary="Create New Order or Invoice", status_code=status.HTTP_201_CREATED)
 def create_order(req: CreateOrderRequest, db: Session = Depends(get_db)):
     try:
+        from services.receipt_service import format_philippine_phone
         meta = dict(req.metadata or {})
         if req.customer_name:
             meta["customer_name"] = req.customer_name
         if req.customer_email:
             meta["customer_email"] = req.customer_email
         if req.customer_phone:
-            meta["customer_phone"] = req.customer_phone
+            meta["customer_phone"] = format_philippine_phone(req.customer_phone) or req.customer_phone
 
         order = orchestrator.create_order(
             db=db,
@@ -254,6 +255,7 @@ async def create_payment_attempt(
         # Update customer details in order metadata if provided
         order = db.query(Order).filter(Order.id == order_id).first()
         if order:
+            from services.receipt_service import format_philippine_phone
             o_meta = dict(order.metadata_dict or {})
             updated_o = False
             if req.customer_name:
@@ -263,7 +265,7 @@ async def create_payment_attempt(
                 o_meta["customer_email"] = req.customer_email
                 updated_o = True
             if req.customer_phone:
-                o_meta["customer_phone"] = req.customer_phone
+                o_meta["customer_phone"] = format_philippine_phone(req.customer_phone) or req.customer_phone
                 updated_o = True
             if updated_o:
                 order.metadata_dict = o_meta
