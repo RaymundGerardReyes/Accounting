@@ -26,6 +26,7 @@ import {
   RotateCcw,
   Receipt,
   Download,
+  AlertTriangle,
 } from "lucide-react"
 import {
   fetchOrders,
@@ -37,6 +38,9 @@ import {
   processFulfillmentOutbox,
   simulateWebhook,
   getReceiptPdfUrl,
+  expirePayment,
+  failPayment,
+  createAndExpireTestPayment,
   Order,
   WebhookEventRecord,
   FulfillmentOutboxRecord,
@@ -56,9 +60,10 @@ interface OrderMobileCardProps {
   onReconcile: (attemptId: string) => void
   onView: (attemptId: string) => void
   onPay: (orderId: string) => void
+  onExpire?: (attemptId: string) => void
 }
 
-function OrderMobileCard({ order, copiedKey, onCopy, onReconcile, onView, onPay }: OrderMobileCardProps) {
+function OrderMobileCard({ order, copiedKey, onCopy, onReconcile, onView, onPay, onExpire }: OrderMobileCardProps) {
   const latest = order.latest_attempt
   return (
     <div className="p-4 space-y-3 bg-card hover:bg-muted/10 transition-colors">
@@ -214,6 +219,18 @@ function OrderMobileCard({ order, copiedKey, onCopy, onReconcile, onView, onPay 
             Reconcile
           </Button>
         )}
+        {latest && (latest.status === "pending" || latest.status === "requires_action") && onExpire && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-xs h-8 flex-1 min-w-[90px] whitespace-nowrap text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/10 gap-1"
+            title="Expire and invalidate this test checkout session"
+            onClick={() => onExpire(latest.id)}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>Expire</span>
+          </Button>
+        )}
         {(order.status === "paid" || latest?.status === "succeeded") && (
           <Button
             variant="outline"
@@ -247,9 +264,10 @@ interface OrderDesktopRowProps {
   onReconcile: (attemptId: string) => void
   onView: (attemptId: string) => void
   onPay: (orderId: string) => void
+  onExpire?: (attemptId: string) => void
 }
 
-function OrderDesktopRow({ order, copiedKey, onCopy, onReconcile, onView, onPay }: OrderDesktopRowProps) {
+function OrderDesktopRow({ order, copiedKey, onCopy, onReconcile, onView, onPay, onExpire }: OrderDesktopRowProps) {
   const latest = order.latest_attempt
   return (
     <tr className="hover:bg-muted/30 transition-colors">
@@ -446,6 +464,18 @@ function OrderDesktopRow({ order, copiedKey, onCopy, onReconcile, onView, onPay 
               onClick={() => onReconcile(latest.id)}
             >
               Reconcile
+            </Button>
+          )}
+          {latest && (latest.status === "pending" || latest.status === "requires_action") && onExpire && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-8 shrink-0 whitespace-nowrap text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/10 gap-1"
+              title="Expire and invalidate this test checkout session"
+              onClick={() => onExpire(latest.id)}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>Expire</span>
             </Button>
           )}
           {(order.status === "paid" || latest?.status === "succeeded") && (
@@ -792,6 +822,7 @@ export function PaymentsHub() {
   const [webhooks, setWebhooks] = useState<WebhookEventRecord[]>([])
   const [outbox, setOutbox] = useState<FulfillmentOutboxRecord[]>([])
   const [simulatedChannel, setSimulatedChannel] = useState<"qrph" | "card_visa" | "gcash" | "maya" | "dob_bpi">("qrph")
+  const [selectedTargetAttemptId, setSelectedTargetAttemptId] = useState<string>("")
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
@@ -893,6 +924,29 @@ export function PaymentsHub() {
     })
   }, [orders, statusFilter, searchQuery])
 
+  // Flat list of all attempts from orders
+  const allAttempts = useMemo(() => {
+    const list: { order: Order; attempt: NonNullable<Order["latest_attempt"]> }[] = []
+    orders.forEach((o) => {
+      if (o.latest_attempt) {
+        list.push({ order: o, attempt: o.latest_attempt })
+      }
+    })
+    return list
+  }, [orders])
+
+  const resolvedTarget = useMemo(() => {
+    if (selectedTargetAttemptId) {
+      const match = allAttempts.find((item) => item.attempt.id === selectedTargetAttemptId)
+      if (match) return match
+    }
+    // Default to first pending / requires_action attempt if available, else first attempt
+    const pendingMatch = allAttempts.find(
+      (item) => item.attempt.status === "pending" || item.attempt.status === "requires_action"
+    )
+    return pendingMatch || allAttempts[0] || null
+  }, [selectedTargetAttemptId, allAttempts])
+
   const handleCreateOrder = async (e: React.FormEvent) => {
     e.preventDefault()
     setActionLoading(true)
@@ -965,13 +1019,66 @@ export function PaymentsHub() {
     }
   }
 
+  const handleExpireAttempt = async (attemptId: string, reason?: string) => {
+    setActionLoading(true)
+    try {
+      const res = await expirePayment(attemptId, reason || "Manually expired via test orchestration console")
+      setFeedbackMessage(
+        `Checkout session expired & invalidated: ${res.attempt?.provider_payment_id || attemptId}. Gateway URL revoked.`
+      )
+      await loadAllData()
+    } catch (err: any) {
+      setFeedbackMessage(`Expiration error: ${err.message}`)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleFailAttempt = async (attemptId: string, code?: string, message?: string) => {
+    setActionLoading(true)
+    try {
+      const res = await failPayment(attemptId, code || "PAYMENT_FAILED_TEST", message || "Test simulated payment failure")
+      setFeedbackMessage(`Payment marked failed: ${attemptId}. Reason: ${res.attempt?.failure_message || "Failed"}`)
+      await loadAllData()
+    } catch (err: any) {
+      setFeedbackMessage(`Failure error: ${err.message}`)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleCreateAndExpireTestOrder = async () => {
+    setActionLoading(true)
+    try {
+      const res = await createAndExpireTestPayment(simulatedChannel)
+      setFeedbackMessage(
+        `Quick Test Success: Created fresh order ${res.order?.order_number} and immediately expired attempt ${res.attempt?.id} (PayMongo session ${res.attempt?.provider_payment_id || "simulated"}). Gateway link blocked!`
+      )
+      await loadAllData()
+    } catch (err: any) {
+      setFeedbackMessage(`Quick test error: ${err.message}`)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   const handleSimulateWebhookEvent = async (type: "paid" | "failed" | "expired" | "duplicate") => {
-    if (orders.length === 0 || !orders[0].latest_attempt) {
+    if (!resolvedTarget) {
       setFeedbackMessage("No orders with payment attempts found to simulate a webhook on.")
       return
     }
+    const targetAttempt = resolvedTarget.attempt
+    if (
+      (type === "expired" || type === "failed") &&
+      (targetAttempt.status === "succeeded" || resolvedTarget.order.status === "paid")
+    ) {
+      setFeedbackMessage(
+        `Cannot expire or fail an already paid attempt (${targetAttempt.provider_payment_id || targetAttempt.id}) under Accounting Rule 1 (Terminal State Immutability). Please select an active pending attempt or click 'Quick Test: Create & Expire Fresh Order'.`
+      )
+      return
+    }
+
     setActionLoading(true)
-    const targetAttempt = orders[0].latest_attempt
     try {
       if (type === "duplicate") {
         const res = await simulateWebhook(targetAttempt.id, "checkout_session.payment.paid", true)
@@ -1244,6 +1351,7 @@ export function PaymentsHub() {
                         onReconcile={handleReconcileSingle}
                         onView={(attemptId) => router.push(`/payment/result/${attemptId}`)}
                         onPay={(orderId) => router.push(`/checkout?order_id=${orderId}`)}
+                        onExpire={handleExpireAttempt}
                       />
                     ))}
                   </div>
@@ -1272,6 +1380,7 @@ export function PaymentsHub() {
                             onReconcile={handleReconcileSingle}
                             onView={(attemptId) => router.push(`/payment/result/${attemptId}`)}
                             onPay={(orderId) => router.push(`/checkout?order_id=${orderId}`)}
+                            onExpire={handleExpireAttempt}
                           />
                         ))}
                       </tbody>
@@ -1479,13 +1588,114 @@ export function PaymentsHub() {
       {activeTab === "checklist" && (
         <div id="tabpanel-checklist" role="tabpanel" aria-labelledby="tab-checklist" className="space-y-6">
           <Card className="shadow-none border-border/90">
-            <CardHeader>
-              <CardTitle className="text-base font-semibold">Interactive Sandbox Testing Suite</CardTitle>
-              <CardDescription className="text-xs">
-                Trigger HMAC-signed webhook simulations to verify payment state machine invariants live
-              </CardDescription>
+            <CardHeader className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-border/60 pb-4">
+              <div>
+                <CardTitle className="text-base font-semibold">Interactive Sandbox & Gateway Testing Suite</CardTitle>
+                <CardDescription className="text-xs">
+                  Test authoritative gateway session invalidation, HMAC-signed webhooks, and state machine invariants live
+                </CardDescription>
+              </div>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handleCreateAndExpireTestOrder}
+                disabled={actionLoading}
+                className="gap-1.5 text-xs font-semibold bg-accent text-accent-foreground hover:bg-accent/90 shrink-0"
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>Quick Test: Create & Expire Fresh Order</span>
+              </Button>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-5 pt-4">
+              {/* Target Attempt Selector */}
+              <div className="p-3.5 rounded-lg border border-border/80 bg-muted/20 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <label htmlFor="target-attempt-select" className="text-xs font-semibold text-foreground uppercase tracking-wide">
+                    Target Payment Attempt for Testing:
+                  </label>
+                  {resolvedTarget && (
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="text-muted-foreground font-mono">Status:</span>
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                          resolvedTarget.attempt.status === "succeeded"
+                            ? "bg-primary/10 text-foreground border border-primary/20"
+                            : resolvedTarget.attempt.status === "failed"
+                            ? "bg-accent/10 text-accent border border-accent/20"
+                            : resolvedTarget.attempt.status === "requires_action" || resolvedTarget.attempt.status === "pending"
+                            ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                            : "bg-muted text-muted-foreground border border-border"
+                        }`}
+                      >
+                        {resolvedTarget.attempt.status}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <select
+                  id="target-attempt-select"
+                  value={resolvedTarget ? resolvedTarget.attempt.id : ""}
+                  onChange={(e) => setSelectedTargetAttemptId(e.target.value)}
+                  className="w-full text-xs font-mono bg-card border border-border rounded-md p-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  {allAttempts.map(({ order, attempt }) => (
+                    <option key={attempt.id} value={attempt.id}>
+                      [{attempt.status.toUpperCase()}] {order.order_number} · {order.title} ({formatPhpFromMinor(attempt.amount_minor)}) — Attempt {attempt.id.slice(0, 8)}... {attempt.provider_payment_id ? `(${attempt.provider_payment_id})` : ""}
+                    </option>
+                  ))}
+                </select>
+
+                {resolvedTarget && (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-border/60 text-xs font-mono">
+                    <div className="space-y-0.5">
+                      <div className="text-[11px] text-foreground font-semibold">
+                        Order: {resolvedTarget.order.order_number} — {resolvedTarget.order.title}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">
+                        Session: {resolvedTarget.attempt.provider_payment_id || resolvedTarget.attempt.id} · Method: {resolvedTarget.attempt.payment_method || "paymongo"}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={actionLoading || resolvedTarget.attempt.status === "succeeded"}
+                        onClick={() => handleExpireAttempt(resolvedTarget.attempt.id)}
+                        className="text-xs h-7 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/10 gap-1"
+                        title={resolvedTarget.attempt.status === "succeeded" ? "Cannot expire paid session" : "Revoke gateway session URL via PayMongo /expire API"}
+                      >
+                        <Clock className="w-3 h-3" />
+                        <span>Authoritative Expire</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={actionLoading || resolvedTarget.attempt.status === "succeeded"}
+                        onClick={() => handleFailAttempt(resolvedTarget.attempt.id)}
+                        className="text-xs h-7 text-accent border-accent/30 hover:bg-accent/10 gap-1"
+                        title={resolvedTarget.attempt.status === "succeeded" ? "Cannot fail paid session" : "Mark attempt failed"}
+                      >
+                        <XCircle className="w-3 h-3" />
+                        <span>Direct Fail</span>
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {resolvedTarget && (resolvedTarget.attempt.status === "succeeded" || resolvedTarget.order.status === "paid") && (
+                  <div className="flex items-start gap-2 p-2 rounded bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 text-xs">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-semibold">Terminal State Immutability Active: </span>
+                      This attempt has already been paid and settled. Accounting records cannot be expired or failed after settlement. To test gateway session expiration or failure blocking, select a pending attempt or click <strong>Quick Test: Create & Expire Fresh Order</strong> above.
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="text-xs font-semibold text-foreground uppercase tracking-wide block mb-2">
                   1. Select Payment Method Rail for Simulation:
@@ -1517,7 +1727,7 @@ export function PaymentsHub() {
 
               <div>
                 <label className="text-xs font-semibold text-foreground uppercase tracking-wide block mb-2">
-                  2. Trigger Simulation:
+                  2. Trigger Simulation on Target Attempt:
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                   <Button
@@ -1526,75 +1736,75 @@ export function PaymentsHub() {
                     disabled={actionLoading}
                     className="gap-1.5 h-auto py-3.5 px-4 text-left flex-col items-start border-border hover:border-foreground"
                   >
-                  <div className="flex items-center gap-1.5 font-semibold text-foreground text-xs">
-                    <CheckCircle2 className="w-4 h-4 text-foreground" />
-                    <span>Simulate Paid Webhook</span>
-                  </div>
-                  <span className="text-[11px] font-mono text-muted-foreground">
-                    checkout_session.payment.paid
-                  </span>
-                </Button>
+                    <div className="flex items-center gap-1.5 font-semibold text-foreground text-xs">
+                      <CheckCircle2 className="w-4 h-4 text-foreground" />
+                      <span>Simulate Paid Webhook</span>
+                    </div>
+                    <span className="text-[11px] font-mono text-muted-foreground">
+                      checkout_session.payment.paid
+                    </span>
+                  </Button>
 
-                <Button
-                  variant="outline"
-                  onClick={() => handleSimulateWebhookEvent("failed")}
-                  disabled={actionLoading}
-                  className="gap-1.5 h-auto py-3.5 px-4 text-left flex-col items-start border-border hover:border-accent"
-                >
-                  <div className="flex items-center gap-1.5 font-semibold text-accent text-xs">
-                    <XCircle className="w-4 h-4 text-accent" />
-                    <span>Simulate Failed Webhook</span>
-                  </div>
-                  <span className="text-[11px] font-mono text-muted-foreground">payment.failed</span>
-                </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => handleSimulateWebhookEvent("failed")}
+                    disabled={actionLoading}
+                    className="gap-1.5 h-auto py-3.5 px-4 text-left flex-col items-start border-border hover:border-accent"
+                  >
+                    <div className="flex items-center gap-1.5 font-semibold text-accent text-xs">
+                      <XCircle className="w-4 h-4 text-accent" />
+                      <span>Simulate Failed Webhook</span>
+                    </div>
+                    <span className="text-[11px] font-mono text-muted-foreground">payment.failed</span>
+                  </Button>
 
-                <Button
-                  variant="outline"
-                  onClick={() => handleSimulateWebhookEvent("expired")}
-                  disabled={actionLoading}
-                  className="gap-1.5 h-auto py-3.5 px-4 text-left flex-col items-start border-border hover:border-amber-500"
-                >
-                  <div className="flex items-center gap-1.5 font-semibold text-amber-500 text-xs">
-                    <Clock className="w-4 h-4 text-amber-500" />
-                    <span>Simulate Expired Webhook</span>
-                  </div>
-                  <span className="text-[11px] font-mono text-muted-foreground">
-                    checkout_session.expired
-                  </span>
-                </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => handleSimulateWebhookEvent("expired")}
+                    disabled={actionLoading}
+                    className="gap-1.5 h-auto py-3.5 px-4 text-left flex-col items-start border-border hover:border-amber-500"
+                  >
+                    <div className="flex items-center gap-1.5 font-semibold text-amber-500 text-xs">
+                      <Clock className="w-4 h-4 text-amber-500" />
+                      <span>Simulate Expired Webhook</span>
+                    </div>
+                    <span className="text-[11px] font-mono text-muted-foreground">
+                      checkout_session.expired
+                    </span>
+                  </Button>
 
-                <Button
-                  variant="outline"
-                  onClick={() => handleSimulateWebhookEvent("duplicate")}
-                  disabled={actionLoading}
-                  className="gap-1.5 h-auto py-3.5 px-4 text-left flex-col items-start border-border hover:border-foreground"
-                >
-                  <div className="flex items-center gap-1.5 font-semibold text-foreground text-xs">
-                    <Layers className="w-4 h-4 text-foreground" />
-                    <span>Simulate Duplicate</span>
-                  </div>
-                  <span className="text-[11px] font-mono text-muted-foreground">
-                    Tests atomic deduplication
-                  </span>
-                </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => handleSimulateWebhookEvent("duplicate")}
+                    disabled={actionLoading}
+                    className="gap-1.5 h-auto py-3.5 px-4 text-left flex-col items-start border-border hover:border-foreground"
+                  >
+                    <div className="flex items-center gap-1.5 font-semibold text-foreground text-xs">
+                      <Layers className="w-4 h-4 text-foreground" />
+                      <span>Simulate Duplicate</span>
+                    </div>
+                    <span className="text-[11px] font-mono text-muted-foreground">
+                      Tests atomic deduplication
+                    </span>
+                  </Button>
 
-                <Button
-                  variant="outline"
-                  onClick={handleBatchReconcile}
-                  disabled={actionLoading}
-                  className="gap-1.5 h-auto py-3.5 px-4 text-left flex-col items-start border-border hover:border-foreground"
-                >
-                  <div className="flex items-center gap-1.5 font-semibold text-foreground text-xs">
-                    <RefreshCw className="w-4 h-4 text-accent" />
-                    <span>Batch Reconcile</span>
-                  </div>
-                  <span className="text-[11px] font-mono text-muted-foreground">
-                    Syncs unresolved attempts
-                  </span>
-                </Button>
+                  <Button
+                    variant="outline"
+                    onClick={handleBatchReconcile}
+                    disabled={actionLoading}
+                    className="gap-1.5 h-auto py-3.5 px-4 text-left flex-col items-start border-border hover:border-foreground"
+                  >
+                    <div className="flex items-center gap-1.5 font-semibold text-foreground text-xs">
+                      <RefreshCw className="w-4 h-4 text-accent" />
+                      <span>Batch Reconcile</span>
+                    </div>
+                    <span className="text-[11px] font-mono text-muted-foreground">
+                      Syncs unresolved attempts
+                    </span>
+                  </Button>
+                </div>
               </div>
-            </div>
-          </CardContent>
+            </CardContent>
           </Card>
 
           <Card className="shadow-none border-border/90">
