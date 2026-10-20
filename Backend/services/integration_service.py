@@ -15,8 +15,17 @@ from sqlalchemy import text
 
 from services.email_service import EmailService
 
-BACKEND_DIR = Path(__file__).resolve().parent.parent
-ENV_FILE = BACKEND_DIR / ".env"
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+CANONICAL_ROOT_ENV = ROOT_DIR / ".env"
+
+def get_authoritative_env_file() -> Path:
+    """
+    Returns the authoritative .env file for the monorepo application.
+    Directly targets repository root E:\Accounting\.env.
+    """
+    return CANONICAL_ROOT_ENV
+
+ENV_FILE = get_authoritative_env_file()
 
 
 class IntegrationService:
@@ -289,17 +298,18 @@ class IntegrationService:
         ]
 
     # =========================================================================
-    # 6. Secure Credential Persistence to Backend/.env
+    # 6. Secure Credential Persistence to Authoritative Root .env
     # =========================================================================
 
     def save_env_credentials(self, updates: Dict[str, str]) -> Dict[str, Any]:
         """
-        Updates or appends key-value pairs into Backend/.env.
-        Preserves existing comments and unrelated keys.
+        Updates or appends key-value pairs into the authoritative root .env file (E:\Accounting\.env).
+        Preserves existing comments, order, and unrelated keys across the monorepo.
         """
+        target_file = get_authoritative_env_file()
         env_lines = []
-        if ENV_FILE.exists():
-            with open(ENV_FILE, "r", encoding="utf-8") as f:
+        if target_file.exists():
+            with open(target_file, "r", encoding="utf-8") as f:
                 env_lines = f.readlines()
 
         keys_to_update = set(updates.keys())
@@ -326,7 +336,7 @@ class IntegrationService:
                 updated_lines.append(f"{key}={val.strip()}\n")
                 os.environ[key] = val.strip()
 
-        with open(ENV_FILE, "w", encoding="utf-8") as f:
+        with open(target_file, "w", encoding="utf-8") as f:
             f.writelines(updated_lines)
 
         # Refresh email service instance with new credentials
@@ -334,7 +344,8 @@ class IntegrationService:
 
         return {
             "success": True,
-            "message": f"Successfully updated {len(updates)} credential(s) in Backend/.env",
+            "message": f"Successfully updated {len(updates)} credential(s) in {target_file.name}",
+            "target_file": str(target_file),
             "updated_keys": list(updates.keys()),
         }
 

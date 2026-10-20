@@ -164,7 +164,7 @@ def test_email_credentials(req: EmailTestRequest):
 @router.post("/configure", summary="Save Integration Credentials to Environment")
 def save_integration_credentials(req: SaveCredentialsRequest):
     """
-    Securely writes updated credentials to Backend/.env and refreshes active runtime services.
+    Securely writes updated credentials to authoritative root .env (E:\Accounting\.env) and refreshes active runtime services.
     """
     updates: Dict[str, str] = {}
     if req.paymongo_secret_key is not None:

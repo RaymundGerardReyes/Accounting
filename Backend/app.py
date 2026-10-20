@@ -12,8 +12,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 
-# Load .env if present
-load_dotenv(Path(__file__).parent / ".env")
+# Load authoritative monorepo environment configuration (E:\Accounting\.env)
+_root_env = Path(__file__).resolve().parent.parent / ".env"
+if _root_env.exists():
+    load_dotenv(_root_env)
 
 from database import get_db
 from models import init_db, Order, PaymentAttempt, WebhookEvent, FulfillmentOutbox

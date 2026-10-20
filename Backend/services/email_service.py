@@ -15,7 +15,7 @@ from typing import Dict, Any, Optional, List
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 
 class EmailService:
@@ -189,7 +189,7 @@ class EmailService:
             return {
                 "success": False,
                 "status": "unconfigured",
-                "message": "SMTP service is not configured. Set SMTP_USER and SMTP_APP_PASSWORD (or SMTP_PASS) in Backend/.env.",
+                "message": "SMTP service is not configured. Set SMTP_USER and SMTP_APP_PASSWORD (or SMTP_PASS) in .env (repository root).",
             }
 
         start_time = time.perf_counter()

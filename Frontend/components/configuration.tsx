@@ -155,7 +155,7 @@ export function Configuration({ onBack }: ConfigurationProps) {
         }),
       })
       if (res.ok) {
-        setPaymongoSaveMsg("Credentials saved to Backend/.env and active in runtime.")
+        setPaymongoSaveMsg("Credentials saved to root .env and active in runtime.")
         await fetchLiveIntegrations()
         setTimeout(() => setPaymongoSaveMsg(null), 3500)
       } else {
@@ -235,7 +235,7 @@ export function Configuration({ onBack }: ConfigurationProps) {
         }),
       })
       if (res.ok) {
-        setEmailSaveMsg("Google SMTP credentials saved to Backend/.env.")
+        setEmailSaveMsg("Google SMTP credentials saved to root .env.")
         await fetchLiveIntegrations()
         setTimeout(() => setEmailSaveMsg(null), 3500)
       } else {

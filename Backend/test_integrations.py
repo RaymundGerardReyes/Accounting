@@ -166,3 +166,12 @@ def test_api_email_test_endpoint_unconfigured():
     assert data["success"] is False
     assert data["probe"]["operational_state"] == "unconfigured"
 
+
+def test_authoritative_root_env_resolution():
+    from services.integration_service import get_authoritative_env_file, ROOT_DIR
+    env_file = get_authoritative_env_file()
+    assert env_file == ROOT_DIR / ".env"
+    # Ensure subdirectory Backend/.env is NOT targeted
+    assert env_file.parent.name != "Backend"
+
+

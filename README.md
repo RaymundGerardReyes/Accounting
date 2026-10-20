@@ -88,16 +88,28 @@ Open **[http://localhost:3000](http://localhost:3000)** to view the Cost Analysi
 
 ---
 
-## 💳 PayMongo Environment Configuration
+## 💳 PayMongo & Monorepo Environment Configuration
 
-To connect live or test PayMongo accounts, create `Backend/.env`:
+Environment variables are unified at the repository root (`E:\Accounting\.env`). To configure live or test credentials, copy `.env.example` to `.env`:
+```bash
+cp .env.example .env
+```
+Key configuration parameters:
 ```ini
+# PayMongo Gateway Keys (omit to run built-in Local Sandbox Simulator)
 PAYMONGO_SECRET_KEY=sk_test_... # or sk_live_...
 PAYMONGO_WEBHOOK_SECRET=whsk_...
-# Optional production PostgreSQL connection:
+
+# Google Email SMTP Settings
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_APP_PASSWORD=your-16-char-app-password
+
+# Optional production PostgreSQL connection (defaults to local SQLite):
 # DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/accounting_db
 ```
-*Note: If omitted, the backend automatically uses the built-in Local Sandbox Simulator.*
+*Note: Subdirectory `.env` files (`Backend/.env`, `Frontend/.env.local`) are deprecated. Both Next.js 15 and FastAPI share and coordinate exclusively via the canonical root `.env`.*
 
 ---
 

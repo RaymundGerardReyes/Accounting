@@ -18,3 +18,9 @@ description: Strict architectural guardrails for E:\Accounting legacy compatibil
    - **Timeout Safety**: Never auto-retry a charge on a gateway timeout; mark the attempt as `unknown` and reconcile first.
    - **Transactional Outbox Resilience**: Outbox processors must support explicit retries of failed entries (`?retry_failed=true`), ensuring asynchronous fulfillment and customer receipt delivery succeed even after temporary email or file I/O outages.
 
+3. **Monorepo Environment Configuration Invariants**:
+   - **Unified Single Source of Truth**: The single authoritative environment file is `E:\Accounting\.env` (repository root), initialized from `E:\Accounting\.env.example`.
+   - **Prohibition of Subsystem `.env` Files**: Placing `.env` files in subdirectories (`E:\Accounting\Backend\.env`, `E:\Accounting\Frontend\.env.local`, etc.) is strictly deprecated and prohibited to eliminate split-brain configuration risk.
+   - **Zero Secrets in Client Bundle**: Server secrets (`PAYMONGO_SECRET_KEY`, `PAYMONGO_WEBHOOK_SECRET`, `SMTP_APP_PASSWORD`) must NEVER be prefixed with `NEXT_PUBLIC_`.
+   - **Automatic Local Fallback**: Omitting PayMongo gateway keys in `E:\Accounting\.env` must cleanly activate the local sandbox simulator without runtime crashes.
+

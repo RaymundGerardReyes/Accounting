@@ -7,10 +7,13 @@ description: >-
 
 # PayMongo Live Orchestration Skill
 
-## 1. Environment Variables (`E:\Accounting\Backend\.env`)
+## 1. Environment Variables (`E:\Accounting\.env`)
+- Authoritative root environment configuration: `E:\Accounting\.env` (template: `E:\Accounting\.env.example`).
+- Subdirectory `.env` files (`Backend/.env`, `Frontend/.env.local`) are strictly deprecated.
 - `PAYMONGO_SECRET_KEY`: `sk_test_...` or `sk_live_...` (if omitted, Backend automatically uses the Local Sandbox Simulator).
 - `PAYMONGO_WEBHOOK_SECRET`: `whsk_...` for verifying `Paymongo-Signature` headers.
 - `DATABASE_URL`: PostgreSQL URL (`postgresql+psycopg2://...`) or omit for automatic `sqlite:///./accounting_payments.db`.
+- `BACKEND_INTERNAL_URL`: `http://localhost:5000` (used by Next.js route proxy).
 
 ## 2. Webhook Signature Verification (`Paymongo-Signature`)
 PayMongo sends `Paymongo-Signature: t=<timestamp>,te=<test_signature>,li=<live_signature>`.

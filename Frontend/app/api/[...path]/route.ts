@@ -1,14 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server"
 
 export const dynamic = "force-dynamic"
-const BACKEND_URL = process.env.BACKEND_INTERNAL_URL || "http://localhost:5000"
 
 async function proxyRequest(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> }
 ) {
+  const backendBase = process.env.BACKEND_INTERNAL_URL || "http://localhost:5000"
   const { path } = await context.params
-  const targetUrl = new URL(`/api/${path.join("/")}`, BACKEND_URL)
+  const targetUrl = new URL(`/api/${path.join("/")}`, backendBase)
   request.nextUrl.searchParams.forEach((val, key) => {
     targetUrl.searchParams.append(key, val)
   })

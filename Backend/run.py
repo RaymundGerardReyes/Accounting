@@ -15,6 +15,13 @@ Usage:
 
 import sys
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load authoritative monorepo environment configuration (E:\Accounting\.env)
+_root_env = Path(__file__).resolve().parent.parent / ".env"
+if _root_env.exists():
+    load_dotenv(_root_env)
 
 def main():
     args = sys.argv[1:]
