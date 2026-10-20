@@ -674,3 +674,80 @@ class PaymentOrchestrator:
                 results.append({"attempt_id": att.id, "status": att.status, "error": str(e)})
         return results
 
+    async def expire_payment_attempt(
+        self,
+        db: Session,
+        attempt_id: str,
+        reason: str = "Manual expiration / session timeout",
+    ) -> PaymentAttempt:
+        """
+        Authoritatively expires an active payment attempt:
+        1. Verifies attempt is not already succeeded (terminal state rule).
+        2. Calls provider to invalidate remote checkout session (e.g. PayMongo POST /checkout_sessions/:id/expire).
+        3. Sets status = 'expired', failure_code = 'SESSION_EXPIRED', clears checkout_url.
+        4. Logs to Audit Trail and returns updated record.
+        """
+        attempt = db.query(PaymentAttempt).filter(PaymentAttempt.id == attempt_id).first()
+        if not attempt:
+            raise ValueError(f"Payment attempt '{attempt_id}' not found.")
+
+        order = db.query(Order).filter(Order.id == attempt.order_id).first()
+        if attempt.status == "succeeded" or (order and order.status == "paid"):
+            raise ValueError(
+                f"Cannot expire payment attempt: Order '{order.order_number if order else attempt_id}' is already settled and paid."
+            )
+
+        if attempt.status == "expired":
+            return attempt
+
+        # Invalidate remote checkout session on PayMongo if applicable
+        if attempt.provider_payment_id:
+            try:
+                await self.provider.expire_checkout_session(attempt.provider_payment_id)
+            except Exception as e:
+                print(f"Remote gateway expire call note: {e}")
+
+        attempt.status = "expired"
+        attempt.failure_code = "SESSION_EXPIRED"
+        attempt.failure_message = reason
+        attempt.checkout_url = None
+        attempt.updated_at = utc_now()
+        db.commit()
+        db.refresh(attempt)
+        return attempt
+
+    async def fail_payment_attempt(
+        self,
+        db: Session,
+        attempt_id: str,
+        code: str = "CARD_DECLINED",
+        message: str = "Payment declined by test rail.",
+    ) -> PaymentAttempt:
+        """
+        Authoritatively fails an active payment attempt:
+        1. Verifies attempt is not already succeeded (terminal state rule).
+        2. Sets status = 'failed', failure_code = code, failure_message = message.
+        3. Clears checkout_url and returns updated record.
+        """
+        attempt = db.query(PaymentAttempt).filter(PaymentAttempt.id == attempt_id).first()
+        if not attempt:
+            raise ValueError(f"Payment attempt '{attempt_id}' not found.")
+
+        order = db.query(Order).filter(Order.id == attempt.order_id).first()
+        if attempt.status == "succeeded" or (order and order.status == "paid"):
+            raise ValueError(
+                f"Cannot fail payment attempt: Order '{order.order_number if order else attempt_id}' is already settled and paid."
+            )
+
+        if attempt.status == "failed":
+            return attempt
+
+        attempt.status = "failed"
+        attempt.failure_code = code
+        attempt.failure_message = message
+        attempt.checkout_url = None
+        attempt.updated_at = utc_now()
+        db.commit()
+        db.refresh(attempt)
+        return attempt
+

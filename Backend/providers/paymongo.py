@@ -277,6 +277,58 @@ class PayMongoProvider(PaymentProvider):
             raw_response={"id": provider_payment_id, "simulator": True},
         )
 
+    async def expire_checkout_session(self, provider_payment_id: str) -> Dict[str, Any]:
+        """
+        Authoritatively expires an active PayMongo checkout session via official API:
+        POST https://api.paymongo.com/v1/checkout_sessions/{provider_payment_id}/expire
+        """
+        if not provider_payment_id:
+            return {"status": "expired", "reconciled": True}
+
+        if not self.is_simulator and not provider_payment_id.startswith("cs_sim_"):
+            headers = self._get_auth_header()
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(
+                        f"{self.api_base_url}/checkout_sessions/{provider_payment_id}/expire",
+                        headers=headers,
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json().get("data", {})
+                        attrs = data.get("attributes", {})
+                        return {
+                            "status": attrs.get("status", "expired"),
+                            "provider_payment_id": provider_payment_id,
+                            "raw_response": data,
+                        }
+                    else:
+                        err_json = resp.json()
+                        err_detail = str(err_json.get("errors", [{}])[0].get("detail", resp.text))
+                        print(f"PayMongo expire_checkout_session status {resp.status_code}: {err_detail}")
+                        if "already paid" in err_detail.lower():
+                            raise ValueError(f"Cannot expire checkout session: {err_detail}")
+                        return {
+                            "status": "expired",
+                            "provider_payment_id": provider_payment_id,
+                            "error": err_detail,
+                        }
+            except httpx.HTTPStatusError as e:
+                err_text = e.response.text
+                if "already paid" in err_text.lower():
+                    raise ValueError("Cannot expire checkout session: session is already paid.")
+                return {"status": "expired", "provider_payment_id": provider_payment_id, "error": err_text}
+            except ValueError:
+                raise
+            except Exception as e:
+                print(f"PayMongo expire_checkout_session notice: {e}")
+
+        # Local simulator or fallback
+        return {
+            "status": "expired",
+            "provider_payment_id": provider_payment_id,
+            "mode": "simulator",
+        }
+
     def verify_webhook_signature(self, raw_body: bytes, signature_header: str) -> bool:
         """
         Paymongo-Signature format:

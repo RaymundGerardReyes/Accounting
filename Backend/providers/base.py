@@ -49,3 +49,7 @@ class PaymentProvider(ABC):
     def verify_webhook_signature(self, raw_body: bytes, signature_header: str) -> bool:
         pass
 
+    @abstractmethod
+    async def expire_checkout_session(self, provider_payment_id: str) -> Dict[str, Any]:
+        pass
+

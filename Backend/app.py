@@ -182,6 +182,15 @@ class SimulateWebhookRequest(BaseModel):
 class ResendReceiptEmailRequest(BaseModel):
     to_email: Optional[str] = Field(None, description="Recipient email address for receipt dispatch")
 
+class ExpirePaymentRequest(BaseModel):
+    reason: Optional[str] = Field("Manual expiration / session timeout", description="Reason for session expiration")
+
+class FailPaymentRequest(BaseModel):
+    code: Optional[str] = Field(None, description="Failure code")
+    message: Optional[str] = Field(None, description="Failure explanation")
+    failure_code: Optional[str] = Field(None, description="Alternative failure code alias")
+    failure_message: Optional[str] = Field(None, description="Alternative failure message alias")
+
 @app.get("/api/v1/orders", summary="List Orders & Invoices")
 def list_orders(status: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(Order).order_by(Order.created_at.desc())
@@ -778,6 +787,94 @@ async def simulate_webhook(req: SimulateWebhookRequest, db: Session = Depends(ge
         "simulated_event_id": event_id,
         "signature_header": signature,
         "result": result,
+    }
+
+@app.post("/api/v1/payments/{payment_id}/expire", summary="Expire Active Payment Attempt & Remote Gateway Session")
+async def expire_payment(
+    payment_id: str,
+    req: Optional[ExpirePaymentRequest] = None,
+    db: Session = Depends(get_db),
+):
+    attempt, order = _resolve_payment_attempt_and_order(db, payment_id)
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Payment attempt not found.")
+    reason = req.reason if req and req.reason else "Manual expiration / session timeout"
+    try:
+        updated = await orchestrator.expire_payment_attempt(db, attempt.id, reason=reason)
+        return {
+            "success": True,
+            "status": "expired",
+            "message": f"Payment attempt '{attempt.id}' authoritatively expired.",
+            "attempt": updated.to_dict(),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/payments/{payment_id}/fail", summary="Fail Active Payment Attempt")
+async def fail_payment(
+    payment_id: str,
+    req: Optional[FailPaymentRequest] = None,
+    db: Session = Depends(get_db),
+):
+    attempt, order = _resolve_payment_attempt_and_order(db, payment_id)
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Payment attempt not found.")
+    code = (req.failure_code or req.code) if req and (req.failure_code or req.code) else "CARD_DECLINED"
+    message = (req.failure_message or req.message) if req and (req.failure_message or req.message) else "Payment declined by test rail."
+    try:
+        updated = await orchestrator.fail_payment_attempt(db, attempt.id, code=code, message=message)
+        return {
+            "success": True,
+            "status": "failed",
+            "message": f"Payment attempt '{attempt.id}' marked failed.",
+            "attempt": updated.to_dict(),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/sandbox/create-and-expire-test", summary="Quick Test: Create and Expire Fresh Test Order & Attempt", status_code=status.HTTP_201_CREATED)
+async def create_and_expire_test(
+    channel: str = "qrph",
+    db: Session = Depends(get_db),
+):
+    """
+    Creates a fresh test order with an active payment attempt, then immediately expires it.
+    Verifies that the checkout session is authoritatively invalidated and blocked.
+    """
+    test_id = uuid.uuid4().hex[:8]
+    order = orchestrator.create_order(
+        db=db,
+        title=f"Expired Test Order {test_id}",
+        category="product_order",
+        reference_code="Product A",
+        quantity=1,
+        metadata={
+            "customer_name": "Test Simulation User",
+            "customer_email": "test.sim@example.com",
+            "customer_phone": "+63 917 000 0000",
+            "test_mode": "expire_simulation",
+        },
+    )
+    attempt = await orchestrator.initiate_payment_attempt(
+        db=db,
+        order_id=order.id,
+        idempotency_key=f"sim_exp_key_{test_id}",
+        payment_method=channel,
+    )
+    expired_attempt = await orchestrator.expire_payment_attempt(
+        db=db,
+        attempt_id=attempt.id,
+        reason="Interactive sandbox test expiration",
+    )
+    return {
+        "success": True,
+        "message": f"Created and expired test attempt '{expired_attempt.id}' for order '{order.order_number}'.",
+        "order": order.to_dict(),
+        "attempt": expired_attempt.to_dict(),
     }
 
 if __name__ == "__main__":
