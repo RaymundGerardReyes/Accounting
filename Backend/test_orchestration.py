@@ -786,7 +786,16 @@ def test_payment_method_normalization_and_catalog():
     assert extract_payment_method_from_paymongo(attrs_gcash) == "gcash"
 
 
-def test_official_receipt_and_acknowledgement_report_flow():
+def test_official_receipt_and_acknowledgement_report_flow(monkeypatch):
+    monkeypatch.setattr("services.email_service.EmailService.is_configured", lambda self: True)
+    monkeypatch.setattr(
+        "services.email_service.EmailService.send_email",
+        lambda self, *args, **kwargs: {
+            "success": True,
+            "message": "Dispatched with PDF attachment",
+            "latency_ms": 120,
+        },
+    )
     # 1. Create order
     resp_order = client.post("/api/v1/orders", json={
         "title": "Official Receipt Validation Order",
@@ -1192,6 +1201,122 @@ def test_customer_billing_info_and_expired_source_guardrails():
     assert slug_data["checkout_url"] is None
     assert slug_data["session_expired"] is True
     assert slug_data["can_retry"] is True
+
+
+def test_authoritative_payment_expiration_and_gateway_invalidation():
+    # 1. Create fresh order and payment attempt
+    resp_order = client.post("/api/v1/orders", json={
+        "title": "Gateway Invalidation Test Order",
+        "category": "product_order",
+        "reference_code": "Product B",
+        "quantity": 1
+    })
+    assert resp_order.status_code == 201
+    order_id = resp_order.json()["id"]
+
+    att_resp = client.post(
+        f"/api/v1/orders/{order_id}/payment-attempts",
+        json={"payment_method": "qrph", "idempotency_key": f"exp_auth_{uuid.uuid4().hex}"}
+    )
+    assert att_resp.status_code == 201
+    att_id = att_resp.json()["id"]
+    assert att_resp.json()["status"] in ["pending", "requires_action"]
+
+    # 2. Authoritative expiration via POST /api/v1/payments/{id}/expire
+    exp_resp = client.post(
+        f"/api/v1/payments/{att_id}/expire",
+        json={"reason": "Customer cancelled checkout before QR scan"}
+    )
+    assert exp_resp.status_code == 200
+    exp_data = exp_resp.json()
+    assert exp_data["success"] is True
+    assert exp_data["status"] == "expired"
+    assert exp_data["attempt"]["status"] == "expired"
+    assert exp_data["attempt"]["failure_code"] == "SESSION_EXPIRED"
+    assert exp_data["attempt"]["checkout_url"] is None
+
+    # Check that order status remains pending to allow retrying
+    order_check = client.get(f"/api/v1/orders/{order_id}").json()
+    assert order_check["status"] == "pending"
+
+    # 3. Terminal State Immutability: Verify paid attempt cannot be expired or failed
+    resp_paid_order = client.post("/api/v1/orders", json={
+        "title": "Settled Terminal Order",
+        "category": "product_order",
+        "reference_code": "Product A",
+        "quantity": 1
+    })
+    paid_order_id = resp_paid_order.json()["id"]
+    att_paid_resp = client.post(
+        f"/api/v1/orders/{paid_order_id}/payment-attempts",
+        json={"payment_method": "gcash", "idempotency_key": f"term_paid_{uuid.uuid4().hex}"}
+    )
+    att_paid_id = att_paid_resp.json()["id"]
+
+    # Settle payment
+    client.post("/api/v1/sandbox/simulate-webhook", json={
+        "payment_attempt_id": att_paid_id,
+        "event_type": "checkout_session.payment.paid",
+        "payment_method": "gcash"
+    })
+
+    # Verify attempt is now succeeded
+    paid_att = client.get(f"/api/v1/payments/{att_paid_id}?auto_reconcile=false").json()
+    assert paid_att["status"] == "succeeded"
+
+    # Attempting to expire a succeeded attempt must fail with HTTP 400
+    expire_paid_resp = client.post(
+        f"/api/v1/payments/{att_paid_id}/expire",
+        json={"reason": "Test late expiration"}
+    )
+    assert expire_paid_resp.status_code == 400
+    assert "already settled and paid" in expire_paid_resp.json()["detail"].lower()
+
+    # Attempting to fail a succeeded attempt must also fail with HTTP 400
+    fail_paid_resp = client.post(
+        f"/api/v1/payments/{att_paid_id}/fail",
+        json={"failure_code": "FRAUD_TEST", "failure_message": "Fraud test"}
+    )
+    assert fail_paid_resp.status_code == 400
+    assert "already settled and paid" in fail_paid_resp.json()["detail"].lower()
+
+    # 4. Quick-test endpoint: POST /api/v1/sandbox/create-and-expire-test
+    quick_resp = client.post("/api/v1/sandbox/create-and-expire-test", json={"channel": "card_visa"})
+    assert quick_resp.status_code in [200, 201]
+    quick_data = quick_resp.json()
+    assert quick_data["success"] is True
+    assert quick_data["attempt"]["status"] == "expired"
+    assert quick_data["attempt"]["failure_code"] == "SESSION_EXPIRED"
+    assert quick_data["attempt"]["checkout_url"] is None
+    assert quick_data["order"]["status"] == "pending"
+
+    # 5. Direct fail endpoint: POST /api/v1/payments/{id}/fail
+    resp_fail_order = client.post("/api/v1/orders", json={
+        "title": "Direct Fail Test Order",
+        "category": "product_order",
+        "reference_code": "Product E",
+        "quantity": 1
+    })
+    fail_order_id = resp_fail_order.json()["id"]
+    att_fail_resp = client.post(
+        f"/api/v1/orders/{fail_order_id}/payment-attempts",
+        json={"payment_method": "maya", "idempotency_key": f"dir_fail_{uuid.uuid4().hex}"}
+    )
+    att_fail_id = att_fail_resp.json()["id"]
+
+    fail_resp = client.post(
+        f"/api/v1/payments/{att_fail_id}/fail",
+        json={"failure_code": "ISSUER_DECLINED", "failure_message": "Customer issuer declined the transaction."}
+    )
+    assert fail_resp.status_code == 200
+    fail_data = fail_resp.json()
+    assert fail_data["success"] is True
+    assert fail_data["status"] == "failed"
+    assert fail_data["attempt"]["status"] == "failed"
+    assert fail_data["attempt"]["failure_code"] == "ISSUER_DECLINED"
+    assert fail_data["attempt"]["failure_message"] == "Customer issuer declined the transaction."
+    assert fail_data["attempt"]["checkout_url"] is None
+
 
 
 
