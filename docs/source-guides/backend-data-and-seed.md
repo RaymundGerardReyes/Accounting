@@ -10,7 +10,7 @@ This guide details the structure, schema, and accounting semantics of the master
 
 ### Key Sections
 1. **`config`**:
-   - `companyName`: Entity legal title (`"Acme Manufacturing Inc."`).
+   - `companyName`: Entity legal title (`"R.G.E Accounting Firm Inc."`).
    - `fiscalYear`: Active financial year (`"2025"`).
    - `allocationMethod`: Default overhead distribution method (`"activity-based"`).
    - `reportingCurrency`: Set to `"PHP"` (Philippine Peso).
