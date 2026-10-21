@@ -41,4 +41,29 @@ PayMongo sends `Paymongo-Signature: t=<timestamp>,te=<test_signature>,li=<live_s
 - **Order Recovery Lifecycle**: When attempts fail or expire, parent order status remains `pending`. The UI displays `Retry Payment` and `/payment/result/:id` offers `Start New Checkout`, allowing customers to retry seamlessly.
 - **Outbox Retries**: Call `POST /api/v1/admin/fulfillment-outbox/process?retry_failed=true` to reprocess failed fulfillment events.
 
+## 6. Authoritative Gateway Session Invalidation & Testing
+- **Remote Gateway Expiration API**:
+  - To cancel or expire an active checkout session on PayMongo's hosted servers, call `POST https://api.paymongo.com/v1/checkout_sessions/{provider_payment_id}/expire` with HTTP Basic Auth (`<secret_key>:`).
+  - Calling this endpoint immediately revokes the public payment URL (`https://pm.link/...`), blocking customer payment attempts via QR Ph, Card, or E-Wallets with a session expired notice.
+  - If the session was already settled, PayMongo returns HTTP 400 with `session_already_paid`. Catch this and enforce Terminal State Immutability.
+- **Dead URL Revocation**:
+  - Whenever an attempt transitions to `failed`, `expired`, or `cancelled`, always clear `attempt.checkout_url = None` in the database to prevent stale client redirection.
+- **Terminal State Immutability Guard**:
+  - Attempts with `status === "succeeded"` or orders with `status === "paid"` MUST NEVER be modified to `expired` or `failed`.
+  - Return HTTP 400 with `Cannot expire payment attempt: Order '...' is already settled and paid.`
+- **Webhook Simulation Auto-Invalidation**:
+  - When simulating `checkout_session.expired` on an attempt with an active PayMongo session (`cs_...`), automatically invoke `expire_checkout_session()` to synchronize remote gateway state.
+
+## 7. Heroku Multi-Buildpack Monorepo Deployment & Production Supervisor
+- **Multi-Buildpack Root Configuration**:
+  - Buildpack 1: `heroku/nodejs` (detects root `package.json`, installs Node >=18, runs `heroku-postbuild: cd Frontend && npm install --include=dev && npm run build`).
+  - Buildpack 2: `heroku/python` (detects root `requirements.txt` & `runtime.txt`, installs `-r Backend/requirements.txt` + `gunicorn`).
+- **Dyno Supervisor (`scripts/start_production.py`)**:
+  - Heroku web dynos assign a single dynamic `$PORT`. Next.js binds to `0.0.0.0:$PORT` while FastAPI binds to internal loopback `127.0.0.1:5000` (or 5001 if `$PORT=5000`).
+  - `scripts/start_production.py` injects `BACKEND_INTERNAL_URL="http://127.0.0.1:<port>"` into the environment so Next.js App Router reverse-proxies `/api/*` requests with zero network latency.
+  - Handles `SIGTERM`/`SIGINT` for graceful shutdown of both child processes.
+- **PostgreSQL URL Scheme Normalization**:
+  - Heroku Postgres add-ons export `DATABASE_URL=postgres://...`. In `Backend/database.py`, always normalize `postgres://` to `postgresql://` for SQLAlchemy 2.0.
+
+
 

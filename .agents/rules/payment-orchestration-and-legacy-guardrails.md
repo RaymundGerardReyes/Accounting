@@ -24,3 +24,10 @@ description: Strict architectural guardrails for E:\Accounting legacy compatibil
    - **Zero Secrets in Client Bundle**: Server secrets (`PAYMONGO_SECRET_KEY`, `PAYMONGO_WEBHOOK_SECRET`, `SMTP_APP_PASSWORD`) must NEVER be prefixed with `NEXT_PUBLIC_`.
    - **Automatic Local Fallback**: Omitting PayMongo gateway keys in `E:\Accounting\.env` must cleanly activate the local sandbox simulator without runtime crashes.
 
+4. **Heroku Monorepo Multi-Buildpack & Dyno Supervision Guardrails**:
+   - **Multi-Buildpack Root Configuration**: Maintain root `package.json`, `requirements.txt`, `runtime.txt`, and `Procfile` so Heroku's `heroku/nodejs` and `heroku/python` buildpacks detect codebase roots cleanly.
+   - **Single Dyno Port Supervisor**: On Heroku, bind Next.js to Heroku's assigned `$PORT` (`0.0.0.0:$PORT`) and FastAPI to internal loopback (`127.0.0.1:5000` or `5001` if collision), supervised via `scripts/start_production.py`.
+   - **Internal Reverse Proxy**: `scripts/start_production.py` injects `BACKEND_INTERNAL_URL` so Next.js App Router reverse-proxies all `/api/*` traffic locally with zero hop latency.
+   - **Postgres Dialect Compatibility**: Always normalize `postgres://` to `postgresql://` in `database.py` for SQLAlchemy 2.0 when running against Heroku Postgres.
+
+
