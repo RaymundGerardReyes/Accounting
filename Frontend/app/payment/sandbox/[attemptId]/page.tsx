@@ -30,10 +30,12 @@ function SandboxContent({ params }: SandboxProps) {
 
   const searchMethod = searchParams?.get("method") || null
   const initialMethod = (
-    searchMethod === "card" || searchMethod === "card_visa" ? "card_visa"
+    searchMethod === "card" || searchMethod === "card_visa" || searchMethod?.startsWith("card_") ? "card_visa"
     : searchMethod === "gcash" ? "gcash"
     : searchMethod === "maya" || searchMethod === "paymaya" ? "maya"
-    : searchMethod === "dob" || searchMethod === "dob_bpi" || searchMethod === "bpi" ? "dob_bpi"
+    : searchMethod === "gcash_maya" || searchMethod === "ewallet" ? "gcash"
+    : searchMethod === "dob" || searchMethod === "dob_bpi" || searchMethod === "bpi" || searchMethod === "dob_ubp" || searchMethod === "online_banking" ? "dob_bpi"
+    : searchMethod === "hosted_checkout" ? "card_visa"
     : "qrph"
   )
 
@@ -179,12 +181,26 @@ function SandboxContent({ params }: SandboxProps) {
 
           {/* Simulated Payment Channel Picker */}
           <div>
-            <label id="payment-channel-label" className="text-xs font-semibold text-foreground block mb-2 uppercase tracking-wide">
-              1. Choose Simulated Payment Channel
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label id="payment-channel-label" className="text-xs font-semibold text-foreground uppercase tracking-wide">
+                1. Choose Simulated Payment Channel
+              </label>
+              {searchMethod && (
+                <span className="text-[11px] bg-accent/10 text-accent font-medium px-2 py-0.5 rounded">
+                  Selected at Checkout: {
+                    searchMethod === "gcash_maya" ? "E-Wallets (GCash / Maya)"
+                    : searchMethod === "card" ? "Credit / Debit Card"
+                    : searchMethod === "dob" ? "Direct Online Banking"
+                    : searchMethod === "qrph" ? "QR Ph"
+                    : searchMethod === "hosted_checkout" ? "All-in-One PayMongo"
+                    : searchMethod
+                  }
+                </span>
+              )}
+            </div>
             <div role="radiogroup" aria-labelledby="payment-channel-label" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {[
-                { id: "qrph", name: "Scan GQRPh code to pay (QR Ph)", icon: QrCode },
+                { id: "qrph", name: "Scan QR Ph code to pay (National QR)", icon: QrCode },
                 { id: "card_visa", name: "Card (VISA 3D Secure)", icon: CreditCard },
                 { id: "gcash", name: "E-Wallet (GCash)", icon: Smartphone },
                 { id: "maya", name: "E-Wallet (Maya)", icon: Smartphone },
