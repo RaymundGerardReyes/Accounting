@@ -390,6 +390,7 @@ class PaymentOrchestrator:
                     attempt.status = "failed"
                     attempt.failure_code = failed_code_val
                     attempt.failure_message = failed_msg_val
+                    attempt.checkout_url = None
 
         elif event_type in expired_event_types:
             # Rule 1: Never overwrite an existing terminal state
@@ -519,6 +520,7 @@ class PaymentOrchestrator:
                                     verification_hash=receipt_data["verification_hash"],
                                     pdf_filename=pdf_filename,
                                     payment_rail=receipt_data["payment_rail"],
+                                    ledger_status=receipt_data.get("ledger_status"),
                                 )
 
                                 attachments = [
@@ -641,7 +643,7 @@ class PaymentOrchestrator:
             attempt.status = provider_status.status
             attempt.failure_code = provider_status.failure_code
             attempt.failure_message = provider_status.failure_message
-            if provider_status.status in ("expired", "cancelled"):
+            if provider_status.status in ("failed", "expired", "cancelled"):
                 attempt.checkout_url = None
             changed = True
 

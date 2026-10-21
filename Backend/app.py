@@ -589,6 +589,7 @@ def resend_payment_receipt_email(
         verification_hash=receipt_data["verification_hash"],
         pdf_filename=pdf_filename,
         payment_rail=receipt_data["payment_rail"],
+        ledger_status=receipt_data.get("ledger_status"),
     )
 
     attachments = [{"filename": pdf_filename, "content": pdf_bytes, "subtype": "pdf"}]
@@ -785,6 +786,14 @@ async def simulate_webhook(req: SimulateWebhookRequest, db: Session = Depends(ge
 
     # Process via normal webhook handler
     result = orchestrator.process_webhook(db=db, raw_body=raw_body, signature_header=signature)
+
+    # If the simulated event is 'expired' and there is a real PayMongo provider session ID, also invalidate remote session
+    if "expired" in req.event_type and attempt.provider_payment_id and not attempt.provider_payment_id.startswith("cs_sim_"):
+        try:
+            await orchestrator.provider.expire_checkout_session(attempt.provider_payment_id)
+        except Exception as e:
+            print(f"Notice: Remote gateway expire during simulate_webhook: {e}")
+
     return {
         "simulated_event_id": event_id,
         "signature_header": signature,
