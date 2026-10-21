@@ -65,5 +65,18 @@ PayMongo sends `Paymongo-Signature: t=<timestamp>,te=<test_signature>,li=<live_s
 - **PostgreSQL URL Scheme Normalization**:
   - Heroku Postgres add-ons export `DATABASE_URL=postgres://...`. In `Backend/database.py`, always normalize `postgres://` to `postgresql://` for SQLAlchemy 2.0.
 
+## 8. Multi-Channel Payment Method Selection & `payment_method_types` Array Mapping
+- **Channel Specificity**:
+  - When initiating a checkout session, never hardcode a static array of payment methods. Map the user's selected channel dynamically via `resolve_paymongo_payment_method_types(payment_method)`.
+  - Canonical PayMongo Checkout Sessions API types:
+    - `card`: `["card"]` (opens Credit / Debit Card form directly)
+    - `gcash_maya`: `["gcash", "paymaya"]` (opens GCash & Maya e-wallet authorization)
+    - `dob`: `["dob"]` (opens Direct Online Banking for BPI & UnionBank)
+    - `qrph`: `["qrph"]` (opens National QR Ph standard)
+    - `hosted_checkout`: `["card", "gcash", "paymaya", "dob", "qrph"]` (renders full multi-channel suite with Card & E-Wallets leading so customers are never defaulted exclusively to QR Ph)
+- **Simulator Parity**:
+  - In `Frontend/app/payment/sandbox/[attemptId]/page.tsx`, ensure `initialMethod` handles compound keys like `gcash_maya` (mapping to `"gcash"`) and renders a prominent badge displaying the channel selected at checkout.
+
+
 
 
