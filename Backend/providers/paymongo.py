@@ -62,7 +62,7 @@ class PayMongoProvider(PaymentProvider):
         metadata: Optional[Dict[str, Any]] = None,
     ) -> CheckoutSessionResult:
         if payment_methods is None:
-            payment_methods = ["qrph", "gcash", "paymaya", "dob", "card"]
+            payment_methods = ["card", "gcash", "paymaya", "dob", "qrph"]
 
         # If live/test secret key is provided, call real PayMongo API
         if not self.is_simulator:
@@ -128,7 +128,7 @@ class PayMongoProvider(PaymentProvider):
         # Local Sandbox Simulator Fallback
         sim_id = f"cs_sim_{uuid.uuid4().hex[:16]}"
         attempt_id = metadata.get("payment_attempt_id") if metadata else None
-        preferred_method = (metadata.get("payment_method") if metadata else None) or "qrph"
+        preferred_method = (metadata.get("payment_method") if metadata else None) or (payment_methods[0] if payment_methods else "card")
         target_id = attempt_id or order_id
         sim_checkout_url = (
             f"http://localhost:3000/payment/sandbox/{target_id}"

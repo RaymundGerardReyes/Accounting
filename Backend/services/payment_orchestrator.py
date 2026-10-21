@@ -21,6 +21,43 @@ from services.receipt_service import (
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
+def resolve_paymongo_payment_method_types(payment_method: Optional[str]) -> List[str]:
+    """
+    Maps an internal payment method code or requested channel to the exact list of
+    PayMongo-accepted `payment_method_types` strings for Checkout Sessions.
+
+    PayMongo Checkout Sessions API canonical types:
+      - 'card': Credit / Debit Cards (Visa, Mastercard, JCB with 3DS)
+      - 'gcash': GCash mobile e-wallet
+      - 'paymaya': Maya mobile e-wallet
+      - 'dob': Direct Online Banking (BPI & UnionBank direct debit)
+      - 'qrph': National QR Ph payment standard (all banks & e-wallets)
+
+    For the all-in-one / hosted_checkout suite, Card and E-Wallets lead so all
+    options appear prominently rather than defaulting exclusively to QR Ph.
+    """
+    if not payment_method or not isinstance(payment_method, str):
+        return ["card", "gcash", "paymaya", "dob", "qrph"]
+
+    code = payment_method.strip().lower()
+
+    if code == "card" or code.startswith("card_"):
+        return ["card"]
+    if code == "gcash":
+        return ["gcash"]
+    if code in ("paymaya", "maya"):
+        return ["paymaya"]
+    if code in ("gcash_maya", "ewallet", "e_wallet", "wallets"):
+        return ["gcash", "paymaya"]
+    if code == "dob" or code.startswith("dob_") or code in ("bpi", "ubp", "unionbank", "online_banking", "bank_transfer"):
+        return ["dob"]
+    if code in ("qrph", "qr", "qr_code", "ph_qr"):
+        return ["qrph"]
+
+    # Default fallback: full channel suite with Card and E-Wallets leading
+    return ["card", "gcash", "paymaya", "dob", "qrph"]
+
+
 VALID_TRANSITIONS = {
     "pending": {"requires_action", "processing", "failed", "unknown"},
     "requires_action": {"processing", "succeeded", "failed", "cancelled", "expired", "unknown"},
@@ -192,6 +229,7 @@ class PaymentOrchestrator:
             if meta_dict.get("customer_phone"):
                 session_metadata["customer_phone"] = meta_dict["customer_phone"]
 
+            target_pm_types = resolve_paymongo_payment_method_types(normalized_pm)
             session_result = await self.provider.create_checkout_session(
                 order_id=order.id,
                 order_number=order.order_number,
@@ -200,7 +238,7 @@ class PaymentOrchestrator:
                 currency=order.currency,
                 success_url=success_url,
                 cancel_url=cancel_url,
-                payment_methods=["qrph", "gcash", "paymaya", "dob", "card"],
+                payment_methods=target_pm_types,
                 metadata=session_metadata,
             )
 
