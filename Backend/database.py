@@ -13,6 +13,10 @@ if _root_env.exists():
 
 # Check for DATABASE_URL environment variable, falling back to local SQLite
 DATABASE_URL = os.getenv("DATABASE_URL")
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    # Heroku PostgreSQL sets postgres:// which SQLAlchemy 2.0 requires as postgresql://
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 if not DATABASE_URL:
     db_path = BASE_DIR / "accounting_payments.db"
     DATABASE_URL = f"sqlite:///{db_path}"

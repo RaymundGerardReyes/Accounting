@@ -68,6 +68,16 @@ def write_json_file(filename: str, data: Any):
         json.dump(data, f, indent=4)
 
 # ==========================================
+# 0. Health Checks
+# ==========================================
+
+@app.get("/health", summary="Health Check")
+@app.get("/api/health", summary="API Health Check")
+def health_check():
+    return {"status": "ok", "service": "Acme Cost Accounting & PayMongo Orchestrator", "version": "2.0.0"}
+
+
+# ==========================================
 # 1. Legacy API Routes (100% Backward Compatible)
 # ==========================================
 
