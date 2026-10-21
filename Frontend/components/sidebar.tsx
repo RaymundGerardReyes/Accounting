@@ -161,14 +161,14 @@ export function Sidebar({
         {!isCollapsed ? (
           <>
             <div className="flex items-center gap-2.5 overflow-hidden">
-              <div className="h-8 w-8 rounded-md bg-primary text-primary-foreground flex items-center justify-center font-mono font-bold text-sm shrink-0 shadow-xs">
-                FA
+              <div className="h-8 w-8 rounded-md bg-primary text-primary-foreground flex items-center justify-center font-mono font-bold text-xs shrink-0 shadow-xs">
+                RGE
               </div>
               <div className="flex flex-col truncate">
-                <span className="font-semibold text-sm leading-none tracking-tight text-sidebar-foreground">
-                  FinOps<span className="text-secondary font-bold">ERP</span>
+                <span className="font-semibold text-xs leading-tight tracking-tight text-sidebar-foreground truncate" title="R.G.E Accounting Firm Inc.">
+                  R.G.E Accounting Firm Inc.
                 </span>
-                <span className="text-[11px] text-muted-foreground mt-0.5 font-mono">
+                <span className="text-[10px] text-muted-foreground font-mono">
                   CPA-Audited Suite
                 </span>
               </div>
@@ -194,7 +194,7 @@ export function Sidebar({
             aria-label="Expand sidebar"
             title="Expand sidebar"
           >
-            <span className="group-hover:hidden">FA</span>
+            <span className="group-hover:hidden">RGE</span>
             <ChevronRight className="h-4 w-4 hidden group-hover:inline-block" />
           </Button>
         )}

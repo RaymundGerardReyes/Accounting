@@ -687,7 +687,7 @@ export default function PaymentResultPage({ params }: PageProps) {
 
             <CardFooter className="bg-muted/30 border-t border-border p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground">
               <div>
-                Acme Manufacturing Inc. &middot; Corporate Accounting &amp; Treasury
+                {receipt.issuer.company_name || "R.G.E Accounting Firm Inc."} &middot; Corporate Accounting &amp; Treasury
               </div>
               <div className="text-[11px] font-mono">
                 TIN: {receipt.issuer.tin}
