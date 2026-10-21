@@ -48,9 +48,9 @@ def test_legacy_configuration_get_and_put():
     assert cfg_data["config"]["reportingCurrency"] == "PHP"
 
     # Test PUT configuration
-    update_resp = client.put("/api/configuration", json={"config": {"companyName": "Acme Manufacturing Inc."}})
+    update_resp = client.put("/api/configuration", json={"config": {"companyName": "R.G.E Accounting Firm Inc."}})
     assert update_resp.status_code == 200
-    assert update_resp.json()["config"]["companyName"] == "Acme Manufacturing Inc."
+    assert update_resp.json()["config"]["companyName"] == "R.G.E Accounting Firm Inc."
 
 def test_order_creation_server_side_pricing():
     # Product order with automatic unit price lookup for Product A (₱125 -> ₱125.00 * 10 = ₱1,250.00 = 125,000 centavos)
