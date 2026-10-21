@@ -1318,6 +1318,96 @@ def test_authoritative_payment_expiration_and_gateway_invalidation():
     assert fail_data["attempt"]["checkout_url"] is None
 
 
+def test_resolve_paymongo_payment_method_types():
+    from services.payment_orchestrator import resolve_paymongo_payment_method_types
+
+    # 1. Cards
+    assert resolve_paymongo_payment_method_types("card") == ["card"]
+    assert resolve_paymongo_payment_method_types("card_visa") == ["card"]
+    assert resolve_paymongo_payment_method_types("card_visa_4242") == ["card"]
+    assert resolve_paymongo_payment_method_types("card_mastercard") == ["card"]
+    assert resolve_paymongo_payment_method_types("card_jcb") == ["card"]
+
+    # 2. E-Wallets
+    assert resolve_paymongo_payment_method_types("gcash") == ["gcash"]
+    assert resolve_paymongo_payment_method_types("paymaya") == ["paymaya"]
+    assert resolve_paymongo_payment_method_types("maya") == ["paymaya"]
+    assert resolve_paymongo_payment_method_types("gcash_maya") == ["gcash", "paymaya"]
+    assert resolve_paymongo_payment_method_types("ewallet") == ["gcash", "paymaya"]
+
+    # 3. Direct Online Banking
+    assert resolve_paymongo_payment_method_types("dob") == ["dob"]
+    assert resolve_paymongo_payment_method_types("dob_bpi") == ["dob"]
+    assert resolve_paymongo_payment_method_types("dob_ubp") == ["dob"]
+    assert resolve_paymongo_payment_method_types("bpi") == ["dob"]
+    assert resolve_paymongo_payment_method_types("ubp") == ["dob"]
+    assert resolve_paymongo_payment_method_types("unionbank") == ["dob"]
+    assert resolve_paymongo_payment_method_types("online_banking") == ["dob"]
+
+    # 4. QR Ph
+    assert resolve_paymongo_payment_method_types("qrph") == ["qrph"]
+    assert resolve_paymongo_payment_method_types("qr") == ["qrph"]
+    assert resolve_paymongo_payment_method_types("ph_qr") == ["qrph"]
+
+    # 5. All-in-One Suite / Fallback
+    expected_suite = ["card", "gcash", "paymaya", "dob", "qrph"]
+    assert resolve_paymongo_payment_method_types("hosted_checkout") == expected_suite
+    assert resolve_paymongo_payment_method_types("") == expected_suite
+    assert resolve_paymongo_payment_method_types(None) == expected_suite
+    assert resolve_paymongo_payment_method_types("unknown_channel") == expected_suite
+
+
+@pytest.mark.asyncio
+async def test_channel_specific_checkout_session_creation():
+    from services.payment_orchestrator import resolve_paymongo_payment_method_types
+    from providers.paymongo import PayMongoProvider
+
+    provider = PayMongoProvider()
+    order_res = client.post("/api/v1/orders", json={
+        "title": "Channel Selection Test Order",
+        "category": "product_order",
+        "reference_code": "Product A",
+        "quantity": 1
+    })
+    assert order_res.status_code == 201
+    order_id = order_res.json()["id"]
+
+    # Channels to test: code -> expected payment_method_types
+    channels_to_test = [
+        ("card", ["card"]),
+        ("gcash_maya", ["gcash", "paymaya"]),
+        ("dob", ["dob"]),
+        ("qrph", ["qrph"]),
+        ("hosted_checkout", ["card", "gcash", "paymaya", "dob", "qrph"]),
+    ]
+
+    for channel, expected_types in channels_to_test:
+        idemp = f"channel_{channel}_{uuid.uuid4().hex[:8]}"
+        res = client.post(
+            f"/api/v1/orders/{order_id}/payment-attempts",
+            json={"payment_method": channel, "idempotency_key": idemp}
+        )
+        assert res.status_code == 201, f"Failed for channel: {channel}"
+        data = res.json()
+        assert data["payment_method"] == channel
+        assert data["checkout_url"] is not None
+        assert f"method={channel}" in data["checkout_url"]
+
+        # Directly verify provider creation honors the channel array
+        sess_res = await provider.create_checkout_session(
+            order_id=order_id,
+            order_number="ORD-TEST",
+            title="Channel Test",
+            amount_minor=10000,
+            currency="PHP",
+            success_url="http://localhost:3000/success",
+            cancel_url="http://localhost:3000/cancel",
+            payment_methods=resolve_paymongo_payment_method_types(channel),
+        )
+        assert sess_res.raw_response["attributes"]["payment_method_types"] == expected_types
+
+
+
 
 
 
