@@ -13,7 +13,15 @@ from pathlib import Path
 
 # Functional scope mapping rules
 SCOPE_PATTERNS = {
-    "repo": [r"^\.gitignore$", r"^README\.md$", r"^LICENSE(\.md)?$"],
+    "repo": [
+        r"^\.gitignore$",
+        r"^README\.md$",
+        r"^LICENSE(\.md)?$",
+        r"^package\.json$",
+        r"^requirements\.txt$",
+        r"^runtime\.txt$",
+        r"^Procfile$",
+    ],
     "backend": [r"^Backend/(?!test_).*"],
     "frontend": [r"^Frontend/.*"],
     "test": [r"^Backend/test_.*", r"^tests/.*"],
