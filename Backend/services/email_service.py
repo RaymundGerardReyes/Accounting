@@ -365,7 +365,7 @@ class EmailService:
     <div class="top-accent"></div>
     <div class="content-container">
       <div class="header">
-        <div class="org-label">Acme Manufacturing Inc. &middot; Corporate Treasury</div>
+        <div class="org-label">R.G.E Accounting Firm Inc. &middot; Corporate Treasury</div>
         <div class="title">Official Receipt &amp; Payment Acknowledgement Report</div>
         <div class="subtitle">TIN: 000-842-915-000 VAT &middot; Verified PayMongo Live Settlement</div>
       </div>
