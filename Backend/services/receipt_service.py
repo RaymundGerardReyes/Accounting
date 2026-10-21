@@ -274,7 +274,6 @@ def _resolve_source_dict(source: Dict[str, Any]) -> Optional[str]:
 def format_philippine_phone(raw_phone: Optional[str]) -> Optional[str]:
     """
     Normalizes and formats Philippine mobile numbers into standard '+63 9XX XXX XXXX' format.
-    Accepts: '+639171234567', '09171234567', '9171234567', '+63 917 123 4567', '0917-123-4567'.
     """
     if not raw_phone:
         return None
@@ -305,14 +304,12 @@ def extract_customer_info_from_paymongo(
     cust_phone = None
 
     if isinstance(resource_attrs, dict):
-        # 1. Top-level billing attribute
         billing = resource_attrs.get("billing")
         if isinstance(billing, dict):
             cust_name = billing.get("name")
             cust_email = billing.get("email")
             cust_phone = billing.get("phone")
 
-        # 2. Nested payments array
         payments = resource_attrs.get("payments")
         if isinstance(payments, list) and len(payments) > 0:
             for p in payments:
@@ -325,7 +322,6 @@ def extract_customer_info_from_paymongo(
                             cust_email = cust_email or p_billing.get("email")
                             cust_phone = cust_phone or p_billing.get("phone")
 
-        # 3. Customer object
         customer = resource_attrs.get("customer")
         if isinstance(customer, dict):
             first = str(customer.get("first_name", "")).strip()
@@ -335,7 +331,6 @@ def extract_customer_info_from_paymongo(
             cust_email = cust_email or customer.get("email")
             cust_phone = cust_phone or customer.get("phone")
 
-        # 4. Metadata overrides
         res_meta = resource_attrs.get("metadata")
         if isinstance(res_meta, dict):
             cust_name = cust_name or res_meta.get("customer_name") or res_meta.get("name")
@@ -375,7 +370,6 @@ def extract_customer_info_from_paymongo(
 def resolve_recipient_email(order_meta: Optional[Dict[str, Any]] = None, default_smtp_user: Optional[str] = None) -> Optional[str]:
     """
     Resolves the target recipient email for dispatching the Official Receipt & Acknowledgement PDF.
-    Avoids dummy @acme.com / @example.com addresses when a real SMTP_USER is configured.
     """
     if not isinstance(order_meta, dict):
         order_meta = {}
@@ -391,7 +385,6 @@ def resolve_recipient_email(order_meta: Optional[Dict[str, Any]] = None, default
         if isinstance(c, str) and "@" in c.strip():
             addr = c.strip()
             domain = addr.split("@")[-1].lower()
-            # If candidate is a dummy test domain (@acme.com or @example.com) and real smtp_user exists, prefer smtp_user
             if domain in ("acme.com", "example.com") and smtp_user and "@" in smtp_user:
                 smtp_domain = smtp_user.split("@")[-1].lower()
                 if smtp_domain not in ("acme.com", "example.com"):
@@ -430,7 +423,6 @@ def build_receipt_and_acknowledgement(
     manila_dt = paid_dt.astimezone(MANILA_TZ)
     utc_dt = paid_dt.astimezone(timezone.utc)
 
-    # Extract sequence suffix from order_number (e.g. ORD-202610-0427 -> 0427)
     order_num_str = str(getattr(order, "order_number", "ORD-0000"))
     order_parts = order_num_str.split("-")
     seq_part = order_parts[-1] if order_parts else "0001"
@@ -447,7 +439,6 @@ def build_receipt_and_acknowledgement(
     amount_minor = int(getattr(attempt, "amount_minor", None) or getattr(order, "amount_minor", 0) or 0)
     amount_php_val = amount_minor / 100.0
 
-    # Tax classification & statutory tax calculation (BIR RMC No. 77-2024 compliance)
     tax_class = str(
         meta.get("tax_classification")
         or meta.get("tax_type")
@@ -495,7 +486,6 @@ def build_receipt_and_acknowledgement(
     hash_input = f"{or_number}|{ack_number}|{order_num_str}|{att_id}|{amount_minor}|{utc_dt.isoformat()}"
     verification_hash = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
 
-    # Determine card badge dynamically
     card_badge = "Card"
     if "mastercard" in pm_code:
         card_badge = "Mastercard"
@@ -507,7 +497,6 @@ def build_receipt_and_acknowledgement(
     card_ch_code = "card_visa" if "visa" in pm_code else ("card_mastercard" if "mastercard" in pm_code else "card")
     is_channel_confirmed = pm_code != "hosted_checkout"
 
-    # Only mark channel as selected if provider data actually confirmed it (do not select all for hosted checkout)
     supported_channels = [
         {
             "code": "qrph",
@@ -546,11 +535,9 @@ def build_receipt_and_acknowledgement(
         },
     ]
 
-    # Resolve provider payment ID without synthesizing fake cs_ IDs
     real_provider_payment_id = getattr(attempt, "provider_payment_id", None)
     provider_pm_id = real_provider_payment_id or f"att_{str(att_id)[:16]}"
 
-    # Derive real outbox status from persisted records
     actual_outbox_status = outbox_status
     att_outbox = getattr(attempt, "fulfillment_records", None)
     if att_outbox and len(att_outbox) > 0:
@@ -558,7 +545,6 @@ def build_receipt_and_acknowledgement(
     elif getattr(order, "fulfillment_records", None) and len(order.fulfillment_records) > 0:
         actual_outbox_status = order.fulfillment_records[0].status
 
-    # Derive ledger status from persisted accounting records (do not claim GL posted without proof)
     ledger_posted = bool(
         meta.get("ledger_posted")
         or meta.get("gl_posted")
@@ -582,7 +568,6 @@ def build_receipt_and_acknowledgement(
     )
     receipt_status = "RECEIPT GENERATED"
 
-    # Line items
     raw_line_items = meta.get("line_items")
     if isinstance(raw_line_items, list) and len(raw_line_items) > 0:
         line_items = raw_line_items
@@ -708,7 +693,6 @@ def persist_receipt_on_order(
     db.add(order)
     db.commit()
 
-    # Also write the PDF file to disk for archival
     try:
         RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)
         pdf_bytes = generate_receipt_pdf_bytes(receipt_data)
@@ -721,6 +705,7 @@ def persist_receipt_on_order(
 
 # ==============================================================================
 # 3. Deterministic ISO-32000-1 Vector PDF Generator (%PDF-1.4)
+#    Synchronized with page.tsx Light Card & Emerald (#12A579) Design System
 # ==============================================================================
 
 def _pdf_escape(text: str) -> str:
@@ -739,7 +724,6 @@ def _pdf_escape(text: str) -> str:
         .replace("–", "-")
         .replace("·", "-")
     )
-    # Encode to latin-1 (WinAnsi subset) with replacement
     cleaned = cleaned.encode("latin-1", errors="replace").decode("latin-1")
     return cleaned.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
@@ -747,7 +731,15 @@ def _pdf_escape(text: str) -> str:
 def generate_receipt_pdf_bytes(receipt: Dict[str, Any]) -> bytes:
     """
     Generates a crisp, single-page corporate Official Receipt & Acknowledgement Report
-    PDF document (612 x 792 pt US Letter) using native PDF vector graphics and Type1 fonts.
+    PDF document (612 x 792 pt US Letter) that mirrors the exact light Card UI and
+    color palette of Frontend/app/payment/result/[paymentId]/page.tsx:
+      - Card Surface: #FFFFFF (1.000, 1.000, 1.000)
+      - Subtle Muted Surface: #FAFAFA (0.980, 0.980, 0.980) / #F4F4F5 (0.957, 0.957, 0.961)
+      - Hairline Border: #E4E4E7 (0.894, 0.894, 0.906)
+      - Primary Foreground Text: #18181B (0.094, 0.094, 0.106)
+      - Muted Foreground Text: #71717A (0.443, 0.443, 0.478)
+      - Emerald Accent: #12A579 (0.071, 0.647, 0.475) / Deep Emerald Text #0D7C5A (0.051, 0.486, 0.353)
+      - Soft Emerald Pill Fill: #ECFDF5 (0.925, 0.992, 0.961)
     """
     cmds: List[str] = []
 
@@ -757,45 +749,53 @@ def generate_receipt_pdf_bytes(receipt: Dict[str, Any]) -> bytes:
     def rect_stroke(x: float, y: float, w: float, h: float, r: float, g: float, b: float, lw: float = 0.8):
         cmds.append(f"{lw:.2f} w {r:.3f} {g:.3f} {b:.3f} RG {x:.1f} {y:.1f} {w:.1f} {h:.1f} re S")
 
-    def line(x1: float, y1: float, x2: float, y2: float, r: float = 0.85, g: float = 0.86, b: float = 0.88, lw: float = 0.6):
+    def line(x1: float, y1: float, x2: float, y2: float, r: float = 0.894, g: float = 0.894, b: float = 0.906, lw: float = 0.6):
         cmds.append(f"{lw:.2f} w {r:.3f} {g:.3f} {b:.3f} RG {x1:.1f} {y1:.1f} m {x2:.1f} {y2:.1f} l S")
 
-    def text(x: float, y: float, s: str, font: str = "F1", size: float = 9.5, r: float = 0.09, g: float = 0.09, b: float = 0.11):
+    def text(x: float, y: float, s: str, font: str = "F1", size: float = 9.5, r: float = 0.094, g: float = 0.094, b: float = 0.106):
         esc = _pdf_escape(s)
         cmds.append(f"BT /{font} {size:.1f} Tf {r:.3f} {g:.3f} {b:.3f} rg {x:.1f} {y:.1f} Td ({esc}) Tj ET")
 
-    # 1. Top Corporate Header Banner (#18181B Neutral Ink with #12A579 Emerald Accent Line)
-    rect_fill(36, 700, 540, 62, 0.094, 0.094, 0.106)
-    rect_fill(36, 759.5, 540, 2.5, 0.071, 0.647, 0.475)
-    text(52, 740, "ACME MANUFACTURING INC. - CORPORATE ACCOUNTING & TREASURY", "F2", 11.5, 0.710, 0.710, 0.730)
-    text(52, 724, "OFFICIAL RECEIPT & PAYMENT ACKNOWLEDGEMENT REPORT", "F2", 14.0, 1.0, 1.0, 1.0)
-    text(52, 710, "TIN: 000-842-915-000 VAT  |  Authoritative Portal & SMTP Copy  |  PayMongo Live Rail", "F1", 8.0, 0.650, 0.650, 0.680)
+    # 0. Outer Receipt Card Frame (#FFFFFF surface, #E4E4E7 border, top #12A579 emerald accent bar)
+    rect_fill(28, 62, 556, 704, 1.000, 1.000, 1.000)
+    rect_stroke(28, 62, 556, 704, 0.894, 0.894, 0.906, 0.9)
+    rect_fill(28, 762, 556, 4, 0.071, 0.647, 0.475)
 
-    # 2. Document Control Bar (OR No, ACK No, Settlement Status)
-    rect_fill(36, 650, 540, 42, 0.980, 0.980, 0.980)
-    rect_stroke(36, 650, 540, 42, 0.894, 0.894, 0.906, 0.8)
+    # 1. Clean Light Editorial Header (Mirrors page.tsx CardHeader)
+    text(44, 740, "ACME MANUFACTURING INC. - CORPORATE ACCOUNTING & TREASURY", "F2", 9.0, 0.443, 0.443, 0.478)
+    text(44, 722, "OFFICIAL RECEIPT & PAYMENT ACKNOWLEDGEMENT REPORT", "F2", 13.5, 0.094, 0.094, 0.106)
+    text(44, 708, "TIN: 000-842-915-000 VAT  |  Authoritative Portal & SMTP Copy  |  PayMongo Live Rail", "F1", 8.0, 0.443, 0.443, 0.478)
 
-    text(48, 676, "OFFICIAL RECEIPT NO.", "F2", 7.5, 0.443, 0.443, 0.478)
-    text(48, 660, str(receipt.get("official_receipt_number", "")), "F4", 10.5, 0.094, 0.094, 0.106)
+    # Soft Emerald Status Pill in Top Right (Matches bg-[#12A579]/10 text-[#0d7c5a] border-[#12A579]/30)
+    rect_fill(436, 724, 132, 24, 0.925, 0.992, 0.961)
+    rect_stroke(436, 724, 132, 24, 0.071, 0.647, 0.475, 0.8)
+    text(448, 733, "PAID & CONFIRMED", "F2", 9.0, 0.051, 0.486, 0.353)
 
-    text(225, 676, "ACKNOWLEDGEMENT REPORT NO.", "F2", 7.5, 0.443, 0.443, 0.478)
-    text(225, 660, str(receipt.get("acknowledgement_number", "")), "F4", 10.5, 0.094, 0.094, 0.106)
+    line(28, 698, 584, 698, 0.894, 0.894, 0.906, 0.8)
 
-    # Status Badge Box (Green #12A579 for success state)
-    rect_fill(430, 658, 134, 26, 0.071, 0.647, 0.475)
-    text(444, 667, "PAID & CONFIRMED", "F2", 9.5, 1.0, 1.0, 1.0)
+    # 2. Document Control Bar (bg-muted/40 #F4F4F5 fill, #E4E4E7 border)
+    rect_fill(40, 650, 532, 38, 0.957, 0.957, 0.961)
+    rect_stroke(40, 650, 532, 38, 0.894, 0.894, 0.906, 0.7)
+
+    text(52, 674, "OFFICIAL RECEIPT NO.", "F2", 7.2, 0.443, 0.443, 0.478)
+    text(52, 659, str(receipt.get("official_receipt_number", "")), "F4", 10.5, 0.094, 0.094, 0.106)
+
+    line(296, 655, 296, 683, 0.894, 0.894, 0.906, 0.7)
+
+    text(310, 674, "ACKNOWLEDGEMENT REPORT NO.", "F2", 7.2, 0.443, 0.443, 0.478)
+    text(310, 659, str(receipt.get("acknowledgement_number", "")), "F4", 10.5, 0.094, 0.094, 0.106)
 
     # 3. Section I: Official Receipt & Settlement Summary
-    text(36, 632, "SECTION I - PAYMENT ACKNOWLEDGEMENT & SETTLEMENT SUMMARY", "F2", 9.5, 0.094, 0.094, 0.106)
-    line(36, 626, 576, 626, 0.894, 0.894, 0.906, 0.8)
+    text(40, 632, "SECTION I - PAYMENT ACKNOWLEDGEMENT & SETTLEMENT SUMMARY", "F2", 9.0, 0.094, 0.094, 0.106)
+    line(40, 626, 572, 626, 0.894, 0.894, 0.906, 0.8)
 
-    # Amount Box on Right & Core Details on Left
-    rect_fill(390, 546, 186, 72, 0.980, 0.980, 0.980)
-    rect_stroke(390, 546, 186, 72, 0.894, 0.894, 0.906, 0.8)
-    text(404, 600, "TOTAL AMOUNT PAID (PHP)", "F2", 8.0, 0.443, 0.443, 0.478)
-    text(404, 576, f"PHP {receipt.get('amount_php', '0.00')}", "F2", 18.0, 0.094, 0.094, 0.106)
+    # Prominent Total Amount Box on Right (#FAFAFA surface, #E4E4E7 border)
+    rect_fill(386, 546, 186, 72, 0.980, 0.980, 0.980)
+    rect_stroke(386, 546, 186, 72, 0.894, 0.894, 0.906, 0.8)
+    text(400, 600, "TOTAL AMOUNT PAID (PHP)", "F2", 7.8, 0.443, 0.443, 0.478)
+    text(400, 575, f"PHP {receipt.get('amount_php', '0.00')}", "F2", 18.0, 0.094, 0.094, 0.106)
     tax_note = f"{receipt.get('tax_classification_label', '12% VAT Inclusive')}  |  Fee: PHP 0.00"
-    text(404, 556, tax_note[:36], "F1", 7.5, 0.443, 0.443, 0.478)
+    text(400, 555, tax_note[:36], "F1", 7.5, 0.443, 0.443, 0.478)
 
     # Left-side key-value rows including customer billing details
     cust_name = str(receipt.get("customer_name") or "Valued Customer")
@@ -812,57 +812,60 @@ def generate_receipt_pdf_bytes(receipt: Dict[str, Any]) -> bytes:
     ]
     y_cursor = 612
     for lbl, val in rows_left:
-        text(42, y_cursor, lbl, "F2", 8.0, 0.443, 0.443, 0.478)
+        text(44, y_cursor, lbl, "F2", 8.0, 0.443, 0.443, 0.478)
         text(155, y_cursor, val, "F1", 8.2, 0.094, 0.094, 0.106)
         y_cursor -= 14
 
-    # 4. Payment Method & PayMongo Channel Verification Matrix (Subtle Neutral #FAFAFA, No Blue Tint)
-    rect_fill(36, 444, 540, 92, 0.980, 0.980, 0.980)
-    rect_stroke(36, 444, 540, 92, 0.894, 0.894, 0.906, 0.8)
-    text(48, 520, "PAYMENT METHOD & PAYMONGO GATEWAY RAIL VERIFICATION", "F2", 8.5, 0.094, 0.094, 0.106)
+    # 4. Payment Method & PayMongo Channel Verification Matrix
+    rect_fill(40, 444, 532, 92, 0.980, 0.980, 0.980)
+    rect_stroke(40, 444, 532, 92, 0.894, 0.894, 0.906, 0.8)
+    text(50, 520, "PAYMENT METHOD & PAYMONGO GATEWAY RAIL VERIFICATION", "F2", 8.2, 0.094, 0.094, 0.106)
 
-    text(48, 502, "Settled Payment Method:", "F2", 8.5, 0.443, 0.443, 0.478)
-    text(170, 502, str(receipt.get("payment_method_label", "")), "F2", 9.5, 0.051, 0.486, 0.353)
+    text(50, 502, "Settled Payment Method:", "F2", 8.2, 0.443, 0.443, 0.478)
+    text(170, 502, str(receipt.get("payment_method_label", "")), "F2", 9.2, 0.051, 0.486, 0.353)
 
-    text(48, 486, "Gateway Provider & Rail:", "F2", 8.5, 0.443, 0.443, 0.478)
-    text(170, 486, f"{receipt.get('provider', 'PayMongo Philippines')} - {receipt.get('payment_rail', '')}", "F1", 8.5, 0.094, 0.094, 0.106)
+    text(50, 486, "Gateway Provider & Rail:", "F2", 8.2, 0.443, 0.443, 0.478)
+    text(170, 486, f"{receipt.get('provider', 'PayMongo Philippines')} - {receipt.get('payment_rail', '')}", "F1", 8.2, 0.094, 0.094, 0.106)
 
-    text(48, 470, "Session / Payment ID:", "F2", 8.5, 0.443, 0.443, 0.478)
-    text(170, 470, f"{receipt.get('provider_payment_id', '')}  (Attempt: {receipt.get('payment_attempt_id', '')})", "F3", 8.0, 0.094, 0.094, 0.106)
+    text(50, 470, "Session / Payment ID:", "F2", 8.2, 0.443, 0.443, 0.478)
+    text(170, 470, f"{receipt.get('provider_payment_id', '')}  (Attempt: {receipt.get('payment_attempt_id', '')})", "F3", 7.8, 0.094, 0.094, 0.106)
 
-    # Channel pills strip representing the 5 PayMongo channels
+    # Channel pills strip (Soft Emerald tint for selected rail, neutral for others)
     channels = receipt.get("supported_channels", [])
-    ch_x = 48
+    ch_x = 50
     for ch in channels:
         is_sel = bool(ch.get("selected"))
-        box_w = 98
+        box_w = 96
         if is_sel:
-            rect_fill(ch_x, 450, box_w, 14, 0.071, 0.647, 0.475)
-            text(ch_x + 5, 454, f"[X] {ch.get('badge', '')}", "F2", 7.2, 1.0, 1.0, 1.0)
+            rect_fill(ch_x, 450, box_w, 14, 0.925, 0.992, 0.961)
+            rect_stroke(ch_x, 450, box_w, 14, 0.071, 0.647, 0.475, 0.7)
+            text(ch_x + 5, 454, f"[X] {ch.get('badge', '')}", "F2", 7.2, 0.051, 0.486, 0.353)
         else:
-            rect_fill(ch_x, 450, box_w, 14, 0.957, 0.957, 0.961)
+            rect_fill(ch_x, 450, box_w, 14, 1.000, 1.000, 1.000)
+            rect_stroke(ch_x, 450, box_w, 14, 0.894, 0.894, 0.906, 0.5)
             text(ch_x + 5, 454, f"[ ] {ch.get('badge', '')}", "F1", 7.2, 0.443, 0.443, 0.478)
-        ch_x += 104
+        ch_x += 103
 
-    # 5. Itemized Accounting & Tax Breakdown Table
-    text(36, 424, "SECTION II - ITEMIZED ORDER & TAX BREAKDOWN", "F2", 9.5, 0.094, 0.094, 0.106)
-    line(36, 418, 576, 418, 0.894, 0.894, 0.906, 0.8)
+    # 5. Itemized Accounting & Tax Breakdown Table (Mirrors page.tsx bg-muted/40 table header)
+    text(40, 424, "SECTION II - ITEMIZED ORDER & TAX BREAKDOWN", "F2", 9.0, 0.094, 0.094, 0.106)
+    line(40, 418, 572, 418, 0.894, 0.894, 0.906, 0.8)
 
-    # Table Header (#18181B Neutral Ink)
-    rect_fill(36, 396, 540, 18, 0.094, 0.094, 0.106)
-    text(44, 402, "REF / CODE", "F2", 7.5, 1.0, 1.0, 1.0)
-    text(135, 402, "PARTICULARS / DESCRIPTION", "F2", 7.5, 1.0, 1.0, 1.0)
-    text(365, 402, "QTY", "F2", 7.5, 1.0, 1.0, 1.0)
-    text(410, 402, "UNIT COST", "F2", 7.5, 1.0, 1.0, 1.0)
-    text(495, 402, "AMOUNT (PHP)", "F2", 7.5, 1.0, 1.0, 1.0)
+    # Light Table Header (#F4F4F5 fill, #E4E4E7 border, #18181B bold text — NO harsh black bar!)
+    rect_fill(40, 396, 532, 18, 0.957, 0.957, 0.961)
+    rect_stroke(40, 396, 532, 18, 0.894, 0.894, 0.906, 0.7)
+    text(48, 402, "REF / CODE", "F2", 7.5, 0.094, 0.094, 0.106)
+    text(135, 402, "PARTICULARS / DESCRIPTION", "F2", 7.5, 0.094, 0.094, 0.106)
+    text(365, 402, "QTY", "F2", 7.5, 0.094, 0.094, 0.106)
+    text(410, 402, "UNIT COST", "F2", 7.5, 0.094, 0.094, 0.106)
+    text(495, 402, "AMOUNT (PHP)", "F2", 7.5, 0.094, 0.094, 0.106)
 
-    # Item Row
-    rect_fill(36, 374, 540, 22, 1.0, 1.0, 1.0)
-    rect_stroke(36, 374, 540, 22, 0.894, 0.894, 0.906, 0.6)
-    text(44, 382, str(receipt.get("reference_code", ""))[:16], "F3", 8.0, 0.094, 0.094, 0.106)
+    # Item Row (#FFFFFF surface, #E4E4E7 border)
+    rect_fill(40, 374, 532, 22, 1.000, 1.000, 1.000)
+    rect_stroke(40, 374, 532, 22, 0.894, 0.894, 0.906, 0.6)
+    text(48, 382, str(receipt.get("reference_code", ""))[:16], "F3", 8.0, 0.443, 0.443, 0.478)
     text(135, 382, str(receipt.get("order_title", ""))[:40], "F1", 8.5, 0.094, 0.094, 0.106)
     text(368, 382, str(receipt.get("quantity", 1)), "F3", 8.5, 0.094, 0.094, 0.106)
-    text(410, 382, f"PHP {receipt.get('unit_price_php', '0.00')}", "F3", 8.0, 0.094, 0.094, 0.106)
+    text(410, 382, f"PHP {receipt.get('unit_price_php', '0.00')}", "F3", 8.0, 0.443, 0.443, 0.478)
     text(495, 382, f"PHP {receipt.get('amount_php', '0.00')}", "F4", 8.5, 0.094, 0.094, 0.106)
 
     # Breakdown Summary Rows adapted to tax classification
@@ -898,18 +901,20 @@ def generate_receipt_pdf_bytes(receipt: Dict[str, Any]) -> bytes:
 
     by = 356
     for b_lbl, b_val, b_font in breakdown_rows:
-        text(310, by, b_lbl, b_font, 8.5, 0.443, 0.443, 0.478)
-        r_c, g_c, b_c = (0.051, 0.486, 0.353) if b_font == "F2" else (0.094, 0.094, 0.106)
-        text(485, by, b_val, "F4" if b_font == "F2" else "F3", 8.5, r_c, g_c, b_c)
-        line(310, by - 4, 576, by - 4, 0.894, 0.894, 0.906, 0.5)
+        is_total = b_font == "F2"
+        lbl_color = (0.094, 0.094, 0.106) if is_total else (0.443, 0.443, 0.478)
+        val_color = (0.051, 0.486, 0.353) if is_total else (0.094, 0.094, 0.106)
+        text(306, by, b_lbl, b_font, 8.5, *lbl_color)
+        text(485, by, b_val, "F4" if is_total else "F3", 8.5, *val_color)
+        line(306, by - 4, 572, by - 4, 0.894, 0.894, 0.906, 0.5)
         by -= 16
 
     # 6. Section III: Treasury & Portal Acknowledgement Report
-    text(36, 274, "SECTION III - TREASURY ACKNOWLEDGEMENT REPORT & AUDIT TRAIL", "F2", 9.5, 0.094, 0.094, 0.106)
-    line(36, 268, 576, 268, 0.894, 0.894, 0.906, 0.8)
+    text(40, 274, "SECTION III - TREASURY ACKNOWLEDGEMENT REPORT & AUDIT TRAIL", "F2", 9.0, 0.094, 0.094, 0.106)
+    line(40, 268, 572, 268, 0.894, 0.894, 0.906, 0.8)
 
-    rect_fill(36, 148, 540, 112, 0.980, 0.980, 0.980)
-    rect_stroke(36, 148, 540, 112, 0.894, 0.894, 0.906, 0.8)
+    rect_fill(40, 148, 532, 112, 0.980, 0.980, 0.980)
+    rect_stroke(40, 148, 532, 112, 0.894, 0.894, 0.906, 0.8)
 
     smtp_info = receipt.get("smtp_delivery") or {}
     smtp_recipient = smtp_info.get("recipient") or os.getenv("SMTP_USER") or "Configured Portal Account"
@@ -925,52 +930,52 @@ def generate_receipt_pdf_bytes(receipt: Dict[str, Any]) -> bytes:
     ]
     ay = 244
     for a_lbl, a_val in ack_lines:
-        text(48, ay, a_lbl, "F2", 8.0, 0.443, 0.443, 0.478)
+        text(50, ay, a_lbl, "F2", 8.0, 0.443, 0.443, 0.478)
         text(185, ay, a_val, "F3" if "SHA-256" in a_lbl or "ID" in a_lbl else "F1", 8.0, 0.094, 0.094, 0.106)
         ay -= 15
 
-    # 7. Official Certification & Footer
-    rect_fill(36, 72, 540, 62, 0.980, 0.980, 0.980)
-    rect_stroke(36, 72, 540, 62, 0.894, 0.894, 0.906, 0.6)
-    text(48, 118, "CERTIFICATION OF PAYMENT ACKNOWLEDGEMENT & AUDIT TRAIL", "F2", 8.0, 0.094, 0.094, 0.106)
+    # 7. Official Certification & Card Footer
+    rect_fill(40, 74, 532, 62, 0.957, 0.957, 0.961)
+    rect_stroke(40, 74, 532, 62, 0.894, 0.894, 0.906, 0.6)
+    text(50, 120, "CERTIFICATION OF PAYMENT ACKNOWLEDGEMENT & AUDIT TRAIL", "F2", 8.0, 0.094, 0.094, 0.106)
     text(
-        48,
-        104,
+        50,
+        106,
         "This document confirms electronic payment settlement via PayMongo Philippines for internal treasury records.",
         "F1",
-        7.8,
+        7.6,
         0.443,
         0.443,
         0.478,
     )
     text(
-        48,
-        92,
+        50,
+        94,
         "Official commercial VAT Invoices are issued separately pursuant to BIR RMC No. 77-2024 upon tax profile verification.",
         "F1",
-        7.8,
+        7.6,
         0.443,
         0.443,
         0.478,
     )
     text(
-        48,
-        80,
+        50,
+        82,
         "Both the SMTP PDF attachment and Portal Copy share identical cryptographic SHA-256 audit digests for internal control.",
         "F1",
-        7.8,
+        7.6,
         0.443,
         0.443,
         0.478,
     )
 
-    text(415, 108, "Digitally Signed & Verified", "F2", 8.0, 0.051, 0.486, 0.353)
-    line(410, 96, 560, 96, 0.894, 0.894, 0.906, 0.6)
-    text(415, 84, "Acme Automated Treasury Engine", "F1", 7.5, 0.443, 0.443, 0.478)
+    text(415, 110, "Digitally Signed & Verified", "F2", 8.0, 0.051, 0.486, 0.353)
+    line(410, 98, 558, 98, 0.894, 0.894, 0.906, 0.6)
+    text(415, 86, "Acme Automated Treasury Engine", "F1", 7.5, 0.443, 0.443, 0.478)
 
     text(
         130,
-        48,
+        44,
         "Acme Manufacturing Inc. - Unified Cost Accounting & Live PayMongo Orchestration Platform",
         "F1",
         7.5,
@@ -1022,4 +1027,3 @@ def generate_receipt_pdf_bytes(receipt: Dict[str, Any]) -> bytes:
 
     body_parts.append(trailer)
     return b"".join(body_parts)
-
