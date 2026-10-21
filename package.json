@@ -1,0 +1,16 @@
+{
+  "name": "rge-accounting-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Acme Cost Accounting & PayMongo Orchestrator Polyglot Monorepo",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "scripts": {
+    "build": "cd Frontend && npm install --include=dev && npm run build",
+    "heroku-postbuild": "npm run build",
+    "start": "python scripts/start_production.py"
+  }
+}
+
