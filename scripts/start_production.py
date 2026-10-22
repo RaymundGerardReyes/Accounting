@@ -86,8 +86,11 @@ def cleanup(signum=None, frame=None):
 def wait_for_backend_health(url: str, timeout: int = 30) -> bool:
     log(f"Waiting for FastAPI backend readiness at {url} (timeout: {timeout}s)...")
     start_time = time.time()
+    # Give uvicorn a brief moment for socket binding
+    time.sleep(0.5)
     while time.time() - start_time < timeout:
         if backend_proc.poll() is not None:
+            time.sleep(0.5)
             log(f"Backend process terminated prematurely with code {backend_proc.returncode}!")
             return False
         try:
@@ -126,14 +129,16 @@ def main():
     env = os.environ.copy()
     env["BACKEND_INTERNAL_URL"] = backend_internal_url
     env["PYTHONUNBUFFERED"] = "1"
+    # Ensure Uvicorn runs in single-process mode on internal loopback, avoiding Multiprocess signals
+    env["WEB_CONCURRENCY"] = "1"
 
     log("=================================================================")
-    log("  Acme Cost Accounting & PayMongo Orchestrator Heroku Dyno")
+    log("  R.G.E Accounting Firm Inc. Production Supervisor Dyno")
     log(f"  Heroku Public Port:       {heroku_port}")
     log(f"  FastAPI Internal Loopback: {backend_internal_url}")
     log("=================================================================")
 
-    # 1. Start FastAPI Backend
+    # 1. Start FastAPI Backend (single-process mode with isolated stdin)
     backend_cmd = [
         sys.executable,
         "-m",
@@ -145,6 +150,8 @@ def main():
         "127.0.0.1",
         "--port",
         str(internal_backend_port),
+        "--workers",
+        "1",
     ]
 
     log(f"Starting Backend: {' '.join(backend_cmd)}")
@@ -152,6 +159,7 @@ def main():
         backend_cmd,
         cwd=str(BACKEND_DIR),
         env=env,
+        stdin=subprocess.DEVNULL,
     )
 
     # 2. Wait for backend readiness
@@ -161,7 +169,7 @@ def main():
         cleanup()
         sys.exit(1)
 
-    # 3. Start Next.js Frontend
+    # 3. Start Next.js Frontend (with isolated stdin)
     next_bin = FRONTEND_DIR / "node_modules" / "next" / "dist" / "bin" / "next"
     if next_bin.exists():
         frontend_cmd = [
@@ -190,6 +198,7 @@ def main():
         frontend_cmd,
         cwd=str(FRONTEND_DIR),
         env=env,
+        stdin=subprocess.DEVNULL,
     )
 
     log("Both services launched. Monitoring supervisor loop...")
