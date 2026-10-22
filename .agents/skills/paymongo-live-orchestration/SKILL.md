@@ -77,6 +77,21 @@ PayMongo sends `Paymongo-Signature: t=<timestamp>,te=<test_signature>,li=<live_s
 - **Simulator Parity**:
   - In `Frontend/app/payment/sandbox/[attemptId]/page.tsx`, ensure `initialMethod` handles compound keys like `gcash_maya` (mapping to `"gcash"`) and renders a prominent badge displaying the channel selected at checkout.
 
+## 9. Polyglot Monorepo `.gitignore` & Runtime Engine Invariants
+- **Preserve Frontend Source Directories**:
+  - Never use unanchored `lib/` or `lib64/` rules in a polyglot monorepo `.gitignore`.
+  - Python virtual environment libraries must be anchored to root (`/lib/`, `/lib64/`), and frontend source directories must be explicitly whitelisted:
+    ```gitignore
+    /lib/
+    /lib64/
+    !Frontend/lib/
+    !Frontend/lib/**
+    ```
+  - Always verify with `git ls-files Frontend/lib/` and `git check-ignore -v Frontend/lib/payment-api.ts` before committing.
+- **Node.js Engine Pinning**:
+  - In root `package.json`, pin `engines.node` to an active LTS release (e.g. `"20.x"`) to satisfy Heroku buildpack recommendations and eliminate wide-range resolution warnings.
+
+
 
 
 
