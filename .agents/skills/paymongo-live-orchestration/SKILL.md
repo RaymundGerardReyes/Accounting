@@ -91,6 +91,17 @@ PayMongo sends `Paymongo-Signature: t=<timestamp>,te=<test_signature>,li=<live_s
 - **Node.js Engine Pinning**:
   - In root `package.json`, pin `engines.node` to an active LTS release (e.g. `"20.x"`) to satisfy Heroku buildpack recommendations and eliminate wide-range resolution warnings.
 
+## 10. Dyno Supervisor Single-Process & Database Resiliency Invariants
+- **Suppress Heroku `WEB_CONCURRENCY` in Monorepo Supervisors**:
+  - The internal FastAPI backend on loopback (`127.0.0.1:5000`) must always run as a single process:
+    - Pass `--workers 1` explicitly in the uvicorn command line.
+    - Set `env["WEB_CONCURRENCY"] = "1"` in the subprocess environment.
+    - Set `stdin=subprocess.DEVNULL` to isolate subprocesses from non-interactive terminal signals.
+- **Heroku PostgreSQL SSL & Local SQLite Fallback**:
+  - Always enforce `connect_args={"sslmode": "require"}` for remote `postgresql://` connections on Heroku.
+  - Implement an immediate fallback to local SQLite (`sqlite:///accounting_payments.db`) if primary PostgreSQL connection validation fails, guaranteeing that the web dyno always passes its readiness probe.
+
+
 
 
 
