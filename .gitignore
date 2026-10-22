@@ -10,8 +10,11 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Python Virtualenv Libs (root only)
+/lib/
+/lib64/
+!Frontend/lib/
+!Frontend/lib/**
 parts/
 sdist/
 var/
