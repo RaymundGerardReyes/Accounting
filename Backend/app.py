@@ -30,7 +30,10 @@ DATA_DIR = Path(__file__).parent / "data"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize DB tables and seed records
-    init_db()
+    try:
+        init_db()
+    except Exception as e:
+        print(f"[ERROR] Database schema initialization notice: {e}", flush=True)
     yield
 
 app = FastAPI(
