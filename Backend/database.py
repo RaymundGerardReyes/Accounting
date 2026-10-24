@@ -1,4 +1,5 @@
 import os
+import re
 import time
 from pathlib import Path
 from sqlalchemy import create_engine
@@ -51,6 +52,23 @@ elif DATABASE_URL.startswith("postgresql+psycopg2://") and not has_psycopg2 and 
     # URL specified psycopg2 but only psycopg3 is installed -> seamlessly fallback to psycopg3
     DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
 
+# Automatically rewrite IPv6-only Supabase Direct Host (db.<ref>.supabase.co) to IPv4 Supavisor Pooler
+# Heroku dynos and many IPv4 networks fail with "Network is unreachable" against db.<ref>.supabase.co
+_supa_direct_match = re.search(r"://([^:@]+)(:[^@]+)?@db\.([a-z0-9]+)\.supabase\.co(?::(\d+))?/", DATABASE_URL)
+if _supa_direct_match:
+    _db_user = _supa_direct_match.group(1)
+    _db_pass_part = _supa_direct_match.group(2) or ""
+    _proj_ref = _supa_direct_match.group(3)
+    _db_port = _supa_direct_match.group(4) or "5432"
+    _pooler_host = os.getenv("SUPABASE_POOLER_HOST", "aws-0-ap-northeast-1.pooler.supabase.com")
+    _pooler_user = _db_user if f".{_proj_ref}" in _db_user else f"{_db_user}.{_proj_ref}"
+    DATABASE_URL = DATABASE_URL.replace(
+        _supa_direct_match.group(0),
+        f"://{_pooler_user}{_db_pass_part}@{_pooler_host}:{_db_port}/",
+        1
+    )
+    print(f"[DB] Rewrote IPv6 Supabase direct host (db.{_proj_ref}.supabase.co) to IPv4 Pooler ({_pooler_host}:{_db_port}).", flush=True)
+
 is_postgres = DATABASE_URL.startswith("postgresql")
 
 # In production or when PostgreSQL is explicitly configured, never default to SQLite
@@ -67,8 +85,12 @@ if DATABASE_URL.startswith("sqlite"):
     connect_args["check_same_thread"] = False
 elif is_postgres:
     # Enforce sslmode=require for Cloud PostgreSQL if not already present in URL or query
-    if "sslmode=" not in DATABASE_URL and not any(h in DATABASE_URL for h in ("localhost", "127.0.0.1")):
-        connect_args["sslmode"] = "require"
+    if not any(h in DATABASE_URL for h in ("localhost", "127.0.0.1")):
+        if "sslmode=" not in DATABASE_URL:
+            connect_args["sslmode"] = "require"
+        # Prevent local Windows %APPDATA%/postgresql/root.crt from causing 'certificate verify failed' under sslmode=require
+        if "sslrootcert=" not in DATABASE_URL and os.getenv("PGSSLMODE", "").lower() not in ("verify-ca", "verify-full"):
+            connect_args["sslrootcert"] = "nonexistent"
     engine_kwargs.update({
         "pool_size": 5,
         "max_overflow": 10,

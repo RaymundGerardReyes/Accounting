@@ -14,9 +14,10 @@ CREATE TABLE IF NOT EXISTS users_finance (
   status VARCHAR(32) NOT NULL DEFAULT 'active',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE IF EXISTS users_finance ALTER COLUMN created_at SET DEFAULT NOW();
 
 CREATE TABLE IF NOT EXISTS role_assignments (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id VARCHAR(36) PRIMARY KEY DEFAULT (gen_random_uuid()::TEXT),
   user_id VARCHAR(64) NOT NULL REFERENCES users_finance(id) ON DELETE CASCADE,
   role VARCHAR(64) NOT NULL,
   department_scope VARCHAR(64) NOT NULL DEFAULT '*',
@@ -24,6 +25,8 @@ CREATE TABLE IF NOT EXISTS role_assignments (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT uq_role_assignment_user_role_scope UNIQUE (user_id, role, department_scope)
 );
+ALTER TABLE IF EXISTS role_assignments ALTER COLUMN id SET DEFAULT (gen_random_uuid()::TEXT);
+ALTER TABLE IF EXISTS role_assignments ALTER COLUMN created_at SET DEFAULT NOW();
 
 -- 2. In-Database Authentication, Session, and OAuth 2.0 PKCE State Tables
 CREATE TABLE IF NOT EXISTS auth_credentials (
@@ -64,15 +67,15 @@ CREATE TABLE IF NOT EXISTS oauth_states (
 
 -- 3. Tamper-Evident Cryptographic Audit Trail
 CREATE TABLE IF NOT EXISTS audit_events (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id VARCHAR(36) PRIMARY KEY DEFAULT (gen_random_uuid()::TEXT),
   sequence_no BIGINT NOT NULL UNIQUE,
   actor_id VARCHAR(64) NOT NULL,
   actor_role VARCHAR(128) NOT NULL,
   action VARCHAR(128) NOT NULL,
   entity_type VARCHAR(64) NOT NULL,
   entity_id VARCHAR(64) NOT NULL,
-  previous_state JSONB,
-  new_state JSONB,
+  previous_state TEXT,
+  new_state TEXT,
   reason TEXT,
   correlation_id VARCHAR(64),
   evidence_ref VARCHAR(64),
@@ -80,149 +83,16 @@ CREATE TABLE IF NOT EXISTS audit_events (
   prev_hash VARCHAR(64) NOT NULL,
   record_hash VARCHAR(64) NOT NULL UNIQUE
 );
+ALTER TABLE IF EXISTS audit_events ALTER COLUMN id SET DEFAULT (gen_random_uuid()::TEXT);
+ALTER TABLE IF EXISTS audit_events ALTER COLUMN occurred_at SET DEFAULT NOW();
 
--- 4. Number Sequences & Operational Tables
+-- 4. Number Sequences (Core ORM operational tables are created by SQLAlchemy Base.metadata.create_all)
 CREATE TABLE IF NOT EXISTS number_sequences (
   prefix VARCHAR(32) PRIMARY KEY,
   current_value BIGINT NOT NULL DEFAULT 0,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE TABLE IF NOT EXISTS financial_policies (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  policy_code VARCHAR(64) NOT NULL UNIQUE,
-  name VARCHAR(255) NOT NULL,
-  description TEXT,
-  scope_workflow VARCHAR(64) NOT NULL,
-  applicable_employee_groups JSONB NOT NULL DEFAULT '["*"]'::jsonb,
-  applicable_departments JSONB NOT NULL DEFAULT '["*"]'::jsonb,
-  current_version_id UUID,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS policy_versions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  policy_id UUID NOT NULL REFERENCES financial_policies(id) ON DELETE CASCADE,
-  version_number BIGINT NOT NULL,
-  status VARCHAR(32) NOT NULL DEFAULT 'active',
-  effective_from VARCHAR(10) NOT NULL,
-  effective_until VARCHAR(10),
-  currency VARCHAR(3) NOT NULL DEFAULT 'PHP',
-  aggregate_monthly_limit_minor BIGINT NOT NULL DEFAULT 1500000,
-  max_reports_per_period BIGINT NOT NULL DEFAULT 1,
-  change_justification TEXT NOT NULL,
-  ratification_status VARCHAR(64) NOT NULL DEFAULT 'ratified_by_controller',
-  author_id VARCHAR(64) NOT NULL,
-  approver_id VARCHAR(64),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT uq_policy_version_number UNIQUE (policy_id, version_number)
-);
-
-CREATE TABLE IF NOT EXISTS policy_rules (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  policy_version_id UUID NOT NULL REFERENCES policy_versions(id) ON DELETE CASCADE,
-  rule_code VARCHAR(64) NOT NULL,
-  description VARCHAR(255) NOT NULL,
-  severity VARCHAR(32) NOT NULL DEFAULT 'block',
-  enforcement_mode VARCHAR(32) NOT NULL DEFAULT 'exception_allowed',
-  is_exception_allowed BOOLEAN NOT NULL DEFAULT TRUE,
-  required_exception_role VARCHAR(64) NOT NULL DEFAULT 'finance_controller',
-  parameters_json JSONB NOT NULL DEFAULT '{}'::jsonb
-);
-
-CREATE TABLE IF NOT EXISTS cash_advances (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  advance_number VARCHAR(64) NOT NULL UNIQUE,
-  requestor_id VARCHAR(64) NOT NULL REFERENCES users_finance(id),
-  employee_id VARCHAR(64) NOT NULL REFERENCES users_finance(id),
-  department_id VARCHAR(64) NOT NULL,
-  cost_center_id VARCHAR(32) NOT NULL,
-  purpose_code VARCHAR(64) NOT NULL,
-  business_justification TEXT NOT NULL,
-  destination_or_site VARCHAR(255),
-  requested_amount_minor BIGINT NOT NULL,
-  approved_amount_minor BIGINT,
-  currency VARCHAR(3) NOT NULL DEFAULT 'PHP',
-  date_needed VARCHAR(10) NOT NULL,
-  liquidation_due_date VARCHAR(10),
-  approval_status VARCHAR(32) NOT NULL DEFAULT 'draft',
-  payment_status VARCHAR(32) NOT NULL DEFAULT 'not_started',
-  liquidation_review_status VARCHAR(32) NOT NULL DEFAULT 'not_started',
-  settlement_status VARCHAR(32) NOT NULL DEFAULT 'open',
-  posting_status VARCHAR(32) NOT NULL DEFAULT 'pending',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS expense_reports (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  report_number VARCHAR(64) NOT NULL UNIQUE,
-  employee_id VARCHAR(64) NOT NULL REFERENCES users_finance(id),
-  department_id VARCHAR(64) NOT NULL,
-  cost_center_id VARCHAR(32) NOT NULL,
-  reporting_period VARCHAR(16) NOT NULL,
-  business_purpose_summary TEXT NOT NULL,
-  out_of_base_activity BOOLEAN NOT NULL DEFAULT FALSE,
-  currency VARCHAR(3) NOT NULL DEFAULT 'PHP',
-  review_status VARCHAR(32) NOT NULL DEFAULT 'submitted',
-  settlement_status VARCHAR(32) NOT NULL DEFAULT 'unapplied',
-  posting_status VARCHAR(32) NOT NULL DEFAULT 'pending',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS exception_requests (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  exception_number VARCHAR(64) NOT NULL UNIQUE,
-  employee_id VARCHAR(64) NOT NULL REFERENCES users_finance(id),
-  requester_id VARCHAR(64) NOT NULL REFERENCES users_finance(id),
-  target_entity_type VARCHAR(64) NOT NULL DEFAULT 'expense_report',
-  reporting_period VARCHAR(16) NOT NULL,
-  violated_rule_code VARCHAR(64) NOT NULL,
-  exception_type VARCHAR(64) NOT NULL DEFAULT 'amount_cap_override',
-  requested_amount_minor BIGINT NOT NULL,
-  approved_max_amount_minor BIGINT,
-  currency VARCHAR(3) NOT NULL DEFAULT 'PHP',
-  business_justification TEXT NOT NULL,
-  status VARCHAR(32) NOT NULL DEFAULT 'submitted',
-  approver_id VARCHAR(64),
-  decision_reason TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS orders (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id VARCHAR(64) NOT NULL,
-  order_number VARCHAR(64) NOT NULL UNIQUE,
-  title VARCHAR(255) NOT NULL,
-  category VARCHAR(32) NOT NULL DEFAULT 'product_order',
-  reference_code VARCHAR(64) NOT NULL,
-  amount_minor BIGINT NOT NULL,
-  currency VARCHAR(3) NOT NULL DEFAULT 'PHP',
-  status VARCHAR(32) NOT NULL DEFAULT 'pending',
-  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS payment_attempts (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-  provider VARCHAR(32) NOT NULL DEFAULT 'paymongo',
-  payment_method VARCHAR(32) NOT NULL DEFAULT 'hosted_checkout',
-  provider_payment_id VARCHAR(128),
-  amount_minor BIGINT NOT NULL,
-  currency VARCHAR(3) NOT NULL DEFAULT 'PHP',
-  status VARCHAR(32) NOT NULL DEFAULT 'requires_action',
-  idempotency_key VARCHAR(128) NOT NULL,
-  checkout_url TEXT,
-  paid_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT uq_payment_attempts_provider_idempotency UNIQUE (provider, idempotency_key)
-);
+ALTER TABLE IF EXISTS number_sequences ALTER COLUMN updated_at SET DEFAULT NOW();
 
 -- 5. Live Cost Allocation Tables
 CREATE TABLE IF NOT EXISTS cost_departments (
@@ -325,7 +195,7 @@ DECLARE
   v_now TIMESTAMPTZ := NOW();
   v_payload TEXT;
   v_record_hash VARCHAR(64);
-  v_id UUID := gen_random_uuid();
+  v_id VARCHAR(36) := gen_random_uuid()::TEXT;
   v_clean_reason TEXT := fn_sanitize_input(p_reason);
 BEGIN
   -- Transaction-scoped advisory lock guarantees strict serial ordering of the hash chain
@@ -362,7 +232,7 @@ BEGIN
     previous_state, new_state, reason, correlation_id, occurred_at, prev_hash, record_hash
   ) VALUES (
     v_id, v_next_seq, p_actor_id, p_actor_role, p_action, p_entity_type, p_entity_id,
-    p_previous_state, p_new_state, v_clean_reason, gen_random_uuid()::TEXT, v_now, v_prev_hash, v_record_hash
+    p_previous_state::TEXT, p_new_state::TEXT, v_clean_reason, gen_random_uuid()::TEXT, v_now, v_prev_hash, v_record_hash
   );
 
   RETURN jsonb_build_object(

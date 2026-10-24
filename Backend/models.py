@@ -38,6 +38,30 @@ def apply_automated_schema_migrations(target_engine=None):
 
     try:
         with eng.connect() as conn:
+            # Self-healing check: if an earlier schema script created ORM tables with UUID primary keys
+            # instead of SQLAlchemy's VARCHAR(36), drop those incompatible tables so create_all() rebuilds them cleanly.
+            uuid_tables = conn.execute(text("""
+                SELECT table_name FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND column_name = 'id'
+                  AND data_type = 'uuid'
+                  AND table_name IN (
+                      'orders', 'payment_attempts', 'role_assignments', 'audit_events',
+                      'cash_advances', 'expense_reports', 'exception_requests',
+                      'financial_policies', 'policy_versions', 'policy_rules'
+                  )
+            """)).fetchall()
+            if uuid_tables:
+                table_list = ", ".join(r[0] for r in uuid_tables)
+                print(f"[Migration] Reconciling legacy UUID primary keys to VARCHAR(36) for: {table_list}", flush=True)
+                conn.execute(text(f"DROP TABLE IF EXISTS {table_list}, schema_migrations CASCADE;"))
+                conn.commit()
+
+        # Ensure all SQLAlchemy ORM tables (including users_finance, number_sequences, orders, etc.) exist
+        import finance_models  # noqa: F401
+        Base.metadata.create_all(bind=eng)
+
+        with eng.connect() as conn:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS schema_migrations (
                     version VARCHAR(64) PRIMARY KEY,

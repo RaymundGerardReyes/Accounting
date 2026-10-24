@@ -1672,8 +1672,11 @@ def seed_finance_db(db):
             ),
         ]
         db.add(policy)
+        db.flush()
         db.add(version)
+        db.flush()
         db.add_all(rules)
+        db.flush()
 
     if db.query(Vendor).count() == 0:
         # Dev-profile only, pending_verification, NO bank account data (per V3 & Rule 8)
