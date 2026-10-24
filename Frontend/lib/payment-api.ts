@@ -410,21 +410,30 @@ export async function createAndExpireTestPayment(channel: string = "qrph"): Prom
 export type SimulatedOutcome = "paid" | "failed" | "expired"
 
 export interface SimulateWebhookResponse {
-  ok: boolean
-  provider_event_id: string
-  transitioned: boolean
-  event_type?: string
+  ok?: boolean
+  success?: boolean
   attempt_id?: string
-  attempt_status?: string
   order_id?: string
+  order_number?: string
+  previous_status?: string
+  new_status?: string
+  outcome?: string
+  event_type?: string
+  provider_event_id?: string
+  simulated_event_id?: string
+  force_override?: boolean
+  delivery_dispatched?: boolean
+  message?: string
+  transitioned?: boolean
+  attempt_status?: string
   order_status?: string
   reason?: string
   [key: string]: any
 }
 
 /**
- * Triggers a simulated webhook transition (PAID, FAILED, or EXPIRED)
- * for a specific payment attempt in the Testing API.
+ * Triggers an authoritative simulated PayMongo webhook transition (PAID, FAILED, or EXPIRED)
+ * for a specific payment attempt in the Testing API / Sandbox environment.
  */
 export async function simulatePaymentAttemptWebhook(
   attemptId: string,
@@ -432,7 +441,7 @@ export async function simulatePaymentAttemptWebhook(
   options?: { forceOverride?: boolean; failedCode?: string; failedMessage?: string }
 ): Promise<SimulateWebhookResponse> {
   return apiFetch<SimulateWebhookResponse>(
-    `/v1/payments/attempts/${encodeURIComponent(attemptId)}/simulate`,
+    `/api/v1/payments/attempts/${encodeURIComponent(attemptId)}/simulate`,
     {
       method: "POST",
       body: {
