@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS role_assignments (
   user_id VARCHAR(64) NOT NULL REFERENCES users_finance(id) ON DELETE CASCADE,
   role VARCHAR(64) NOT NULL,
   department_scope VARCHAR(64) NOT NULL DEFAULT '*',
-  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  is_active INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT uq_role_assignment_user_role_scope UNIQUE (user_id, role, department_scope)
 );
@@ -396,7 +396,7 @@ BEGIN
   SELECT COALESCE(jsonb_agg(role ORDER BY role), '["employee"]'::jsonb)
   INTO v_roles
   FROM role_assignments
-  WHERE user_id = v_user.id AND is_active = TRUE;
+  WHERE user_id = v_user.id AND is_active = 1;
 
   RETURN jsonb_build_object(
     'id', v_user.id,
@@ -738,17 +738,17 @@ ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO role_assignments (user_id, role, department_scope, is_active)
 VALUES
-  ('emp_field_01', 'employee', 'manufacturing', TRUE),
-  ('emp_field_02', 'employee', 'logistics', TRUE),
-  ('sup_approver_01', 'supervisor', '*', TRUE),
-  ('fin_reviewer_01', 'finance_reviewer', '*', TRUE),
-  ('fin_maker_01', 'maker', '*', TRUE),
-  ('fin_verifier_01', 'verifier', '*', TRUE),
-  ('bank_approver_01', 'bank_approver', '*', TRUE),
-  ('evidence_verifier_01', 'evidence_verifier', '*', TRUE),
-  ('fin_controller_01', 'finance_controller', '*', TRUE),
-  ('auditor_01', 'auditor', '*', TRUE),
-  ('sys_admin_01', 'system_admin', '*', TRUE)
+  ('emp_field_01', 'employee', 'manufacturing', 1),
+  ('emp_field_02', 'employee', 'logistics', 1),
+  ('sup_approver_01', 'supervisor', '*', 1),
+  ('fin_reviewer_01', 'finance_reviewer', '*', 1),
+  ('fin_maker_01', 'maker', '*', 1),
+  ('fin_verifier_01', 'verifier', '*', 1),
+  ('bank_approver_01', 'bank_approver', '*', 1),
+  ('evidence_verifier_01', 'evidence_verifier', '*', 1),
+  ('fin_controller_01', 'finance_controller', '*', 1),
+  ('auditor_01', 'auditor', '*', 1),
+  ('sys_admin_01', 'system_admin', '*', 1)
 ON CONFLICT (user_id, role, department_scope) DO NOTHING;
 
 -- Provision bcrypt password hashes ('Acme@2026!') inside PostgreSQL using pgcrypto

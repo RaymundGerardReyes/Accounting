@@ -1,5 +1,7 @@
 import uuid
 import json
+import hashlib
+from pathlib import Path
 from datetime import datetime, timezone
 from sqlalchemy import (
     Column,
@@ -10,9 +12,75 @@ from sqlalchemy import (
     ForeignKey,
     UniqueConstraint,
     Index,
+    text,
 )
 from sqlalchemy.orm import relationship
 from database import Base, SessionLocal, engine
+
+SCHEMA_PATH = Path(__file__).resolve().parent.parent / "db" / "postgres_live_schema.sql"
+
+def apply_automated_schema_migrations(target_engine=None):
+    """
+    Executes PostgreSQL extensions, stored functions, triggers, standalone tables,
+    and seeders automatically on boot if and only if the schema checksum has updated.
+    """
+    eng = target_engine or engine
+    # Only run against PostgreSQL; SQLite does not support pgcrypto or PL/pgSQL
+    if not eng.url.drivername.startswith("postgresql"):
+        return
+
+    if not SCHEMA_PATH.exists():
+        print(f"[Migration] Notice: Schema file not found at {SCHEMA_PATH}", flush=True)
+        return
+
+    sql_content = SCHEMA_PATH.read_text(encoding="utf-8")
+    schema_hash = hashlib.sha256(sql_content.encode("utf-8")).hexdigest()
+
+    try:
+        with eng.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version VARCHAR(64) PRIMARY KEY,
+                    checksum VARCHAR(64) NOT NULL,
+                    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+            """))
+            conn.commit()
+
+            row = conn.execute(
+                text("SELECT checksum FROM schema_migrations WHERE version = 'postgres_live_schema'")
+            ).fetchone()
+
+            if row and row[0] == schema_hash:
+                print(f"[Migration] Remote PostgreSQL schema, functions, and seeders are up to date (hash: {schema_hash[:8]}).", flush=True)
+                return
+
+            print(f"[Migration] Executing live DDL, stored functions, triggers, and seeders update (hash: {schema_hash[:8]})...", flush=True)
+
+        # Use raw DBAPI connection to properly compile multi-statement SQL with $$ plpgsql blocks
+        raw_conn = eng.raw_connection()
+        try:
+            with raw_conn.cursor() as cur:
+                cur.execute(sql_content)
+            raw_conn.commit()
+        finally:
+            raw_conn.close()
+
+        with eng.connect() as conn:
+            conn.execute(
+                text("""
+                    INSERT INTO schema_migrations (version, checksum, applied_at)
+                    VALUES ('postgres_live_schema', :hash, NOW())
+                    ON CONFLICT (version) DO UPDATE SET checksum = :hash, applied_at = NOW()
+                """),
+                {"hash": schema_hash}
+            )
+            conn.commit()
+
+        print("[Migration] Live PostgreSQL schema, functions, triggers, and seeders successfully applied!", flush=True)
+    except Exception as exc:
+        print(f"[Migration Error] Failed to apply live schema migrations: {exc}", flush=True)
+        raise
 
 def utc_now():
     return datetime.now(timezone.utc)
@@ -175,7 +243,9 @@ class FulfillmentOutbox(Base):
         }
 
 def init_db():
-    # Ensure finance_models are registered on Base.metadata before create_all
+    # 1. Apply automated PostgreSQL migrations, stored functions, unmapped tables, and seeders
+    apply_automated_schema_migrations(engine)
+    # 2. Ensure finance_models are registered on Base.metadata before create_all
     import finance_models  # noqa: F401
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
