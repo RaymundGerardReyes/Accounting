@@ -125,9 +125,10 @@ def main():
     internal_backend_port = 5001 if heroku_port == 5000 else 5000
     backend_internal_url = f"http://127.0.0.1:{internal_backend_port}"
 
-    # Inherit and inject BACKEND_INTERNAL_URL into environment for Next.js proxy
+    # Inherit and inject BACKEND_INTERNAL_URL and BACKEND_API_URL into environment for Next.js proxy
     env = os.environ.copy()
     env["BACKEND_INTERNAL_URL"] = backend_internal_url
+    env["BACKEND_API_URL"] = backend_internal_url
     env["PYTHONUNBUFFERED"] = "1"
     # Ensure Uvicorn runs in single-process mode on internal loopback, avoiding Multiprocess signals
     env["WEB_CONCURRENCY"] = "1"
