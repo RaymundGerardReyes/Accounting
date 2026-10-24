@@ -607,17 +607,48 @@ function runBookstoreFormBuilder() {
  */
 function onOpen() {
   try {
-    SpreadsheetApp.getUi()
-      .createMenu("📚 R.G.E Bookstore Admin")
-      .addItem("🔨 Generate Bookstore Order Form", "runBookstoreFormBuilder")
-      .addItem("📋 Setup Bookstore Sheet Headers & Triggers", "setupBookstoreSheet")
+    var ui = SpreadsheetApp.getUi();
+    ui.createMenu("📚 R.G.E Bookstore Admin")
+      .addItem("⚡ 1. Instant-Build Bookstore Google Form", "generateBookstoreOrderForm")
       .addSeparator()
-      .addItem("🧪 Simulate Single Student Submission", "simulateSingleBookstoreSubmission")
-      .addItem("⚡ Simulate 5 Random Submissions", "simulateFiveBookstoreSubmissions")
-      .addItem("🔄 Reconcile Active Row Status with Backend", "reconcileActiveRowWithBackend")
+      .addItem("🎲 2. Simulate 3 Random External Book Orders", "runThreeRandomOrders")
+      .addItem("🎲 3. Simulate 1 Random External Book Order", "runSingleRandomOrder")
+      .addItem("⚡ 4. Simulate 5 Random External Book Orders", "simulateFiveBookstoreSubmissions")
+      .addSeparator()
+      .addItem("🔧 5. Verify / Repair Form Submit Trigger", "repairTriggersMenuAction")
+      .addItem("📋 6. Setup Bookstore Sheet Headers & Triggers", "setupBookstoreSheet")
+      .addSeparator()
+      .addItem("🔄 7. Reconcile Active Row Status with Backend", "reconcileActiveRowWithBackend")
       .addToUi();
   } catch (menuErr) {
     Logger.log("Notice in onOpen (UI not available in standalone/trigger context): " + menuErr);
+  }
+}
+
+function runThreeRandomOrders() {
+  if (typeof generateRandomBookstoreSubmissions === "function") {
+    generateRandomBookstoreSubmissions(3);
+  } else {
+    SpreadsheetApp.getUi().alert("Please ensure FormBuilder.gs is added to your Apps Script project.");
+  }
+}
+
+function runSingleRandomOrder() {
+  if (typeof generateRandomBookstoreSubmissions === "function") {
+    generateRandomBookstoreSubmissions(1);
+  } else {
+    onFormSubmit();
+  }
+}
+
+function repairTriggersMenuAction() {
+  var context = resolveSheetSafely(null);
+  var spreadsheet = context.spreadsheet || (context.sheet ? context.sheet.getParent() : SpreadsheetApp.getActiveSpreadsheet());
+  if (spreadsheet) {
+    if (typeof ensureFormSubmitTrigger === "function") {
+      ensureFormSubmitTrigger(spreadsheet);
+    }
+    SpreadsheetApp.getUi().alert("Trigger verified for spreadsheet: " + spreadsheet.getName());
   }
 }
 
