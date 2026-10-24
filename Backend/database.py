@@ -16,11 +16,40 @@ if _root_env.exists():
 IS_PRODUCTION = bool(os.getenv("DYNO") or os.getenv("HEROKU_APP_NAME") or os.getenv("APP_DOMAIN"))
 IS_TESTING = bool(os.getenv("PYTEST_CURRENT_TEST") or os.getenv("TESTING"))
 
+# Check which PostgreSQL driver is available in the Python runtime
+has_psycopg3 = False
+has_psycopg2 = False
+try:
+    import psycopg  # noqa: F401
+    has_psycopg3 = True
+except ImportError:
+    pass
+
+try:
+    import psycopg2  # noqa: F401
+    has_psycopg2 = True
+except ImportError:
+    pass
+
+# Determine preferred driver (prefer psycopg2 if available, else psycopg3)
+preferred_driver = "postgresql+psycopg2://" if has_psycopg2 else ("postgresql+psycopg://" if has_psycopg3 else "postgresql://")
+
 # Check for DATABASE_URL environment variable
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+
+# Normalize PostgreSQL driver in DATABASE_URL
 if DATABASE_URL.startswith("postgres://"):
-    # Heroku PostgreSQL sets postgres:// which SQLAlchemy 2.0 requires as postgresql://
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    # Heroku PostgreSQL sets postgres:// which SQLAlchemy 2.0 requires as postgresql+psycopg2://
+    DATABASE_URL = DATABASE_URL.replace("postgres://", preferred_driver, 1)
+elif DATABASE_URL.startswith("postgresql://"):
+    # Bare postgresql:// -> convert explicitly to available driver
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", preferred_driver, 1)
+elif DATABASE_URL.startswith("postgresql+psycopg://") and not has_psycopg3 and has_psycopg2:
+    # URL specified psycopg (v3) but only psycopg2 is installed -> seamlessly fallback to psycopg2
+    DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
+elif DATABASE_URL.startswith("postgresql+psycopg2://") and not has_psycopg2 and has_psycopg3:
+    # URL specified psycopg2 but only psycopg3 is installed -> seamlessly fallback to psycopg3
+    DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
 
 is_postgres = DATABASE_URL.startswith("postgresql")
 
