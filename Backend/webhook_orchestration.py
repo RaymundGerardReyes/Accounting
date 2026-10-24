@@ -233,7 +233,8 @@ def verify_paymongo_signature(raw_body: bytes, signature_header: Optional[str] =
     if not timestamp:
         return False
 
-    signed_payload = f"{timestamp}.{raw_body.decode('utf-8')}".encode("utf-8")
+    decoded_body = raw_body.decode('utf-8', errors='replace') if isinstance(raw_body, (bytes, bytearray)) else str(raw_body)
+    signed_payload = f"{timestamp}.{decoded_body}".encode("utf-8")
     expected_sig = hmac.new(
         target_secret.encode("utf-8"),
         msg=signed_payload,
@@ -252,15 +253,37 @@ def resolve_attempt_and_order(db: Session, resource: dict, OrderModel=Order, Pay
     Resolves PaymentAttempt and Order across checkout_session (cs_...),
     payment (pay_...), and qrph resources using metadata first, then provider_payment_id.
     """
+    if not resource or not isinstance(resource, dict):
+        return None, None
+
     resource_id = resource.get("id")
     attrs = resource.get("attributes") or {}
+    if not isinstance(attrs, dict):
+        attrs = {}
+
     metadata = attrs.get("metadata") or {}
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except Exception:
+            metadata = {}
+    if not isinstance(metadata, dict):
+        metadata = {}
 
     # Also check nested payments array if this is a checkout_session payload
     payments_list = attrs.get("payments") or []
-    if not metadata and payments_list:
-        first_payment_attrs = (payments_list[0].get("attributes") if isinstance(payments_list[0], dict) else {}) or {}
-        metadata = first_payment_attrs.get("metadata") or {}
+    if not metadata and payments_list and isinstance(payments_list, list):
+        p0 = payments_list[0] if isinstance(payments_list[0], dict) else {}
+        first_payment_attrs = p0.get("attributes") if isinstance(p0.get("attributes"), dict) else p0
+        if isinstance(first_payment_attrs, dict):
+            p_meta = first_payment_attrs.get("metadata") or {}
+            if isinstance(p_meta, str):
+                try:
+                    p_meta = json.loads(p_meta)
+                except Exception:
+                    p_meta = {}
+            if isinstance(p_meta, dict):
+                metadata = p_meta
 
     attempt_id = metadata.get("payment_attempt_id")
     order_id = metadata.get("order_id")
@@ -321,10 +344,16 @@ def apply_webhook_transition(
     even if the attempt was previously marked terminal.
     """
     now = datetime.now(timezone.utc)
-    attrs = resource.get("attributes") or {}
+    res_dict = resource if isinstance(resource, dict) else {}
+    attrs = res_dict.get("attributes") or {}
+    if not isinstance(attrs, dict):
+        attrs = {}
 
     if not attempt:
         return {"transitioned": False, "reason": "payment_attempt_not_found"}
+
+    if not order and attempt.order_id:
+        order = db.query(Order).filter(Order.id == attempt.order_id).first()
 
     # Guard terminal states in production webhooks unless force_override is True (Testing API)
     if attempt.status in TERMINAL_ATTEMPT_STATUSES and not force_override:
@@ -338,6 +367,7 @@ def apply_webhook_transition(
     if event_type in PAID_EVENTS:
         attempt.status = "succeeded"
         attempt.paid_at = now
+        attempt.expires_at = None
         attempt.failure_code = None
         attempt.failure_message = None
         attempt.updated_at = now
@@ -367,9 +397,13 @@ def apply_webhook_transition(
                         processed_at=now,
                     )
                 )
+            elif existing_outbox.status == "cancelled":
+                existing_outbox.status = "completed"
+                existing_outbox.processed_at = now
 
     elif event_type in FAILED_EVENTS:
         attempt.status = "failed"
+        attempt.paid_at = None
         attempt.failure_code = attrs.get("failed_code") or "PAYMENT_FAILED"
         attempt.failure_message = attrs.get("failed_message") or "Payment processing failed."
         attempt.updated_at = now
@@ -380,9 +414,23 @@ def apply_webhook_transition(
             order.status = "pending"
             order.updated_at = now
 
+        if force_override:
+            rev_outboxes = (
+                db.query(OutboxModel)
+                .filter(
+                    OutboxModel.payment_attempt_id == attempt.id,
+                    OutboxModel.event_type == "order.paid",
+                )
+                .all()
+            )
+            for ob in rev_outboxes:
+                ob.status = "cancelled"
+                ob.processed_at = now
+
     elif event_type in EXPIRED_EVENTS:
         attempt.status = "expired"
         attempt.expires_at = now
+        attempt.paid_at = None
         attempt.failure_code = attrs.get("failed_code") or "SESSION_EXPIRED"
         attempt.failure_message = attrs.get("failed_message") or "Checkout session expired."
         attempt.updated_at = now
@@ -390,6 +438,19 @@ def apply_webhook_transition(
         if order and force_override and order.status == "paid":
             order.status = "pending"
             order.updated_at = now
+
+        if force_override:
+            rev_outboxes = (
+                db.query(OutboxModel)
+                .filter(
+                    OutboxModel.payment_attempt_id == attempt.id,
+                    OutboxModel.event_type == "order.paid",
+                )
+                .all()
+            )
+            for ob in rev_outboxes:
+                ob.status = "cancelled"
+                ob.processed_at = now
 
     else:
         return {"transitioned": False, "reason": f"unhandled_event_type:{event_type}"}
@@ -735,11 +796,16 @@ async def handle_paymongo_webhook(
     """
     raw_body = await request.body()
 
-    if not paymongo_signature:
-        raise HTTPException(status_code=401, detail="Missing Paymongo-Signature header.")
-
-    if not verify_paymongo_signature(raw_body, paymongo_signature, os.getenv("PAYMONGO_WEBHOOK_SECRET", "")):
-        raise HTTPException(status_code=401, detail="Invalid Paymongo-Signature header.")
+    secret = os.getenv("PAYMONGO_WEBHOOK_SECRET", "").strip()
+    if secret:
+        if not paymongo_signature:
+            raise HTTPException(status_code=401, detail="Missing Paymongo-Signature header.")
+        if not verify_paymongo_signature(raw_body, paymongo_signature, secret):
+            raise HTTPException(status_code=401, detail="Invalid Paymongo-Signature header.")
+    else:
+        # Development / sandbox mode: secret is empty, signature verification is bypassed
+        if paymongo_signature and not verify_paymongo_signature(raw_body, paymongo_signature, secret):
+            raise HTTPException(status_code=401, detail="Invalid Paymongo-Signature header.")
 
     try:
         result = orchestrator.process_webhook(
@@ -828,16 +894,27 @@ def simulate_payment_webhook(
     body: SimulatePaymentAttemptRequest,
     db: Session = Depends(get_db),
 ):
+    clean_id = attempt_id.strip()
     attempt = (
         db.query(PaymentAttempt)
         .filter(
-            (PaymentAttempt.id == attempt_id)
-            | (PaymentAttempt.provider_payment_id == attempt_id)
-            | (PaymentAttempt.order_id == attempt_id)
+            (PaymentAttempt.id == clean_id)
+            | (PaymentAttempt.provider_payment_id == clean_id)
+            | (PaymentAttempt.order_id == clean_id)
         )
         .order_by(PaymentAttempt.created_at.desc())
         .first()
     )
+    if not attempt:
+        ord_by_num = db.query(Order).filter(Order.order_number == clean_id).first()
+        if ord_by_num:
+            attempt = (
+                db.query(PaymentAttempt)
+                .filter(PaymentAttempt.order_id == ord_by_num.id)
+                .order_by(PaymentAttempt.created_at.desc())
+                .first()
+            )
+
     if not attempt:
         raise HTTPException(status_code=404, detail="Payment attempt not found")
 
@@ -858,18 +935,27 @@ def simulate_payment_webhook(
 
     event_type, provider_event_id = event_map[outcome_clean]
 
-    resource = {
-        "id": attempt.provider_payment_id or f"cs_sim_{uuid.uuid4().hex[:16]}",
-        "type": "checkout_session",
-        "attributes": {
-            "status": outcome_clean,
-            "failed_code": body.failed_code or ("DECLINED" if outcome_clean == "failed" else None),
-            "failed_message": body.failed_message or ("Simulated failure" if outcome_clean == "failed" else None),
-            "metadata": {
-                "order_id": order.id if order else attempt.order_id,
-                "payment_attempt_id": attempt.id,
-            },
+    cs_id = attempt.provider_payment_id or f"cs_sim_{uuid.uuid4().hex[:16]}"
+    is_payment_resource = (outcome_clean == "failed")
+    resource_id = f"pay_sim_{uuid.uuid4().hex[:16]}" if is_payment_resource else cs_id
+    resource_type = "payment" if is_payment_resource else "checkout_session"
+
+    attrs = {
+        "status": outcome_clean,
+        "failed_code": body.failed_code or ("DECLINED" if outcome_clean == "failed" else None),
+        "failed_message": body.failed_message or ("Simulated failure" if outcome_clean == "failed" else None),
+        "metadata": {
+            "order_id": order.id if order else attempt.order_id,
+            "payment_attempt_id": attempt.id,
         },
+    }
+    if is_payment_resource:
+        attrs["checkout_session_id"] = cs_id
+
+    resource = {
+        "id": resource_id,
+        "type": resource_type,
+        "attributes": attrs,
     }
 
     synthetic_payload = {

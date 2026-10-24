@@ -346,7 +346,8 @@ function resolveSheetSafely(e) {
       sheet = spreadsheet.getActiveSheet() || spreadsheet.getSheets()[0];
     }
     if (sheet && !rowIndex) {
-      rowIndex = sheet.getLastRow();
+      var last = sheet.getLastRow();
+      rowIndex = (last < 1) ? 2 : last + 1;
     }
   }
 
@@ -625,16 +626,22 @@ function onOpen() {
  */
 function setupBookstoreSheet() {
   var context = resolveSheetSafely();
+  var spreadsheet = context.spreadsheet;
   var sheet = context.sheet;
-  if (!sheet) {
-    SpreadsheetApp.getUi().alert("Error: Active sheet could not be found.");
+  if (!spreadsheet && sheet) {
+    try {
+      spreadsheet = sheet.getParent();
+    } catch (_) {}
+  }
+  if (!spreadsheet) {
+    SpreadsheetApp.getUi().alert("Error: Active spreadsheet could not be found.");
     return;
   }
   if (typeof formatBookstoreSheetHeaders === "function") {
-    formatBookstoreSheetHeaders(sheet);
+    formatBookstoreSheetHeaders(spreadsheet);
   }
   if (typeof ensureFormSubmitTrigger === "function") {
-    ensureFormSubmitTrigger();
+    ensureFormSubmitTrigger(spreadsheet);
   }
   SpreadsheetApp.getUi().alert("✅ R.G.E Bookstore Sheet headers formatted and onFormSubmit trigger registered successfully!");
 }
@@ -679,7 +686,55 @@ function reconcileActiveRowWithBackend() {
     SpreadsheetApp.getUi().alert("Please select an order row (row 2 or below) to reconcile.");
     return;
   }
-  SpreadsheetApp.getUi().alert("Reconciliation checked for Row " + row + ".");
+
+  var lastCol = sheet.getLastColumn();
+  if (lastCol < 1) {
+    SpreadsheetApp.getUi().alert("Sheet contains no data.");
+    return;
+  }
+
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h) {
+    return String(h || "").trim().toLowerCase();
+  });
+  var rowValues = sheet.getRange(row, 1, 1, lastCol).getValues()[0];
+
+  var attemptCol = headers.indexOf("payment attempt id");
+  var orderCol = headers.indexOf("order number");
+  var paymentId = (attemptCol !== -1 && rowValues[attemptCol]) ? String(rowValues[attemptCol]).trim() : "";
+  var orderNo = (orderCol !== -1 && rowValues[orderCol]) ? String(rowValues[orderCol]).trim() : "";
+  var refId = paymentId || orderNo;
+
+  if (!refId) {
+    SpreadsheetApp.getUi().alert("No Payment Attempt ID or Order Number found in selected row " + row + ".");
+    return;
+  }
+
+  var baseUrl = CONFIG.BACKEND_URL.replace(/\/api\/v1\/integrations\/google-forms\/submit\/?$/, "");
+  var pollUrl = baseUrl + "/api/v1/payments/" + encodeURIComponent(refId) + "?auto_reconcile=true";
+
+  try {
+    var response = UrlFetchApp.fetch(pollUrl, { muteHttpExceptions: true });
+    var code = response.getResponseCode();
+    if (code === 200) {
+      var data = JSON.parse(response.getContentText());
+      var status = (data.status || "UNKNOWN").toUpperCase();
+      var receiptNo = (data.receipt && data.receipt.official_receipt_number) ? data.receipt.official_receipt_number : "";
+      var updateMap = {
+        "Payment Status": status,
+        "Synchronized At": new Date().toLocaleString()
+      };
+      if (receiptNo) {
+        updateMap["Official Receipt No"] = receiptNo;
+        updateMap["Webhook Outcome Details"] = "Live reconciled with PayMongo. Receipt: " + receiptNo;
+      }
+      ensureAndWriteColumns(sheet, row, updateMap);
+      SpreadsheetApp.getUi().alert("✅ Row " + row + " successfully reconciled! Status: " + status + (receiptNo ? " | Receipt: " + receiptNo : ""));
+    } else {
+      SpreadsheetApp.getUi().alert("Reconciliation response code " + code + ": " + response.getContentText().substring(0, 150));
+    }
+  } catch (fetchErr) {
+    SpreadsheetApp.getUi().alert("Reconciliation error: " + fetchErr.toString());
+  }
 }
 
 

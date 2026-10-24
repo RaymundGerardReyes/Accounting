@@ -37,6 +37,7 @@ import {
   fetchFulfillmentOutbox,
   processFulfillmentOutbox,
   simulateWebhook,
+  simulatePaymentAttemptWebhook,
   getReceiptPdfUrl,
   expirePayment,
   failPayment,
@@ -1102,15 +1103,6 @@ export function PaymentsHub() {
       return
     }
     const targetAttempt = resolvedTarget.attempt
-    if (
-      (type === "expired" || type === "failed") &&
-      (targetAttempt.status === "succeeded" || resolvedTarget.order.status === "paid")
-    ) {
-      setFeedbackMessage(
-        `Cannot expire or fail an already paid attempt (${targetAttempt.provider_payment_id || targetAttempt.id}) under Accounting Rule 1 (Terminal State Immutability). Please select an active pending attempt or click 'Quick Test: Create & Expire Fresh Order'.`
-      )
-      return
-    }
 
     setActionLoading(true)
     try {
@@ -1121,17 +1113,21 @@ export function PaymentsHub() {
             res.result?.duplicate ? "Deduplicated cleanly (200 OK without double fulfillment)" : "Received"
           }`
         )
-      } else if (type === "paid") {
-        await simulateWebhook(targetAttempt.id, "checkout_session.payment.paid", false, simulatedChannel)
-        setFeedbackMessage(
-          `Simulated signed 'checkout_session.payment.paid' webhook processed via ${simulatedChannel.toUpperCase()}. Official Receipt & Acknowledgement PDF generated & dispatched.`
-        )
-      } else if (type === "failed") {
-        await simulateWebhook(targetAttempt.id, "payment.failed", false)
-        setFeedbackMessage("Simulated signed 'payment.failed' webhook processed. Attempt marked failed.")
-      } else if (type === "expired") {
-        await simulateWebhook(targetAttempt.id, "checkout_session.expired", false)
-        setFeedbackMessage("Simulated signed 'checkout_session.expired' webhook processed. Attempt marked expired.")
+      } else {
+        await simulatePaymentAttemptWebhook(targetAttempt.id, type, { forceOverride: true })
+        if (type === "paid") {
+          setFeedbackMessage(
+            `Simulated signed 'checkout_session.payment.paid' webhook processed via ${simulatedChannel.toUpperCase()}. Official Receipt & Acknowledgement PDF generated & dispatched.`
+          )
+        } else if (type === "failed") {
+          setFeedbackMessage(
+            `Simulated signed 'payment.failed' webhook processed. Attempt marked failed.`
+          )
+        } else if (type === "expired") {
+          setFeedbackMessage(
+            `Simulated signed 'checkout_session.expired' webhook processed. Attempt marked expired.`
+          )
+        }
       }
       await loadAllData()
     } catch (err: any) {

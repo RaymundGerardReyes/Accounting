@@ -190,7 +190,18 @@ function generateBookstoreOrderForm() {
  * @param {Spreadsheet} spreadsheet - Target Google Spreadsheet.
  * @return {boolean} True if created, false if already present.
  */
-function ensureFormSubmitTrigger(spreadsheet) {
+function ensureFormSubmitTrigger(target) {
+  var spreadsheet = target || null;
+  if (spreadsheet && typeof spreadsheet.getSheets !== "function" && typeof spreadsheet.getParent === "function") {
+    spreadsheet = spreadsheet.getParent();
+  }
+  if (!spreadsheet) {
+    try {
+      spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    } catch (_) {
+      spreadsheet = null;
+    }
+  }
   if (!spreadsheet) return false;
 
   var triggers = ScriptApp.getProjectTriggers();
@@ -246,9 +257,22 @@ function ensureFormSubmitTrigger(spreadsheet) {
  * 16. Webhook Outcome Details
  * 17. Synchronized At
  *
- * @param {Spreadsheet} spreadsheet - Target Google Spreadsheet.
+ * @param {Spreadsheet|Sheet} target - Target Google Spreadsheet or Sheet.
  */
-function formatBookstoreSheetHeaders(spreadsheet) {
+function formatBookstoreSheetHeaders(target) {
+  if (!target) return;
+
+  var spreadsheet = (typeof target.getSheets === "function")
+    ? target
+    : (typeof target.getParent === "function" ? target.getParent() : null);
+
+  if (!spreadsheet) {
+    try {
+      spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    } catch (_) {
+      spreadsheet = null;
+    }
+  }
   if (!spreadsheet) return;
 
   // Give Google Forms a moment to link the responses tab if newly assigned

@@ -459,12 +459,15 @@ class PaymentOrchestrator:
             "payment.paid",
             "payment_intent.succeeded",
             "qr.paid",
+            "qrph.paid",
         }
         failed_event_types = {
             "payment.failed",
             "payment_intent.payment_failed",
             "checkout_session.payment.failed",
             "source.failed",
+            "qrph.failed",
+            "qr.failed",
         }
         expired_event_types = {
             "checkout_session.expired",

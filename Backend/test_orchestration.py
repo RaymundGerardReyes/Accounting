@@ -1910,6 +1910,305 @@ def test_verify_paymongo_signature_logic():
     assert verify_paymongo_signature(raw_body, sig_header=None, webhook_secret="") is True
 
 
+def test_resolve_attempt_and_order_edge_cases():
+    """
+    Validates extreme edge cases for resolve_attempt_and_order:
+    - None resource input
+    - Empty dict
+    - Null attributes
+    - String serialized metadata JSON
+    - Nested payments with nested attributes and flat metadata
+    """
+    from webhook_orchestration import resolve_attempt_and_order
+
+    db = SessionLocal()
+    try:
+        # 1. Null / malformed inputs
+        att_none, ord_none = resolve_attempt_and_order(db, None, Order, PaymentAttempt)
+        assert att_none is None and ord_none is None
+
+        att_empty, ord_empty = resolve_attempt_and_order(db, {}, Order, PaymentAttempt)
+        assert att_empty is None and ord_empty is None
+
+        att_null_attrs, ord_null_attrs = resolve_attempt_and_order(db, {"id": "test", "attributes": None}, Order, PaymentAttempt)
+        assert att_null_attrs is None and ord_null_attrs is None
+
+        # 2. Setup test order & attempt
+        order = Order(
+            id=str(uuid.uuid4()),
+            order_number=f"ORD-EDGE-{uuid.uuid4().hex[:6]}",
+            title="Edge Resolver Order",
+            category="product_order",
+            reference_code="Product C",
+            amount_minor=12000,
+            status="pending",
+        )
+        db.add(order)
+        db.commit()
+
+        cs_id = f"cs_edge_{uuid.uuid4().hex[:12]}"
+        attempt = PaymentAttempt(
+            id=str(uuid.uuid4()),
+            order_id=order.id,
+            provider="paymongo",
+            payment_method="card",
+            provider_payment_id=cs_id,
+            amount_minor=12000,
+            status="pending",
+            idempotency_key=f"resolve_edge_{uuid.uuid4().hex}",
+        )
+        db.add(attempt)
+        db.commit()
+
+        # 3. String-serialized metadata JSON (rare PayMongo wire edge case)
+        str_meta_res = {
+            "id": f"pay_str_{uuid.uuid4().hex[:8]}",
+            "attributes": {
+                "metadata": json.dumps({"payment_attempt_id": attempt.id})
+            }
+        }
+        att_str, ord_str = resolve_attempt_and_order(db, str_meta_res, Order, PaymentAttempt)
+        assert att_str is not None and att_str.id == attempt.id
+
+        # 4. Nested payments array with flat dict (attributes omitted in sub-item)
+        flat_payments_res = {
+            "id": f"pay_flat_{uuid.uuid4().hex[:8]}",
+            "attributes": {
+                "payments": [
+                    {"metadata": {"payment_attempt_id": attempt.id}}
+                ]
+            }
+        }
+        att_flat, ord_flat = resolve_attempt_and_order(db, flat_payments_res, Order, PaymentAttempt)
+        assert att_flat is not None and att_flat.id == attempt.id
+
+        # 5. Nested payments array with sub-item string metadata
+        nested_str_res = {
+            "id": f"pay_nest_str_{uuid.uuid4().hex[:8]}",
+            "attributes": {
+                "payments": [
+                    {"attributes": {"metadata": json.dumps({"payment_attempt_id": attempt.id})}}
+                ]
+            }
+        }
+        att_nest, ord_nest = resolve_attempt_and_order(db, nested_str_res, Order, PaymentAttempt)
+        assert att_nest is not None and att_nest.id == attempt.id
+    finally:
+        db.close()
+
+
+def test_verify_paymongo_signature_edge_cases():
+    """
+    Tests edge cases for verify_paymongo_signature:
+    - Non-UTF8 bytes in body
+    - Missing timestamp (t=)
+    - Malformed signature header with no equal signs
+    - Whitespace trimming
+    """
+    from webhook_orchestration import verify_paymongo_signature
+
+    secret = "whsk_edge_secret_456"
+
+    # Non-utf8 bytes should not crash
+    bad_bytes = b"non-utf8 \xff\xfe payload"
+    assert verify_paymongo_signature(bad_bytes, sig_header=None, webhook_secret="") is True
+
+    # Missing timestamp
+    assert verify_paymongo_signature(b"{}", sig_header="te=only_signature_no_timestamp", webhook_secret=secret) is False
+
+    # Malformed signature header without key-value equals
+    assert verify_paymongo_signature(b"{}", sig_header="garbage_header_without_equals", webhook_secret=secret) is False
+
+    # Empty signature header with active secret
+    assert verify_paymongo_signature(b"{}", sig_header="", webhook_secret=secret) is False
+
+
+def test_simulate_payment_webhook_edge_cases_and_reversals():
+    """
+    Tests simulate_payment_webhook with:
+    1. Lookup by Order.order_number instead of attempt_id
+    2. Case-insensitive outcome parsing (" PAID ", " Failed ")
+    3. Invalid outcome 400 rejection
+    4. Nonexistent attempt 404 rejection
+    5. Clean state reversals: Succeeded -> Failed (clearing paid_at, cancelling outbox) -> Succeeded (re-clearing failure info)
+    """
+    # 1. Create order and attempt
+    resp_order = client.post("/api/v1/orders", json={
+        "title": "State Reversal Test Order",
+        "category": "product_order",
+        "reference_code": "Product A",
+        "quantity": 1
+    })
+    assert resp_order.status_code == 201
+    order_id = resp_order.json()["id"]
+    order_number = resp_order.json()["order_number"]
+
+    att_resp = client.post(
+        f"/api/v1/orders/{order_id}/payment-attempts",
+        json={"idempotency_key": f"rev_test_{uuid.uuid4().hex}"}
+    )
+    assert att_resp.status_code == 201
+    attempt_id = att_resp.json()["id"]
+
+    # 2. Test 400 on unsupported outcome
+    bad_outcome_resp = client.post(
+        f"/api/v1/payments/attempts/{attempt_id}/simulate",
+        json={"outcome": "unknown_outcome", "force_override": True}
+    )
+    assert bad_outcome_resp.status_code == 400
+    assert "Unsupported outcome" in bad_outcome_resp.json()["detail"]
+
+    # 3. Test 404 on nonexistent attempt
+    not_found_resp = client.post(
+        "/api/v1/payments/attempts/nonexistent_attempt_999/simulate",
+        json={"outcome": "paid", "force_override": True}
+    )
+    assert not_found_resp.status_code == 404
+
+    # 4. Simulate PAID using order_number lookup and uppercase whitespace string
+    sim_paid = client.post(
+        f"/api/v1/payments/attempts/{order_number}/simulate",
+        json={"outcome": "  PAID  ", "force_override": True}
+    )
+    assert sim_paid.status_code == 200
+    assert sim_paid.json()["attempt_status"] == "succeeded"
+    assert sim_paid.json()["order_status"] == "paid"
+
+    # Verify attempt and outbox state in DB
+    db = SessionLocal()
+    try:
+        db_att = db.query(PaymentAttempt).filter(PaymentAttempt.id == attempt_id).first()
+        assert db_att.status == "succeeded"
+        assert db_att.paid_at is not None
+        assert db_att.failure_code is None
+
+        outbox_paid = db.query(FulfillmentOutbox).filter(
+            FulfillmentOutbox.payment_attempt_id == attempt_id,
+            FulfillmentOutbox.event_type == "order.paid"
+        ).first()
+        assert outbox_paid is not None
+        assert outbox_paid.status == "completed"
+    finally:
+        db.close()
+
+    # 5. Override to FAILED with force_override=True -> verify paid_at cleared, outbox cancelled, order reverted to pending
+    sim_failed = client.post(
+        f"/api/v1/payments/attempts/{attempt_id}/simulate",
+        json={"outcome": "  FAILED  ", "force_override": True, "failed_code": "TEST_DECLINED"}
+    )
+    assert sim_failed.status_code == 200
+    assert sim_failed.json()["attempt_status"] == "failed"
+    assert sim_failed.json()["order_status"] == "pending"
+
+    db = SessionLocal()
+    try:
+        db_att = db.query(PaymentAttempt).filter(PaymentAttempt.id == attempt_id).first()
+        assert db_att.status == "failed"
+        assert db_att.paid_at is None
+        assert db_att.failure_code == "TEST_DECLINED"
+
+        db_order = db.query(Order).filter(Order.id == order_id).first()
+        assert db_order.status == "pending"
+
+        outbox_reverted = db.query(FulfillmentOutbox).filter(
+            FulfillmentOutbox.payment_attempt_id == attempt_id,
+            FulfillmentOutbox.event_type == "order.paid"
+        ).first()
+        assert outbox_reverted.status == "cancelled"
+    finally:
+        db.close()
+
+    # 6. Override back to PAID -> verify re-completed cleanly without duplicate outbox
+    sim_repaid = client.post(
+        f"/api/v1/payments/attempts/{attempt_id}/simulate",
+        json={"outcome": "paid", "force_override": True}
+    )
+    assert sim_repaid.status_code == 200
+    assert sim_repaid.json()["attempt_status"] == "succeeded"
+    assert sim_repaid.json()["order_status"] == "paid"
+
+    db = SessionLocal()
+    try:
+        db_att = db.query(PaymentAttempt).filter(PaymentAttempt.id == attempt_id).first()
+        assert db_att.status == "succeeded"
+        assert db_att.paid_at is not None
+        assert db_att.failure_code is None
+
+        outboxes = db.query(FulfillmentOutbox).filter(
+            FulfillmentOutbox.payment_attempt_id == attempt_id,
+            FulfillmentOutbox.event_type == "order.paid"
+        ).all()
+        assert len(outboxes) == 1
+        assert outboxes[0].status == "completed"
+    finally:
+        db.close()
+
+
+def test_qrph_paid_webhook_processing():
+    """
+    Validates that PaymentOrchestrator recognizes 'qrph.paid' event type
+    and transitions attempt to succeeded with fulfillment outbox creation.
+    """
+    order_resp = client.post("/api/v1/orders", json={
+        "title": "QRPh Paid Test Order",
+        "category": "product_order",
+        "reference_code": "Product B",
+        "quantity": 1
+    })
+    assert order_resp.status_code == 201
+    order_id = order_resp.json()["id"]
+
+    att_resp = client.post(
+        f"/api/v1/orders/{order_id}/payment-attempts",
+        json={"payment_method": "qrph", "idempotency_key": f"qrph_test_{uuid.uuid4().hex}"}
+    )
+    assert att_resp.status_code == 201
+    attempt_id = att_resp.json()["id"]
+    cs_id = att_resp.json()["provider_payment_id"]
+
+    # Craft qrph.paid webhook payload
+    qrph_payload = {
+        "data": {
+            "id": f"evt_qrph_{uuid.uuid4().hex[:12]}",
+            "type": "event",
+            "attributes": {
+                "type": "qrph.paid",
+                "livemode": False,
+                "data": {
+                    "id": f"pay_qrph_{uuid.uuid4().hex[:12]}",
+                    "type": "payment",
+                    "attributes": {
+                        "amount": 15000,
+                        "currency": "PHP",
+                        "status": "paid",
+                        "checkout_session_id": cs_id,
+                        "metadata": {
+                            "payment_attempt_id": attempt_id,
+                            "order_id": order_id,
+                        }
+                    }
+                }
+            }
+        }
+    }
+    raw_body = json.dumps(qrph_payload).encode("utf-8")
+
+    db = SessionLocal()
+    try:
+        res = orchestrator.process_webhook(db=db, raw_body=raw_body, signature_header=None)
+        assert res.get("received") is True
+        assert res.get("status") == "succeeded"
+
+        attempt = db.query(PaymentAttempt).filter(PaymentAttempt.id == attempt_id).first()
+        assert attempt.status == "succeeded"
+        assert attempt.paid_at is not None
+
+        order = db.query(Order).filter(Order.id == order_id).first()
+        assert order.status == "paid"
+    finally:
+        db.close()
+
+
 
 
 
