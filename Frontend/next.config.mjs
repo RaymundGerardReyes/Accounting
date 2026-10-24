@@ -1,6 +1,21 @@
 import path from "path"
 import fs from "fs"
 
+// Windows Node v24 EPERM workaround for Next.js async realpath resolution
+if (fs.promises && fs.promises.realpath) {
+  const origRealpath = fs.promises.realpath
+  fs.promises.realpath = async (p, opts) => {
+    try {
+      return await origRealpath(p, opts)
+    } catch (err) {
+      if (err && (err.code === "EPERM" || err.code === "EACCES")) {
+        return fs.realpathSync(p)
+      }
+      throw err
+    }
+  }
+}
+
 // Load authoritative root monorepo .env (E:\Accounting\.env) into process.env if present
 const candidatePaths = [
   path.resolve(process.cwd(), "..", ".env"),
@@ -46,6 +61,8 @@ const nextConfig = {
   },
   experimental: {
     optimizePackageImports: ["lucide-react", "recharts"],
+    webpackBuildWorker: false,
+    cpus: 1,
   },
 }
 

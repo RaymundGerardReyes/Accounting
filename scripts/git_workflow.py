@@ -15,12 +15,14 @@ from pathlib import Path
 SCOPE_PATTERNS = {
     "repo": [
         r"^\.gitignore$",
+        r"^\.env\.example$",
         r"^README\.md$",
         r"^LICENSE(\.md)?$",
         r"^package\.json$",
         r"^requirements\.txt$",
         r"^runtime\.txt$",
         r"^Procfile$",
+        r"^nginx/.*",
     ],
     "backend": [r"^Backend/(?!test_).*"],
     "frontend": [r"^Frontend/.*"],
