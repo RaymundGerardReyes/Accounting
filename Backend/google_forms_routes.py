@@ -9,10 +9,15 @@ Accounting & Payments platform.
 import os
 import json
 import uuid
+import hmac
+import hashlib
+import smtplib
 import urllib.request
 from datetime import datetime, timezone
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Header, status
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -25,10 +30,155 @@ from services.receipt_service import format_philippine_phone
 router = APIRouter(prefix="/api/v1/integrations/google-forms", tags=["Google Forms Integration"])
 orchestrator = PaymentOrchestrator(provider=PayMongoProvider())
 
+GOOGLE_FORMS_SECRET = os.getenv("GOOGLE_FORMS_SECRET", "rge_gforms_live_sec_89f3a21")
+GOOGLE_APPS_SCRIPT_WEBHOOK_URL = os.getenv("GOOGLE_APPS_SCRIPT_WEBHOOK_URL", "")
+
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "") or os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "") or os.getenv("SMTP_APP_PASSWORD", "")
+SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "R.G.E Accounting Firm Inc. <noreply@rge-accounting.com>")
+
 
 def get_expected_gforms_secret() -> str:
     """Retrieves the authoritative secret configured in .env or defaults to safe fallback."""
     return os.getenv("GOOGLE_FORMS_SECRET", "rge_gforms_live_sec_89f3a21").strip()
+
+
+def verify_google_forms_request(
+    raw_body: bytes,
+    secret_header: Optional[str],
+    signature_header: Optional[str] = None,
+) -> bool:
+    """Verifies X-Google-Forms-Secret and optional X-Google-Forms-Signature (HMAC-SHA256)."""
+    expected_sec = get_expected_gforms_secret()
+    if not secret_header or not hmac.compare_digest(secret_header.strip(), expected_sec):
+        return False
+    if signature_header:
+        expected_hmac = hmac.new(
+            expected_sec.encode("utf-8"),
+            msg=raw_body,
+            digestmod=hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(expected_hmac, signature_header.strip()):
+            return False
+    return True
+
+
+def notify_paymongo_webhook_outcome(
+    *,
+    outcome: str,  # "PAID" | "FAILED" | "EXPIRED"
+    order_number: str,
+    order_title: str,
+    amount_minor: int,
+    customer_email: str,
+    customer_name: str,
+    response_id: Optional[str] = None,
+    payment_attempt_id: Optional[str] = None,
+    sheet_row_index: Optional[int] = None,
+    provider_event_id: Optional[str] = None,
+    official_receipt_no: Optional[str] = None,
+    checkout_url: Optional[str] = None,
+    failure_code: Optional[str] = None,
+    failure_message: Optional[str] = None,
+) -> None:
+    """
+    Executed ONLY after a verified PayMongo Webhook is processed:
+    1. Sends the authoritative SMTP email (Official Receipt on PAID, Retry on FAILED, Notice on EXPIRED).
+    2. Calls the Google Apps Script doPost(e) Web App to synchronize the Google Sheet row live.
+    """
+    normalized_outcome = outcome.upper()
+    amount_php = f"₱{amount_minor / 100:,.2f}"
+
+    # 1. Dispatch Authoritative SMTP Email
+    if customer_email and SMTP_USERNAME and SMTP_PASSWORD:
+        if normalized_outcome == "PAID":
+            subject = f"Official Receipt {official_receipt_no or ''} - Order {order_number} (PAID)"
+            badge_bg = "#16a34a"
+            headline = "Payment Confirmed & Official Receipt Issued"
+            details_html = (
+                f"<p>Your payment for <strong>{order_title}</strong> ({amount_php}) has been verified via PayMongo.</p>"
+                f"<p><strong>Official Receipt Number:</strong> {official_receipt_no or 'Issued in Portal'}</p>"
+            )
+        elif normalized_outcome == "FAILED":
+            subject = f"Payment Failed: Action Required for Order {order_number}"
+            badge_bg = "#dc2626"
+            headline = "Payment Attempt Failed"
+            details_html = (
+                f"<p>Your payment attempt for <strong>{order_title}</strong> ({amount_php}) could not be completed.</p>"
+                f"<p><strong>Failure Code:</strong> {failure_code or 'DECLINED'} — {failure_message or 'Please try again.'}</p>"
+                + (
+                    f"<p><a href='{checkout_url}' style='background:#dc2626;color:#fff;padding:12px 24px;"
+                    f"border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;'>"
+                    f"Retry Secure Payment &rarr;</a></p>"
+                    if checkout_url else ""
+                )
+            )
+        else:  # EXPIRED
+            subject = f"Payment Link Expired: Order {order_number}"
+            badge_bg = "#d97706"
+            headline = "PayMongo Checkout Session Expired"
+            details_html = (
+                f"<p>The checkout link for <strong>{order_title}</strong> ({amount_php}) has expired.</p>"
+                "<p>If you still wish to complete your order, please submit a new form or contact our finance desk.</p>"
+            )
+
+        html_body = f"""
+        <div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 8px;">
+          <div style="background: {badge_bg}; color: #fff; padding: 6px 12px; border-radius: 4px; display: inline-block; font-size: 12px; font-weight: 700;">
+            {normalized_outcome}
+          </div>
+          <h2 style="color: #0f172a; margin-top: 16px;">{headline}</h2>
+          <p>Dear <strong>{customer_name}</strong>,</p>
+          {details_html}
+          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+          <p style="font-size: 12px; color: #64748b;">Order Reference: {order_number} | Event ID: {provider_event_id or 'N/A'}</p>
+        </div>
+        """
+
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = SMTP_FROM_EMAIL
+            msg["To"] = customer_email
+            msg.attach(MIMEText(html_body, "html"))
+
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+                server.ehlo()
+                server.starttls()
+                server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                server.sendmail(SMTP_FROM_EMAIL, [customer_email], msg.as_string())
+        except Exception as smtp_err:
+            print(f"[SMTP Error] Could not send {normalized_outcome} email to {customer_email}: {smtp_err}")
+
+    # 2. Synchronize Live Status Back to Google Sheets via Apps Script doPost(e)
+    script_url = (os.getenv("GOOGLE_APPS_SCRIPT_WEBHOOK_URL", "")).strip()
+    if script_url and (response_id or order_number):
+        callback_payload = json.dumps({
+            "secret": get_expected_gforms_secret(),
+            "response_id": response_id,
+            "order_number": order_number,
+            "payment_attempt_id": payment_attempt_id,
+            "sheet_row_index": sheet_row_index,
+            "payment_status": normalized_outcome,
+            "official_receipt_no": official_receipt_no or "",
+            "provider_event_id": provider_event_id or "",
+            "failure_code": failure_code or "",
+            "failure_message": failure_message or "",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            script_url,
+            data=callback_payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as _:
+                pass
+        except Exception as gas_err:
+            print(f"[Google Sheets Callback Notice] {gas_err}")
 
 
 class GoogleFormSubmissionRequest(BaseModel):
@@ -75,6 +225,7 @@ class GoogleFormSubmissionResponse(BaseModel):
 async def submit_google_form(
     req: GoogleFormSubmissionRequest,
     x_google_forms_secret: Optional[str] = Header(None, alias="X-Google-Forms-Secret"),
+    x_google_forms_signature: Optional[str] = Header(None, alias="X-Google-Forms-Signature"),
     db: Session = Depends(get_db),
 ):
     """

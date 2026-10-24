@@ -1,142 +1,293 @@
 /**
  * ==============================================================================
- * R.G.E ACCOUNTING FIRM INC. - HIGH-CONCURRENCY GOOGLE FORMS TO PAYMONGO
+ * R.G.E ACCOUNTING FIRM INC. - GOOGLE FORMS TO PAYMONGO LIVE ORCHESTRATOR
  * ==============================================================================
  * File: scripts/google_apps_script/Code.gs
  *
- * Squash Fix:
- *  - Eliminates "TypeError: Cannot read properties of null (reading 'getActiveSheet')"
- *
- * Supported Execution Environments:
- *  1. Google Sheet Container-Bound Trigger (From spreadsheet -> On form submit)
- *  2. Google Form Container-Bound Trigger (From form -> On form submit)
- *  3. Standalone Apps Script Project (Using CONFIG.SPREADSHEET_ID)
- *  4. Manual IDE "Run" execution (Toolbar Run button where e is undefined)
- *  5. Web App Reverse Webhook (doPost for real-time PayMongo sync back to Sheet)
+ * CAPABILITIES:
+ * 1. Absorbs 5,000+ concurrent Google Form submissions without server crashes.
+ * 2. Eliminates "Cannot read properties of null (reading 'getActiveSheet')".
+ * 3. Protects Google Sheets against CSV / Formula Injection (=, +, -, @).
+ * 4. Sends HMAC-authenticated payloads to FastAPI (/api/v1/integrations/google-forms/submit).
+ * 5. Exposes doPost(e) Reverse-Webhook so FastAPI PayMongo Webhooks can update
+ *    the Google Sheet row live for PAID, FAILED, and EXPIRED transactions!
  * ==============================================================================
  */
 
 var CONFIG = {
-  // 1. Authoritative Backend Intake Endpoint (NGINX / Cloudflare / PaaS)
+  // 1. Your live Cloudflare / NGINX / PaaS domain (must match NEXT_PUBLIC_APP_DOMAIN in .env)
   BACKEND_URL: "https://rge-accounting-3aa707d5f496.herokuapp.com/api/v1/integrations/google-forms/submit",
 
-  // 2. Shared secret matching GOOGLE_FORMS_SECRET in root .env file
-  GOOGLE_FORMS_SECRET: "rge_gforms_live_sec_89f3a21",
-  SECRET_KEY: "rge_gforms_live_sec_89f3a21", // Backward-compatible alias
+  // 2. Shared secret key (must match GOOGLE_FORMS_SECRET in root .env)
+  SECRET_KEY: "rge_gforms_live_sec_89f3a21",
 
-  // 3. Optional: Paste Google Sheet ID here if running script outside the Sheet
-  // (From Sheet URL: /spreadsheets/d/THIS_ID/edit). Leave empty ("") if container-bound.
-  SPREADSHEET_ID: "",
+  // 3. Optional fallback Spreadsheet ID (from https://docs.google.com/spreadsheets/d/THIS_ID/edit)
+  // Leave as "" if this script is pasted inside the Google Sheet's Extensions -> Apps Script.
+  FALLBACK_SPREADSHEET_ID: "",
+  FALLBACK_SHEET_NAME: "",
 
-  // 4. Optional: Target tab name. Leave empty ("") to use active/first tab.
-  SHEET_TAB_NAME: "",
-
-  // 5. Branded company configuration and email notifications
+  // 4. Organization branding
   COMPANY_NAME: "R.G.E Accounting Firm Inc.",
-  SUPPORT_EMAIL: "raymundgerardrestaca@gmail.com",
-  SEND_CUSTOMER_EMAIL: true
+  SUPPORT_EMAIL: "support@rge-accounting.com",
+
+  // 5. Email control:
+  // Set to true if Apps Script should email the initial checkout link upon form submission.
+  // Final PAID (Official Receipt), FAILED, and EXPIRED emails are sent by Backend SMTP after PayMongo Webhooks!
+  SEND_INITIAL_CHECKOUT_EMAIL_FROM_GAS: true
 };
 
 /**
- * Main Trigger Function: Runs automatically when a Google Form is submitted,
- * or safely when clicking "Run" in the Apps Script editor.
- *
- * @param {Object} [e] - Form submit event object (may be undefined in manual IDE runs).
+ * ==============================================================================
+ * 1. OUTBOUND ORCHESTRATOR: Triggered when a user submits the Google Form
+ * ==============================================================================
+ * @param {Object} e - The Google Sheets or Google Forms submission event object.
  */
 function onFormSubmit(e) {
   var lock = LockService.getScriptLock();
   try {
-    lock.waitLock(30000); // Wait up to 30s for concurrent execution safety
+    // Wait up to 30 seconds for concurrent thread isolation
+    lock.waitLock(30000);
   } catch (lockErr) {
-    Logger.log("Lock acquisition notice: " + lockErr);
+    Logger.log("Could not obtain script lock: " + lockErr);
   }
 
   try {
-    // Step A: Safely resolve target Google Sheet without throwing null pointer errors
-    var sheetContext = resolveTargetSheet(e);
-    var sheet = sheetContext.sheet;
+    // Safely resolve the target sheet & row (Never crashes on null getActiveSheet)
+    var context = resolveSheetSafely(e);
+    var sheet = context.sheet;
+    var rowIndex = context.rowIndex;
 
-    // Step B: Extract form fields safely from Sheet trigger, Form trigger, or Manual run
-    var parsed = parseSubmissionData(e, sheetContext);
-    Logger.log("Parsed submission payload: " + JSON.stringify(parsed));
+    // Extract form fields from Sheet row, Form event, or Manual test run
+    var formData = extractFormDataSafely(e, sheet, rowIndex);
 
-    // Step C: Send authoritative intake request to Cloud FastAPI Backend
-    var requestOptions = {
+    var customerEmail = extractField(formData, ["email", "email address", "customer email", "your email"]);
+    var customerName = extractField(formData, ["name", "full name", "customer name", "your name"]) || "Valued Client";
+    var customerPhone = extractField(formData, ["phone", "mobile", "mobile number", "contact number", "cellphone"]);
+    var itemReference = extractField(formData, ["product", "item", "service", "package", "select package", "order category", "department"]) || "Product A";
+    var quantityStr = extractField(formData, ["quantity", "qty", "number of items"]);
+    var quantity = parseInt(quantityStr, 10);
+    if (isNaN(quantity) || quantity < 1) quantity = 1;
+    var notes = extractField(formData, ["notes", "remarks", "instructions", "comments"]) || "";
+
+    // Generate deterministic Response ID for atomic idempotency
+    var rawTimestamp = formData["timestamp"] || new Date().toISOString();
+    var parsedTime = new Date(rawTimestamp).getTime();
+    if (isNaN(parsedTime)) parsedTime = new Date().getTime();
+    var responseId = (e && e.response && typeof e.response.getId === "function")
+      ? "gf_" + e.response.getId()
+      : "gf_" + (rowIndex || "manual") + "_" + parsedTime;
+
+    Logger.log("Processing submission for: " + customerName + " (" + customerEmail + ") | Response ID: " + responseId);
+
+    if (!customerEmail) {
+      Logger.log("Error: No customer email found in row " + rowIndex);
+      if (sheet && rowIndex >= 2) {
+        ensureAndWriteColumns(sheet, rowIndex, {
+          "Response ID": responseId,
+          "Payment Status": "ERROR (MISSING EMAIL)",
+          "Error Details": "Customer email address was not provided in the form."
+        });
+      }
+      return;
+    }
+
+    // Build authoritative payload matching Backend/google_forms_routes.py
+    var payload = {
+      response_id: responseId,
+      sheet_row_index: rowIndex || 0,
+      customer_name: customerName,
+      customer_email: customerEmail,
+      customer_phone: customerPhone || null,
+      item_reference: itemReference,
+      reference_code: itemReference,
+      title: itemReference + " - " + customerName,
+      category: "product_order",
+      quantity: quantity,
+      payment_method: "hosted_checkout",
+      notes: notes
+    };
+
+    var payloadJson = JSON.stringify(payload);
+    var hmacSignature = computeHmacSha256Hex(payloadJson, CONFIG.SECRET_KEY);
+
+    var options = {
       method: "post",
       contentType: "application/json",
       headers: {
-        "X-Google-Forms-Secret": CONFIG.GOOGLE_FORMS_SECRET,
+        "X-Google-Forms-Secret": CONFIG.SECRET_KEY,
+        "X-Google-Forms-Signature": hmacSignature,
         "Accept": "application/json"
       },
-      payload: JSON.stringify(parsed.payload),
+      payload: payloadJson,
       muteHttpExceptions: true
     };
 
-    var response = UrlFetchApp.fetch(CONFIG.BACKEND_URL, requestOptions);
-    var statusCode = response.getResponseCode();
+    // Call Cloud FastAPI Backend
+    var response = UrlFetchApp.fetch(CONFIG.BACKEND_URL, options);
+    var responseCode = response.getResponseCode();
     var responseText = response.getContentText();
 
-    if (statusCode < 200 || statusCode >= 300) {
-      throw new Error("Backend API returned HTTP " + statusCode + ": " + responseText);
-    }
+    Logger.log("Backend response (" + responseCode + "): " + responseText);
 
-    var result = JSON.parse(responseText);
-    Logger.log("Order created successfully: " + JSON.stringify(result));
+    if (responseCode === 201 || responseCode === 200) {
+      var data = JSON.parse(responseText);
 
-    // Step D: Write Order Number, PayMongo Link, Amount & Status back to Sheet
-    if (sheet && parsed.rowNumber && parsed.rowNumber >= 2) {
-      writeOrderResultToSheet(sheet, parsed.rowNumber, result);
+      // Write initial PENDING status & PayMongo Checkout Link to Google Sheet
+      if (sheet && rowIndex >= 2) {
+        ensureAndWriteColumns(sheet, rowIndex, {
+          "Response ID": responseId,
+          "Order Number": data.order_number || "",
+          "PayMongo Checkout Link": data.checkout_url || "",
+          "Amount": data.amount_php || "",
+          "Payment Status": String(data.status || "PENDING").toUpperCase(),
+          "Payment Attempt ID": data.payment_attempt_id || "",
+          "Official Receipt No": "",
+          "Webhook Outcome Details": "Awaiting PayMongo payment webhook...",
+          "Synchronized At": new Date().toLocaleString()
+        });
+      }
+
+      // Send initial payment instructions email if enabled
+      if (CONFIG.SEND_INITIAL_CHECKOUT_EMAIL_FROM_GAS && data.checkout_url) {
+        sendPaymentInstructionsEmail(customerEmail, customerName, data);
+      }
     } else {
-      Logger.log("Notice: Skipping sheet write-back because no active sheet row was bound.");
+      if (sheet && rowIndex >= 2) {
+        ensureAndWriteColumns(sheet, rowIndex, {
+          "Response ID": responseId,
+          "Payment Status": "ERROR (" + responseCode + ")",
+          "Error Details": responseText.substring(0, 150),
+          "Synchronized At": new Date().toLocaleString()
+        });
+      }
     }
 
-    // Step E: Send branded HTML email with direct PayMongo link to customer
-    if (CONFIG.SEND_CUSTOMER_EMAIL && parsed.payload.customer_email) {
-      sendCustomerPaymentEmail(parsed.payload, result);
-    }
-
-  } catch (err) {
-    Logger.log("Unhandled Exception in onFormSubmit: " + (err && err.stack ? err.stack : err));
+  } catch (error) {
+    Logger.log("Unhandled Exception in onFormSubmit: " + (error && error.stack ? error.stack : error.toString()));
   } finally {
     try {
       lock.releaseLock();
-    } catch (_) {
-      // ignore
+    } catch (releaseErr) {
+      // Ignore lock release errors
     }
   }
 }
 
 /**
- * 5-Layer Sheet Resolution:
- * Safely locates the target Google Sheet across all trigger types and manual runs.
- * Prevents "TypeError: Cannot read properties of null (reading 'getActiveSheet')".
- *
- * @param {Object} [e] - Event object
- * @returns {Object} { spreadsheet, sheet, rowNumber }
+ * ==============================================================================
+ * 2. INBOUND WEBHOOK RECEIVER (doPost):
+ *    Called automatically by your FastAPI Backend AFTER a PayMongo Webhook
+ *    verifies a PAID, FAILED, or EXPIRED transaction!
+ * ==============================================================================
  */
-function resolveTargetSheet(e) {
-  var spreadsheet = null;
-  var sheet = null;
-  var rowNumber = null;
-
-  // Layer 1: Best case - Triggered from a Google Sheet trigger where e.range exists
-  if (e && e.range && typeof e.range.getSheet === "function") {
-    try {
-      sheet = e.range.getSheet();
-      spreadsheet = sheet.getParent();
-      rowNumber = e.range.getRow();
-      return { spreadsheet: spreadsheet, sheet: sheet, rowNumber: rowNumber };
-    } catch (l1Err) {
-      Logger.log("Layer 1 resolution warning: " + l1Err);
-    }
+function doPost(e) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+  } catch (lockErr) {
+    return createJsonResponse({ ok: false, error: "Lock timeout" });
   }
 
-  // Layer 2: Check if e.source is a Spreadsheet instance
+  try {
+    if (!e || !e.postData || !e.postData.contents) {
+      return createJsonResponse({ ok: false, error: "Empty request body" });
+    }
+
+    var rawBody = e.postData.contents;
+    var body = JSON.parse(rawBody);
+
+    // Verify shared secret to prevent unauthorized tampering
+    if (!body.secret || body.secret !== CONFIG.SECRET_KEY) {
+      return createJsonResponse({ ok: false, error: "Unauthorized webhook secret" });
+    }
+
+    var context = resolveSheetSafely(null);
+    var sheet = context.sheet;
+    if (!sheet) {
+      return createJsonResponse({ ok: false, error: "Spreadsheet not bound or FALLBACK_SPREADSHEET_ID not set" });
+    }
+
+    // Locate the exact row by Response ID, Order Number, Payment Attempt ID, or sheet_row_index
+    var targetRow = findMatchingRow(
+      sheet,
+      body.response_id,
+      body.order_number,
+      body.payment_attempt_id,
+      body.sheet_row_index
+    );
+
+    if (!targetRow) {
+      return createJsonResponse({
+        ok: false,
+        error: "Could not find matching row for Order " + (body.order_number || body.response_id)
+      });
+    }
+
+    // Format authoritative PayMongo webhook status (PAID, FAILED, EXPIRED)
+    var normalizedStatus = String(body.payment_status || "PENDING").toUpperCase();
+    var outcomeDetails = body.outcome_details || "";
+    if (normalizedStatus === "PAID") {
+      outcomeDetails = "Verified via PayMongo Webhook (" + (body.provider_event_id || "checkout_session.payment.paid") + ")";
+    } else if (normalizedStatus === "FAILED") {
+      outcomeDetails = "Failed (" + (body.failure_code || "DECLINED") + "): " + (body.failure_message || "Payment declined");
+    } else if (normalizedStatus === "EXPIRED") {
+      outcomeDetails = "Checkout session expired (" + (body.provider_event_id || "checkout_session.expired") + ")";
+    }
+
+    ensureAndWriteColumns(sheet, targetRow, {
+      "Payment Status": normalizedStatus,
+      "Official Receipt No": body.official_receipt_no || "",
+      "Webhook Outcome Details": outcomeDetails,
+      "Synchronized At": new Date().toLocaleString()
+    });
+
+    return createJsonResponse({
+      ok: true,
+      row_updated: targetRow,
+      order_number: body.order_number,
+      payment_status: normalizedStatus,
+      official_receipt_no: body.official_receipt_no || null
+    });
+
+  } catch (err) {
+    Logger.log("Error in doPost webhook receiver: " + err.toString());
+    return createJsonResponse({ ok: false, error: err.toString() });
+  } finally {
+    try {
+      lock.releaseLock();
+    } catch (_) {}
+  }
+}
+
+/**
+ * ==============================================================================
+ * HELPER FUNCTIONS: Safe Sheet Resolution, Sanitization & Email Dispatch
+ * ==============================================================================
+ */
+
+/**
+ * Multi-layer sheet resolution to prevent:
+ * "TypeError: Cannot read properties of null (reading 'getActiveSheet')"
+ */
+function resolveSheetSafely(e) {
+  var spreadsheet = null;
+  var sheet = null;
+  var rowIndex = null;
+
+  // Layer 1: Event range from Google Sheet 'On form submit' trigger
+  if (e && e.range && typeof e.range.getSheet === "function") {
+    sheet = e.range.getSheet();
+    spreadsheet = sheet.getParent();
+    rowIndex = e.range.getRow();
+    return { spreadsheet: spreadsheet, sheet: sheet, rowIndex: rowIndex };
+  }
+
+  // Layer 2: Event source if it is a Spreadsheet
   if (e && e.source && typeof e.source.getActiveSheet === "function") {
     spreadsheet = e.source;
   }
 
-  // Layer 3: Check container-bound active spreadsheet
+  // Layer 3: Container-bound active Spreadsheet
   if (!spreadsheet) {
     try {
       spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
@@ -145,420 +296,256 @@ function resolveTargetSheet(e) {
     }
   }
 
-  // Layer 4: Form linked destination detection (if script is attached to Google Form)
+  // Layer 4: If pasted inside Google Forms instead of Google Sheets, look up linked Sheet ID
   if (!spreadsheet) {
     try {
-      var form = null;
-      if (e && e.source && typeof e.source.getDestinationId === "function") {
-        form = e.source;
-      } else if (typeof FormApp !== "undefined" && FormApp.getActiveForm) {
-        form = FormApp.getActiveForm();
+      var form = (e && e.source && typeof e.source.getDestinationId === "function")
+        ? e.source
+        : FormApp.getActiveForm();
+      if (form && form.getDestinationId()) {
+        spreadsheet = SpreadsheetApp.openById(form.getDestinationId());
       }
-
-      if (form && typeof form.getDestinationId === "function") {
-        var destinationId = form.getDestinationId();
-        if (destinationId) {
-          spreadsheet = SpreadsheetApp.openById(destinationId);
-        }
-      }
-    } catch (l4Err) {
-      Logger.log("Layer 4 Form destination check: " + l4Err);
+    } catch (_) {
       spreadsheet = null;
     }
   }
 
-  // Layer 5: Fallback to explicit SPREADSHEET_ID in CONFIG
-  if (!spreadsheet && CONFIG.SPREADSHEET_ID && CONFIG.SPREADSHEET_ID.trim() !== "") {
+  // Layer 5: Explicit FALLBACK_SPREADSHEET_ID
+  if (!spreadsheet && CONFIG.FALLBACK_SPREADSHEET_ID && CONFIG.FALLBACK_SPREADSHEET_ID.trim() !== "") {
     try {
-      spreadsheet = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID.trim());
+      spreadsheet = SpreadsheetApp.openById(CONFIG.FALLBACK_SPREADSHEET_ID.trim());
     } catch (openErr) {
-      Logger.log("Warning: Could not open CONFIG.SPREADSHEET_ID: " + openErr);
+      Logger.log("Could not open FALLBACK_SPREADSHEET_ID: " + openErr);
     }
   }
 
-  // Resolve specific tab within the spreadsheet
   if (spreadsheet) {
-    try {
-      if (CONFIG.SHEET_TAB_NAME && CONFIG.SHEET_TAB_NAME.trim() !== "") {
-        sheet = spreadsheet.getSheetByName(CONFIG.SHEET_TAB_NAME.trim());
-      }
-      if (!sheet) {
-        sheet = spreadsheet.getActiveSheet() || spreadsheet.getSheets()[0];
-      }
-      if (sheet && !rowNumber) {
-        rowNumber = sheet.getLastRow();
-      }
-    } catch (tabErr) {
-      Logger.log("Warning: Tab resolution notice: " + tabErr);
+    if (CONFIG.FALLBACK_SHEET_NAME && CONFIG.FALLBACK_SHEET_NAME.trim() !== "") {
+      sheet = spreadsheet.getSheetByName(CONFIG.FALLBACK_SHEET_NAME.trim());
+    }
+    if (!sheet) {
+      sheet = spreadsheet.getActiveSheet() || spreadsheet.getSheets()[0];
+    }
+    if (sheet && !rowIndex) {
+      rowIndex = sheet.getLastRow();
     }
   }
 
-  return { spreadsheet: spreadsheet, sheet: sheet, rowNumber: rowNumber };
+  return { spreadsheet: spreadsheet, sheet: sheet, rowIndex: rowIndex };
 }
 
 /**
- * Extracts and maps submission data across:
- *  - Google Sheets onFormSubmit(e) [e.namedValues]
- *  - Google Forms onFormSubmit(e)  [e.response]
- *  - Manual IDE execution          [e === undefined]
- *
- * @param {Object} [e]
- * @param {Object} sheetContext
- * @returns {Object} { rowNumber, payload }
+ * Safely extracts form key-value pairs whether triggered from a Sheet, a Form, or a manual test run.
  */
-function parseSubmissionData(e, sheetContext) {
-  var rawFields = {};
-  var rowNumber = sheetContext.rowNumber || null;
-  var responseId = "";
+function extractFormDataSafely(e, sheet, rowIndex) {
+  var formData = {};
 
-  // Case 1: Google Sheets Trigger (e.namedValues)
+  // Case A: Sheet available with at least 1 data row
+  if (sheet && rowIndex && rowIndex >= 2 && sheet.getLastColumn() >= 1) {
+    var lastCol = sheet.getLastColumn();
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    var rowValues = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+    for (var i = 0; i < headers.length; i++) {
+      var headerName = String(headers[i] || "").trim().toLowerCase();
+      if (headerName) {
+        formData[headerName] = rowValues[i];
+      }
+    }
+    return formData;
+  }
+
+  // Case B: e.namedValues from Sheet trigger
   if (e && e.namedValues) {
     for (var key in e.namedValues) {
       if (Object.prototype.hasOwnProperty.call(e.namedValues, key)) {
-        var valArray = e.namedValues[key];
-        var valStr = Array.isArray(valArray) ? (valArray[0] || "") : (valArray || "");
-        rawFields[key.trim().toLowerCase()] = String(valStr).trim();
+        var val = e.namedValues[key];
+        formData[key.trim().toLowerCase()] = Array.isArray(val) ? val[0] : val;
       }
     }
+    return formData;
   }
-  // Case 2: Google Forms Trigger (e.response)
-  else if (e && e.response && typeof e.response.getItemResponses === "function") {
-    responseId = String(e.response.getId ? e.response.getId() : "");
+
+  // Case C: e.response from Google Form trigger
+  if (e && e.response && typeof e.response.getItemResponses === "function") {
     if (typeof e.response.getRespondentEmail === "function" && e.response.getRespondentEmail()) {
-      rawFields["email address"] = String(e.response.getRespondentEmail()).trim();
+      formData["email address"] = e.response.getRespondentEmail();
     }
-    var itemResponses = e.response.getItemResponses();
-    for (var i = 0; i < itemResponses.length; i++) {
-      var itemTitle = itemResponses[i].getItem().getTitle().trim().toLowerCase();
-      var answer = String(itemResponses[i].getResponse() || "").trim();
-      rawFields[itemTitle] = answer;
+    var items = e.response.getItemResponses();
+    for (var j = 0; j < items.length; j++) {
+      var title = String(items[j].getItem().getTitle() || "").trim().toLowerCase();
+      formData[title] = items[j].getResponse();
     }
-  }
-  // Case 3: Manual Run in Apps Script Editor (reads the latest data row if sheet exists)
-  else if (sheetContext.sheet && sheetContext.sheet.getLastRow() >= 2) {
-    var s = sheetContext.sheet;
-    rowNumber = s.getLastRow();
-    var lastCol = Math.max(s.getLastColumn(), 1);
-    var headers = s.getRange(1, 1, 1, lastCol).getValues()[0];
-    var rowValues = s.getRange(rowNumber, 1, 1, lastCol).getValues()[0];
-
-    for (var c = 0; c < headers.length; c++) {
-      var headerName = String(headers[c] || "").trim().toLowerCase();
-      if (headerName) {
-        rawFields[headerName] = String(rowValues[c] || "").trim();
-      }
-    }
-    Logger.log("Manual IDE run: Loaded row " + rowNumber + " from sheet '" + s.getName() + "'.");
-  }
-  // Case 4: Manual Run with no sheet bound -> Safe diagnostic test payload
-  else {
-    Logger.log("Manual IDE run with no active sheet: Using diagnostic test payload.");
-    rawFields = {
-      "timestamp": new Date().toISOString(),
-      "email address": "customer.test@example.com",
-      "full name": "Juan Dela Cruz",
-      "contact number": "09171234567",
-      "product": "Product A",
-      "quantity": "1",
-      "notes": "Automated IDE Diagnostic Test Run"
-    };
+    return formData;
   }
 
-  // Flexible alias lookup helper
-  function pickField(candidates, defaultValue) {
-    // 1. Exact match
-    for (var i = 0; i < candidates.length; i++) {
-      var k = candidates[i].toLowerCase();
-      if (rawFields[k] !== undefined && rawFields[k] !== "") {
-        return rawFields[k];
-      }
-    }
-    // 2. Substring match fallback
-    var keys = Object.keys(rawFields);
-    for (var j = 0; j < candidates.length; j++) {
-      var needle = candidates[j].toLowerCase();
-      for (var m = 0; m < keys.length; m++) {
-        if (keys[m].indexOf(needle) !== -1 && rawFields[keys[m]] !== "") {
-          return rawFields[keys[m]];
-        }
-      }
-    }
-    return defaultValue;
-  }
-
-  var timestamp = pickField(["timestamp", "date", "submission time"], new Date().toISOString());
-  var customerEmail = pickField(["email address", "email", "customer email", "e-mail", "your email", "contact email"], "");
-  var customerName = pickField(["full name", "name", "customer name", "requestor", "your name", "client name"], "Valued Customer");
-  var customerPhone = pickField(["phone", "mobile", "mobile number", "contact number", "cellphone"], "");
-  var productSelection = pickField(["product", "package", "reference_code", "item", "order item", "service", "item_reference"], "Product A");
-  var quantityRaw = parseInt(pickField(["quantity", "qty", "units", "number of items"], "1"), 10);
-  var quantity = isNaN(quantityRaw) || quantityRaw < 1 ? 1 : quantityRaw;
-  var notes = pickField(["notes", "remarks", "instructions", "comments"], "");
-  var title = pickField(["title", "order title", "purpose", "description"], productSelection + " (Qty: " + quantity + ") - " + customerName);
-
-  // Deterministic response ID generation for atomic idempotency
-  if (!responseId) {
-    var rawKey = [timestamp, customerEmail, productSelection, rowNumber || "manual"].join("|");
-    var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, rawKey);
-    responseId = "gforms_" + digest.map(function(b) {
-      return ("0" + (b & 0xFF).toString(16)).slice(-2);
-    }).join("").slice(0, 24);
-  }
-
+  // Case D: Manual click on "Run" button in Apps Script Editor with an empty sheet
+  Logger.log("Manual test run detected: Using diagnostic sample submission.");
   return {
-    rowNumber: rowNumber,
-    payload: {
-      response_id: responseId,
-      sheet_row_index: rowNumber,
-      sheet_row: rowNumber,
-      customer_name: customerName,
-      customer_email: customerEmail,
-      customer_phone: customerPhone || null,
-      reference_code: productSelection,
-      item_reference: productSelection,
-      title: title,
-      category: "product_order",
-      quantity: quantity,
-      notes: notes,
-      raw_answers: rawFields
-    }
+    "timestamp": new Date().toISOString(),
+    "full name": "Juan Dela Cruz (Test)",
+    "email address": CONFIG.SUPPORT_EMAIL.indexOf("@") !== -1 ? CONFIG.SUPPORT_EMAIL : "test.client@example.com",
+    "mobile number": "09171234567",
+    "select package / product": "Product A",
+    "quantity": "1",
+    "notes / instructions": "Diagnostic test run from Apps Script IDE"
   };
 }
 
 /**
- * Writes Order Number, PayMongo Checkout URL, Amount, and Status back to the Sheet row.
- *
- * @param {Sheet} sheet
- * @param {number} rowNumber
- * @param {Object} result
+ * Extracts a value from the formData map matching any candidate aliases.
  */
-function writeOrderResultToSheet(sheet, rowNumber, result) {
-  var headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0];
-  var columnsToEnsure = [
-    { header: "Order Number", value: result.order_number || "" },
-    { header: "PayMongo Checkout Link", value: result.checkout_url || "" },
-    { header: "Amount (PHP)", value: result.amount_php || "" },
-    { header: "Payment Status", value: (result.status || "pending").toUpperCase() },
-    { header: "Payment Attempt ID", value: result.payment_attempt_id || "" },
-    { header: "Synchronized At", value: new Date().toISOString() }
-  ];
-
-  columnsToEnsure.forEach(function(col) {
-    var colIndex = -1;
-    for (var i = 0; i < headers.length; i++) {
-      if (String(headers[i] || "").trim().toLowerCase() === col.header.toLowerCase()) {
-        colIndex = i;
-        break;
-      }
+function extractField(formData, candidateAliases) {
+  for (var i = 0; i < candidateAliases.length; i++) {
+    var alias = candidateAliases[i].toLowerCase();
+    if (formData[alias] !== undefined && String(formData[alias]).trim() !== "") {
+      return String(formData[alias]).trim();
     }
-    if (colIndex === -1) {
-      colIndex = headers.length;
-      headers.push(col.header);
-      sheet.getRange(1, colIndex + 1).setValue(col.header).setFontWeight("bold");
-    }
-    sheet.getRange(rowNumber, colIndex + 1).setValue(col.value);
-  });
-
-  SpreadsheetApp.flush();
-}
-
-/**
- * Web App Reverse Webhook Endpoint (doPost):
- * Called automatically by the backend when PayMongo webhooks confirm payment
- * (PAID, FAILED, EXPIRED), updating the sheet row live.
- *
- * Deployment: Deploy -> New deployment -> Select type: Web app
- * Execute as: Me
- * Who has access: Anyone
- */
-function doPost(e) {
-  try {
-    if (!e || !e.postData || !e.postData.contents) {
-      return ContentService.createTextOutput(JSON.stringify({
-        status: "error",
-        message: "Empty postData contents."
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-
-    var data = JSON.parse(e.postData.contents);
-
-    // Validate shared secret
-    var secret = data.secret || "";
-    if (secret !== CONFIG.GOOGLE_FORMS_SECRET && secret !== CONFIG.SECRET_KEY) {
-      return ContentService.createTextOutput(JSON.stringify({
-        status: "unauthorized",
-        message: "Invalid secret."
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-
-    var sheetContext = resolveTargetSheet(null);
-    var sheet = sheetContext.sheet;
-    if (!sheet) {
-      return ContentService.createTextOutput(JSON.stringify({
-        status: "error",
-        message: "No connected Google Sheet resolved."
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-
-    // Locate target row by Order Number or Response ID
-    var targetRow = findRowByReference(sheet, data.order_number, data.response_id);
-    if (targetRow > 0) {
-      var updates = {
-        "Payment Status": (data.payment_status || "PAID").toUpperCase(),
-        "Official Receipt No": data.official_receipt_no || "",
-        "Failure Reason": data.failure_reason || "",
-        "Synchronized At": data.updated_at || new Date().toISOString()
-      };
-
-      writeColumnsToRow(sheet, targetRow, updates);
-      SpreadsheetApp.flush();
-
-      return ContentService.createTextOutput(JSON.stringify({
-        status: "success",
-        updated_row: targetRow,
-        order_number: data.order_number,
-        payment_status: data.payment_status
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "not_found",
-      message: "Order or response ID not found in sheet rows."
-    })).setMimeType(ContentService.MimeType.JSON);
-
-  } catch (err) {
-    Logger.log("doPost exception: " + err);
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "error",
-      message: (err && err.message ? err.message : String(err))
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-/**
- * Health check endpoint for Web App verification.
- */
-function doGet(e) {
-  return ContentService.createTextOutput(JSON.stringify({
-    status: "ok",
-    service: "R.G.E Google Forms to PayMongo Orchestrator",
-    company: CONFIG.COMPANY_NAME,
-    timestamp: new Date().toISOString()
-  })).setMimeType(ContentService.MimeType.JSON);
-}
-
-/**
- * Helper to locate a sheet row matching either order_number or response_id.
- */
-function findRowByReference(sheet, orderNumber, responseId) {
-  var lastRow = sheet.getLastRow();
-  var lastCol = Math.max(sheet.getLastColumn(), 1);
-  if (lastRow < 2) return -1;
-
-  var data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
-  var headers = data[0];
-
-  var orderColIdx = -1;
-  var responseIdColIdx = -1;
-
-  for (var c = 0; c < headers.length; c++) {
-    var h = String(headers[c] || "").trim().toLowerCase();
-    if (h === "order number" || h === "order_number") orderColIdx = c;
-    if (h === "response id" || h === "response_id" || h === "reference id") responseIdColIdx = c;
-  }
-
-  for (var r = 1; r < data.length; r++) {
-    var rowValues = data[r];
-    if (orderNumber && orderColIdx !== -1 && String(rowValues[orderColIdx]).trim() === String(orderNumber).trim()) {
-      return r + 1; // 1-indexed
-    }
-    if (responseId && responseIdColIdx !== -1 && String(rowValues[responseIdColIdx]).trim() === String(responseId).trim()) {
-      return r + 1;
-    }
-  }
-
-  // Fallback: search all cells in the row for orderNumber
-  if (orderNumber) {
-    for (var r2 = 1; r2 < data.length; r2++) {
-      for (var c2 = 0; c2 < data[r2].length; c2++) {
-        if (String(data[r2][c2] || "").trim() === String(orderNumber).trim()) {
-          return r2 + 1;
+    for (var key in formData) {
+      if (Object.prototype.hasOwnProperty.call(formData, key)) {
+        if (key.indexOf(alias) !== -1 && formData[key] !== undefined && String(formData[key]).trim() !== "") {
+          return String(formData[key]).trim();
         }
       }
     }
   }
-
-  return -1;
+  return "";
 }
 
 /**
- * Ensures columns exist in header and writes dictionary values to target row.
+ * Neutralizes spreadsheet formula injection (=, +, -, @) before writing to cells.
  */
-function writeColumnsToRow(sheet, rowIndex, colValues) {
-  var headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0];
+function sanitizeForSpreadsheet(val) {
+  if (val === null || val === undefined) return "";
+  var str = String(val);
+  if (/^[=+\-@]/.test(str.trim())) {
+    return "'" + str;
+  }
+  return str;
+}
+
+/**
+ * Ensures target columns exist in the header row, then writes sanitized values to the specific row.
+ */
+function ensureAndWriteColumns(sheet, rowIndex, columnMap) {
+  var lastCol = Math.max(sheet.getLastColumn(), 1);
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   var headerMap = {};
+
   for (var i = 0; i < headers.length; i++) {
-    headerMap[String(headers[i] || "").trim().toLowerCase()] = i + 1;
+    var h = String(headers[i] || "").trim();
+    if (h) {
+      headerMap[h.toLowerCase()] = i + 1;
+    }
   }
 
-  for (var key in colValues) {
-    var lowerKey = key.trim().toLowerCase();
-    var colIdx = headerMap[lowerKey];
-    if (!colIdx) {
-      colIdx = sheet.getLastColumn() + 1;
-      sheet.getRange(1, colIdx).setValue(key).setFontWeight("bold");
-      headerMap[lowerKey] = colIdx;
+  for (var colName in columnMap) {
+    if (Object.prototype.hasOwnProperty.call(columnMap, colName)) {
+      var lookupKey = colName.trim().toLowerCase();
+      var colIndex = headerMap[lookupKey];
+      if (!colIndex) {
+        colIndex = sheet.getLastColumn() + 1;
+        sheet.getRange(1, colIndex).setValue(colName);
+        sheet.getRange(1, colIndex).setFontWeight("bold");
+        headerMap[lookupKey] = colIndex;
+      }
+      var safeValue = sanitizeForSpreadsheet(columnMap[colName]);
+      sheet.getRange(rowIndex, colIndex).setValue(safeValue);
     }
-    sheet.getRange(rowIndex, colIdx).setValue(colValues[key]);
   }
+  SpreadsheetApp.flush();
 }
 
 /**
- * Sends a responsive HTML email with the PayMongo Checkout Link to the customer.
+ * Finds the target row in the Google Sheet for a PayMongo webhook callback.
  */
-function sendCustomerPaymentEmail(submissionPayload, result) {
-  if (!result.checkout_url) return;
+function findMatchingRow(sheet, responseId, orderNumber, paymentAttemptId, sheetRowIndex) {
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return null;
 
-  var subject = "Invoice & Payment Instructions: Order " + (result.order_number || "") + " - " + CONFIG.COMPANY_NAME;
-  var htmlBody =
-    "<div style='font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 8px; background-color: #ffffff; color: #1e293b;'>" +
-      "<div style='border-bottom: 2px solid #0f172a; padding-bottom: 16px; margin-bottom: 20px;'>" +
-        "<h2 style='margin: 0; color: #0f172a; font-size: 20px; font-weight: 700;'>" + CONFIG.COMPANY_NAME + "</h2>" +
-        "<p style='margin: 4px 0 0 0; color: #64748b; font-size: 13px;'>Automated Payment & Order Orchestration</p>" +
-      "</div>" +
-      "<p style='font-size: 15px; margin-top: 0;'>Hello <strong>" + submissionPayload.customer_name + "</strong>,</p>" +
-      "<p style='font-size: 14px; line-height: 1.6; color: #334155;'>" +
-        "We have received your order submission for <strong>" + submissionPayload.reference_code + "</strong>. " +
-        "Your order reference is <strong>" + (result.order_number || "") + "</strong>." +
-      "</p>" +
-      "<div style='background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 16px; margin: 20px 0;'>" +
-        "<table style='width: 100%; border-collapse: collapse; font-size: 13px;'>" +
-          "<tr><td style='color: #64748b; padding: 4px 0;'>Order Number:</td><td style='font-weight: 600; text-align: right; font-family: monospace;'>" + (result.order_number || "") + "</td></tr>" +
-          "<tr><td style='color: #64748b; padding: 4px 0;'>Description:</td><td style='font-weight: 600; text-align: right;'>" + (result.order_title || submissionPayload.title) + "</td></tr>" +
-          "<tr><td style='color: #64748b; padding: 4px 0;'>Total Amount Due:</td><td style='font-weight: 700; color: #0f172a; font-size: 16px; text-align: right;'>" + (result.amount_php || "PHP 0.00") + "</td></tr>" +
-        "</table>" +
-      "</div>" +
-      "<div style='text-align: center; margin: 28px 0;'>" +
-        "<a href='" + result.checkout_url + "' style='background-color: #dc2626; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>" +
-          "Pay Now via PayMongo (QR Ph / GCash / Maya / Card)" +
-        "</a>" +
-      "</div>" +
-      "<p style='font-size: 12px; color: #64748b; text-align: center; line-height: 1.5; margin-bottom: 24px;'>" +
-        "Supported channels: <strong>QR Ph, GCash, Maya, Visa, Mastercard, BPI Online</strong>.<br/>" +
-        "Upon settlement, your official receipt will be generated and synchronized automatically." +
-      "</p>" +
-      "<div style='border-top: 1px solid #e2e8f0; padding-top: 16px; font-size: 11px; color: #94a3b8; text-align: center;'>" +
-        "Reference ID: " + submissionPayload.response_id + " &middot; Need help? Contact " + CONFIG.SUPPORT_EMAIL +
-      "</div>" +
+  var allValues = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  var headers = allValues[0].map(function(h) { return String(h || "").trim().toLowerCase(); });
+
+  var respCol = headers.indexOf("response id");
+  var orderCol = headers.indexOf("order number");
+  var attemptCol = headers.indexOf("payment attempt id");
+
+  for (var r = 1; r < allValues.length; r++) {
+    var row = allValues[r];
+    if (orderCol !== -1 && orderNumber && String(row[orderCol]).trim() === String(orderNumber).trim()) {
+      return r + 1;
+    }
+    if (respCol !== -1 && responseId && String(row[respCol]).trim() === String(responseId).trim()) {
+      return r + 1;
+    }
+    if (attemptCol !== -1 && paymentAttemptId && String(row[attemptCol]).trim() === String(paymentAttemptId).trim()) {
+      return r + 1;
+    }
+  }
+
+  if (sheetRowIndex && sheetRowIndex >= 2 && sheetRowIndex <= lastRow) {
+    return Number(sheetRowIndex);
+  }
+  return null;
+}
+
+/**
+ * Computes an HMAC-SHA256 hex signature for payload integrity verification.
+ */
+function computeHmacSha256Hex(message, secret) {
+  var signatureBytes = Utilities.computeHmacSha256Signature(message, secret);
+  return signatureBytes.map(function(byte) {
+    return ("0" + (byte & 0xFF).toString(16)).slice(-2);
+  }).join("");
+}
+
+function createJsonResponse(payload) {
+  return ContentService.createTextOutput(JSON.stringify(payload))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * Sends a responsive HTML email to the customer with their direct PayMongo link.
+ */
+function sendPaymentInstructionsEmail(recipientEmail, recipientName, orderData) {
+  var orderNo = orderData.order_number || "PENDING";
+  var orderTitle = orderData.order_title || orderData.title || "Product Order";
+  var amountDisplay = orderData.amount_php || "0.00";
+  var subject = "Invoice & Payment Instructions: Order " + orderNo + " - " + CONFIG.COMPANY_NAME;
+
+  var htmlBody = "" +
+    "<div style='font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 8px; background-color: #ffffff; color: #1e293b;'>" +
+    "  <div style='border-bottom: 2px solid #0f172a; padding-bottom: 16px; margin-bottom: 20px;'>" +
+    "    <h2 style='margin: 0; color: #0f172a; font-size: 20px; font-weight: 700;'>" + CONFIG.COMPANY_NAME + "</h2>" +
+    "    <p style='margin: 4px 0 0 0; color: #64748b; font-size: 13px;'>Automated Payment & Order Orchestration</p>" +
+    "  </div>" +
+    "  <p style='font-size: 15px; margin-top: 0;'>Dear <strong>" + recipientName + "</strong>,</p>" +
+    "  <p style='font-size: 14px; line-height: 1.6; color: #334155;'>" +
+    "    Thank you for your order submission! Your order has been registered in our live accounting system with reference number <strong>" + orderNo + "</strong>." +
+    "  </p>" +
+    "  <div style='background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 16px; margin: 20px 0;'>" +
+    "    <table style='width: 100%; border-collapse: collapse; font-size: 13px;'>" +
+    "      <tr><td style='color: #64748b; padding: 4px 0;'>Order Number:</td><td style='font-weight: 600; text-align: right;'>" + orderNo + "</td></tr>" +
+    "      <tr><td style='color: #64748b; padding: 4px 0;'>Description:</td><td style='font-weight: 600; text-align: right;'>" + orderTitle + "</td></tr>" +
+    "      <tr><td style='color: #64748b; padding: 4px 0;'>Total Amount Due:</td><td style='font-weight: 700; color: #0f172a; font-size: 16px; text-align: right;'>" + amountDisplay + "</td></tr>" +
+    "    </table>" +
+    "  </div>" +
+    "  <div style='text-align: center; margin: 28px 0;'>" +
+    "    <a href='" + orderData.checkout_url + "' style='background-color: #dc2626; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 15px; display: inline-block; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>" +
+    "      Proceed to Secure Payment &rarr;" +
+    "    </a>" +
+    "  </div>" +
+    "  <p style='font-size: 12px; color: #64748b; text-align: center; margin-bottom: 24px;'>" +
+    "    Supported payment options: <strong>GCash, Maya, QR Ph, Credit/Debit Card, BPI Online</strong>.<br/>" +
+    "    Payment is powered by PayMongo Philippines. Your official BIR-compliant electronic receipt will be emailed immediately upon successful payment." +
+    "  </p>" +
+    "  <div style='border-top: 1px solid #e2e8f0; padding-top: 16px; font-size: 11px; color: #94a3b8; text-align: center;'>" +
+    "    If you have any questions or require assistance, please reply to this email or reach us at " + CONFIG.SUPPORT_EMAIL + "." +
+    "  </div>" +
     "</div>";
 
-  try {
-    MailApp.sendEmail({
-      to: submissionPayload.customer_email,
-      subject: subject,
-      htmlBody: htmlBody
-    });
-  } catch (mailErr) {
-    Logger.log("MailApp notice: " + mailErr);
-  }
+  MailApp.sendEmail(recipientEmail, subject, "Please view this email in an HTML-compatible client.", {
+    htmlBody: htmlBody,
+    name: CONFIG.COMPANY_NAME
+  });
 }

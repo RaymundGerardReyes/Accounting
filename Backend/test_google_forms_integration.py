@@ -226,3 +226,42 @@ def test_verify_paymongo_signature_helper():
     assert verify_paymongo_signature(raw_payload, bad_header, test_secret) is False
 
 
+def test_verify_google_forms_request_helper():
+    """Verifies X-Google-Forms-Secret and optional HMAC signature verification."""
+    import hmac
+    import hashlib
+    from google_forms_routes import verify_google_forms_request
+
+    raw_body = b'{"response_id":"gf_test_999","customer_name":"Test User"}'
+    valid_secret = VALID_SECRET
+    computed_sig = hmac.new(valid_secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+
+    # Valid secret only
+    assert verify_google_forms_request(raw_body, valid_secret) is True
+    # Invalid secret
+    assert verify_google_forms_request(raw_body, "wrong_secret") is False
+    # Valid secret + valid HMAC signature
+    assert verify_google_forms_request(raw_body, valid_secret, computed_sig) is True
+    # Valid secret + invalid HMAC signature
+    assert verify_google_forms_request(raw_body, valid_secret, "bad_signature") is False
+
+
+def test_notify_paymongo_webhook_outcome_mock():
+    """Verifies notify_paymongo_webhook_outcome dispatches status update without crashing."""
+    from unittest.mock import patch
+    from google_forms_routes import notify_paymongo_webhook_outcome
+
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        notify_paymongo_webhook_outcome(
+            outcome="PAID",
+            order_number="ORD-202610-TEST",
+            order_title="Product A - Test",
+            amount_minor=25000,
+            customer_email="customer@example.com",
+            customer_name="Customer Name",
+            response_id="gf_test_001",
+            official_receipt_no="OR-202610-001",
+        )
+
+
+
