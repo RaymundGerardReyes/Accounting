@@ -203,21 +203,30 @@ def extract_price_from_text(text: Optional[str]) -> Optional[int]:
     if not text:
         return None
     import re
-    # 1. Match standard currency indicators (₱, PHP, Php) first to avoid misinterpreting part codes like P1 or P2
-    m = re.search(r'(?:₱|PHP|Php|php)\s*([\d,]+(?:\.\d{1,2})?)', text)
-    if not m:
-        # 2. Match standalone P / Php with word boundary and at least 2 digits or explicit decimal (e.g. P450, P500.00)
-        m = re.search(r'\b(?:Php?\.?|P\.?)\s*([\d,]{2,}(?:\.\d{1,2})?|\d+(?:\.\d{1,2}))', text)
-    if m:
+    # 1. Match explicit Philippine Peso symbol ₱ or PHP first (avoids mistaking 'P2 Reviewer' as ₱2)
+    m_sym = re.search(r'(?:[₱]|PHP|Php|php)\s*([\d,]+(?:\.\d{1,2})?)', text)
+    if m_sym:
         try:
-            val = float(m.group(1).replace(",", ""))
+            val = float(m_sym.group(1).replace(",", ""))
             return int(round(val * 100))
         except ValueError:
             pass
+
+    # 2. Check catalog lookup before bare 'P' matching
     clean_lower = text.lower().strip()
     for book_key, price_cents in BOOKSTORE_CATALOG_MINOR.items():
         if book_key in clean_lower:
             return price_cents
+
+    # 3. Match bare 'P' followed by numbers with word boundary or separator
+    m_p = re.search(r'(?:^|[\s\-\(])P\s*([\d,]+(?:\.\d{1,2})?)', text)
+    if m_p:
+        try:
+            val = float(m_p.group(1).replace(",", ""))
+            return int(round(val * 100))
+        except ValueError:
+            pass
+
     return None
 
 
@@ -248,10 +257,10 @@ def resolve_bookstore_fields(
 
             if not book and any(bk in k_clean for bk in ["book", "material", "course material", "textbook"]):
                 book = v_clean
-            if not student_id and any(sk in k_clean for sk in ["student id", "enrollee id", "student / enrollee", "id number", "student no", "student_id", "student #", "student number"]):
+            if not student_id and any(sk in k_clean for sk in ["student id", "enrollee id", "student / enrollee", "id number", "student no", "student_id"]):
                 student_id = v_clean
             if not instructor and (
-                any(ik in k_clean for ik in ["instructor", "professor", "prof.", "faculty", "teacher"])
+                any(ik in k_clean for ik in ["instructor", "professor", "prof.", "faculty"])
                 or ("credit" in k_clean and "card" not in k_clean)
             ):
                 instructor = v_clean
@@ -265,17 +274,17 @@ def resolve_bookstore_fields(
     # 3. Search notes text if student_id, instructor, or book are still missing
     if notes:
         if not student_id:
-            m_sid = re.search(r'(?:Student\s*(?:/\s*Enrollee\s*)?ID(?:\s*Number)?|Student\s*Number|Student\s*#|Enrollee\s*ID|ID\s*Number|Student\s*No\.?)[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
+            m_sid = re.search(r'(?:Student\s*(?:/\s*Enrollee\s*)?ID(?:\s*Number)?|Enrollee\s*ID|ID\s*Number|Student\s*(?:No\.?|#|Number))[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
             if m_sid:
-                student_id = m_sid.group(1).strip().strip("'\"")
+                student_id = m_sid.group(1).strip()
         if not instructor:
-            m_inst = re.search(r'(?:Instructor(?:\s*Credit)?|Enrolled\s*Instructor(?:\s*to\s*Credit)?|Professor|Prof\.|Faculty(?:\s*Credit)?|Teacher)[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
+            m_inst = re.search(r'(?:Faculty\s*(?:Credit)?|Instructor(?:\s*Credit)?|Enrolled\s*Instructor(?:\s*to\s*Credit)?|Professor|Prof\.)[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
             if m_inst:
-                instructor = m_inst.group(1).strip().strip("'\"")
+                instructor = m_inst.group(1).strip()
         if not book:
-            m_bk = re.search(r'(?:Book(?:\s*/\s*Course\s*Material)?|Course\s*Material|Textbook|Title)[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
+            m_bk = re.search(r'(?:Book(?:\s*/\s*Course\s*Material)?|Course\s*Material|Textbook)[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
             if m_bk:
-                book = m_bk.group(1).strip().strip("'\"")
+                book = m_bk.group(1).strip()
 
     return book, student_id, instructor
 

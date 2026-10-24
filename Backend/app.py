@@ -26,7 +26,17 @@ from integration_routes import router as integration_router
 from auth_routes import router as auth_router
 from cost_allocation_routes import router as cost_allocation_router
 from google_forms_routes import router as google_forms_router
-from webhook_orchestration import router as webhook_orchestration_router
+from webhook_orchestration import (
+    router as webhook_orchestration_router,
+    PAID_EVENTS,
+    FAILED_EVENTS,
+    EXPIRED_EVENTS,
+    TERMINAL_ATTEMPT_STATUSES,
+    resolve_attempt_and_order,
+    apply_webhook_transition,
+    simulate_payment_webhook,
+    SimulatePaymentAttemptRequest,
+)
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -222,6 +232,9 @@ class SimulateWebhookRequest(BaseModel):
     event_type: str = Field("checkout_session.payment.paid", description="Webhook event type")
     duplicate: bool = Field(False, description="Whether to simulate duplicate event ID")
     payment_method: Optional[str] = Field(None, description="Simulated payment method channel (e.g. qrph, card_visa, gcash, maya, dob_bpi)")
+    force_override: bool = Field(True, description="Force override terminal states during sandbox testing")
+    failed_code: Optional[str] = None
+    failed_message: Optional[str] = None
 
 class ResendReceiptEmailRequest(BaseModel):
     to_email: Optional[str] = Field(None, description="Recipient email address for receipt dispatch")
@@ -829,6 +842,23 @@ async def simulate_webhook(req: SimulateWebhookRequest, db: Session = Depends(ge
     # Process via normal webhook handler
     result = orchestrator.process_webhook(db=db, raw_body=raw_body, signature_header=signature)
 
+    # If force_override is requested and attempt is in a terminal state, override transition
+    target_status = "succeeded" if "paid" in req.event_type else ("expired" if "expired" in req.event_type else "failed")
+    if req.force_override and result.get("status") != target_status:
+        resource = payload_dict["data"]["attributes"]["data"]
+        override_res = apply_webhook_transition(
+            db=db,
+            event_type=req.event_type,
+            resource=resource,
+            attempt=attempt,
+            order=order,
+            OutboxModel=FulfillmentOutbox,
+            force_override=True,
+        )
+        if override_res.get("transitioned"):
+            result["status"] = override_res.get("attempt_status")
+            result["force_override"] = True
+
     # If the simulated event is 'expired' and there is a real PayMongo provider session ID, also invalidate remote session
     if "expired" in req.event_type and attempt.provider_payment_id and not attempt.provider_payment_id.startswith("cs_sim_"):
         try:
@@ -841,6 +871,14 @@ async def simulate_webhook(req: SimulateWebhookRequest, db: Session = Depends(ge
         "signature_header": signature,
         "result": result,
     }
+
+@app.post("/api/v1/payments/attempts/{attempt_id}/simulate", summary="Dedicated Testing Simulator for Payment Attempt")
+def app_simulate_payment_webhook(
+    attempt_id: str,
+    body: SimulatePaymentAttemptRequest,
+    db: Session = Depends(get_db),
+):
+    return simulate_payment_webhook(attempt_id=attempt_id, body=body, db=db)
 
 @app.post("/api/v1/payments/{payment_id}/expire", summary="Expire Active Payment Attempt & Remote Gateway Session")
 async def expire_payment(

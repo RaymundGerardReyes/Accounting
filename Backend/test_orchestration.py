@@ -1735,6 +1735,182 @@ async def test_get_checkout_session_detects_last_payment_error(monkeypatch):
     assert result.currency == "PHP"
 
 
+def test_dedicated_simulate_payment_attempt_webhook():
+    """
+    Tests POST /api/v1/payments/attempts/{attempt_id}/simulate:
+    1. Simulates PAID -> attempt is succeeded, order is paid, outbox record created.
+    2. Tests terminal state guard when force_override=False.
+    3. Overrides terminal state when force_override=True -> transitions to failed.
+    4. Overrides terminal state -> transitions to expired.
+    """
+    resp_order = client.post("/api/v1/orders", json={
+        "title": "Dedicated Simulator Test Order",
+        "category": "product_order",
+        "reference_code": "Product A",
+        "quantity": 1
+    })
+    assert resp_order.status_code == 201
+    order_id = resp_order.json()["id"]
+
+    att_resp = client.post(
+        f"/api/v1/orders/{order_id}/payment-attempts",
+        json={"idempotency_key": f"ded_sim_{uuid.uuid4().hex}"}
+    )
+    assert att_resp.status_code == 201
+    attempt_id = att_resp.json()["id"]
+
+    # 1. Simulate PAID
+    sim_paid = client.post(
+        f"/api/v1/payments/attempts/{attempt_id}/simulate",
+        json={"outcome": "paid", "force_override": True}
+    )
+    assert sim_paid.status_code == 200
+    data_paid = sim_paid.json()
+    assert data_paid["ok"] is True
+    assert data_paid["transitioned"] is True
+    assert data_paid["attempt_status"] == "succeeded"
+    assert data_paid["order_status"] == "paid"
+
+    # 2. Terminal state guard with force_override=False
+    sim_blocked = client.post(
+        f"/api/v1/payments/attempts/{attempt_id}/simulate",
+        json={"outcome": "failed", "force_override": False}
+    )
+    assert sim_blocked.status_code == 200
+    data_blocked = sim_blocked.json()
+    assert data_blocked["ok"] is True
+    assert data_blocked["transitioned"] is False
+    assert "attempt_already_in_terminal_state" in data_blocked["reason"]
+
+    # 3. Terminal state override with force_override=True -> FAILED
+    sim_failed = client.post(
+        f"/api/v1/payments/attempts/{attempt_id}/simulate",
+        json={"outcome": "failed", "force_override": True, "failed_code": "INSUFFICIENT_FUNDS"}
+    )
+    assert sim_failed.status_code == 200
+    data_failed = sim_failed.json()
+    assert data_failed["ok"] is True
+    assert data_failed["transitioned"] is True
+    assert data_failed["attempt_status"] == "failed"
+    assert data_failed["order_status"] == "pending"
+
+    # 4. Terminal state override with force_override=True -> EXPIRED
+    sim_expired = client.post(
+        f"/api/v1/payments/attempts/{attempt_id}/simulate",
+        json={"outcome": "expired", "force_override": True}
+    )
+    assert sim_expired.status_code == 200
+    data_expired = sim_expired.json()
+    assert data_expired["ok"] is True
+    assert data_expired["transitioned"] is True
+    assert data_expired["attempt_status"] == "expired"
+
+
+def test_resolve_attempt_and_order_logic():
+    """
+    Tests resolve_attempt_and_order across checkout_session (cs_...),
+    payment (pay_...), and metadata references.
+    """
+    from webhook_orchestration import resolve_attempt_and_order
+
+    db = SessionLocal()
+    try:
+        order = Order(
+            id=str(uuid.uuid4()),
+            order_number=f"ORD-RES-{uuid.uuid4().hex[:6]}",
+            title="Resolver Test Order",
+            category="product_order",
+            reference_code="Product B",
+            amount_minor=15000,
+            status="pending",
+        )
+        db.add(order)
+        db.commit()
+
+        cs_id = f"cs_test_{uuid.uuid4().hex[:12]}"
+        attempt = PaymentAttempt(
+            id=str(uuid.uuid4()),
+            order_id=order.id,
+            provider="paymongo",
+            payment_method="card",
+            provider_payment_id=cs_id,
+            amount_minor=15000,
+            status="pending",
+            idempotency_key=f"resolve_{uuid.uuid4().hex}",
+        )
+        db.add(attempt)
+        db.commit()
+
+        # Case 1: Match via checkout_session ID directly
+        att1, ord1 = resolve_attempt_and_order(db, {"id": cs_id, "attributes": {}}, Order, PaymentAttempt)
+        assert att1 is not None and att1.id == attempt.id
+        assert ord1 is not None and ord1.id == order.id
+
+        # Case 2: Match via payment ID with checkout_session_id in attributes
+        pay_res = {
+            "id": f"pay_{uuid.uuid4().hex[:12]}",
+            "attributes": {"checkout_session_id": cs_id}
+        }
+        att2, ord2 = resolve_attempt_and_order(db, pay_res, Order, PaymentAttempt)
+        assert att2 is not None and att2.id == attempt.id
+        assert ord2 is not None and ord2.id == order.id
+
+        # Case 3: Match via metadata.payment_attempt_id
+        meta_res = {
+            "id": f"pay_unknown_{uuid.uuid4().hex[:8]}",
+            "attributes": {
+                "metadata": {"payment_attempt_id": attempt.id}
+            }
+        }
+        att3, ord3 = resolve_attempt_and_order(db, meta_res, Order, PaymentAttempt)
+        assert att3 is not None and att3.id == attempt.id
+
+        # Case 4: Match via metadata.order_id fallback
+        order_res = {
+            "id": f"pay_order_fallback_{uuid.uuid4().hex[:8]}",
+            "attributes": {
+                "metadata": {"order_id": order.id}
+            }
+        }
+        att4, ord4 = resolve_attempt_and_order(db, order_res, Order, PaymentAttempt)
+        assert att4 is not None and att4.id == attempt.id
+        assert ord4 is not None and ord4.id == order.id
+    finally:
+        db.close()
+
+
+def test_verify_paymongo_signature_logic():
+    """
+    Tests verify_paymongo_signature function for test and live signatures.
+    """
+    import hmac
+    import hashlib
+    import time
+    from webhook_orchestration import verify_paymongo_signature
+
+    raw_body = b'{"data":{"id":"evt_test"}}'
+    secret = "whsk_test_signature_secret_999"
+    ts = str(int(time.time()))
+    signed = f"{ts}.{raw_body.decode('utf-8')}".encode("utf-8")
+    expected_hex = hmac.new(secret.encode("utf-8"), signed, hashlib.sha256).hexdigest()
+
+    # Valid test mode signature
+    valid_te_hdr = f"t={ts},te={expected_hex}"
+    assert verify_paymongo_signature(raw_body, sig_header=valid_te_hdr, webhook_secret=secret) is True
+
+    # Valid live mode signature
+    valid_li_hdr = f"t={ts},li={expected_hex}"
+    assert verify_paymongo_signature(raw_body, sig_header=valid_li_hdr, webhook_secret=secret) is True
+
+    # Invalid signature
+    invalid_hdr = f"t={ts},te=invalid_signature_hex_123"
+    assert verify_paymongo_signature(raw_body, sig_header=invalid_hdr, webhook_secret=secret) is False
+
+    # Empty secret bypasses in dev
+    assert verify_paymongo_signature(raw_body, sig_header=None, webhook_secret="") is True
+
+
+
 
 
 

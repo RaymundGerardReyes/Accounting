@@ -335,16 +335,27 @@ class PaymentOrchestrator:
         resource_attrs = resource_data.get("attributes") or resource_data
         metadata = resource_attrs.get("metadata") or resource_data.get("metadata") or {}
 
-        attempt = None
-        # a) Check PaymentAttempt.provider_payment_id == resource_id (standard cs_...)
-        if resource_id:
-            attempt = db.query(PaymentAttempt).filter(PaymentAttempt.provider_payment_id == resource_id).first()
+        # Also check nested payments array if this is a checkout_session payload
+        payments_list = resource_attrs.get("payments") or []
+        if not metadata and payments_list:
+            first_payment_attrs = (payments_list[0].get("attributes") if isinstance(payments_list[0], dict) else {}) or {}
+            metadata = first_payment_attrs.get("metadata") or {}
 
-        # b) Check metadata["payment_attempt_id"]
-        if not attempt and "payment_attempt_id" in metadata:
+        attempt = None
+        # a) Check metadata["payment_attempt_id"] first
+        if "payment_attempt_id" in metadata:
             attempt = db.query(PaymentAttempt).filter(PaymentAttempt.id == metadata["payment_attempt_id"]).first()
 
-        # Check metadata["order_id"]
+        # b) Check PaymentAttempt.provider_payment_id == resource_id (standard cs_...)
+        if not attempt and resource_id:
+            attempt = db.query(PaymentAttempt).filter(PaymentAttempt.provider_payment_id == resource_id).first()
+
+        # c) Check checkout_session_id inside payment resource
+        checkout_session_id = resource_attrs.get("checkout_session_id") or metadata.get("checkout_session_id")
+        if not attempt and checkout_session_id:
+            attempt = db.query(PaymentAttempt).filter(PaymentAttempt.provider_payment_id == checkout_session_id).first()
+
+        # d) Check metadata["order_id"]
         if not attempt and "order_id" in metadata:
             attempt = (
                 db.query(PaymentAttempt)
@@ -353,7 +364,7 @@ class PaymentOrchestrator:
                 .first()
             )
 
-        # c) If resource has payment_intent_id, find the order whose metadata contains this payment_intent_id and get its latest active attempt
+        # e) If resource has payment_intent_id, find the order whose metadata contains this payment_intent_id and get its latest active attempt
         resource_pi_id = (
             resource_attrs.get("payment_intent_id")
             or (resource_attrs.get("payment_intent", {}).get("id") if isinstance(resource_attrs.get("payment_intent"), dict) else None)

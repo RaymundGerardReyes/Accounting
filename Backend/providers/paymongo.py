@@ -97,9 +97,10 @@ class PayMongoProvider(PaymentProvider):
                         "success_url": success_url,
                         "cancel_url": cancel_url,
                         "metadata": {
-                            "order_id": order_id,
-                            "order_number": order_number,
-                            **(metadata or {}),
+                            "order_id": str(order_id),
+                            "order_number": str(order_number),
+                            "payment_attempt_id": str((metadata or {}).get("payment_attempt_id") or ""),
+                            **{k: str(v) if isinstance(v, (int, float, bool)) else v for k, v in (metadata or {}).items()},
                         },
                     }
                 }

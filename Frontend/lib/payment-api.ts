@@ -1,3 +1,5 @@
+import { apiFetch } from "./api-client"
+
 // Payment API client & security helpers
 
 export interface Order {
@@ -403,6 +405,44 @@ export async function createAndExpireTestPayment(channel: string = "qrph"): Prom
     throw new Error(err.detail || "Failed to create and expire test payment")
   }
   return res.json()
+}
+
+export type SimulatedOutcome = "paid" | "failed" | "expired"
+
+export interface SimulateWebhookResponse {
+  ok: boolean
+  provider_event_id: string
+  transitioned: boolean
+  event_type?: string
+  attempt_id?: string
+  attempt_status?: string
+  order_id?: string
+  order_status?: string
+  reason?: string
+  [key: string]: any
+}
+
+/**
+ * Triggers a simulated webhook transition (PAID, FAILED, or EXPIRED)
+ * for a specific payment attempt in the Testing API.
+ */
+export async function simulatePaymentAttemptWebhook(
+  attemptId: string,
+  outcome: SimulatedOutcome,
+  options?: { forceOverride?: boolean; failedCode?: string; failedMessage?: string }
+): Promise<SimulateWebhookResponse> {
+  return apiFetch<SimulateWebhookResponse>(
+    `/v1/payments/attempts/${encodeURIComponent(attemptId)}/simulate`,
+    {
+      method: "POST",
+      body: {
+        outcome,
+        force_override: options?.forceOverride ?? true,
+        failed_code: options?.failedCode,
+        failed_message: options?.failedMessage,
+      },
+    }
+  )
 }
 
 function jsonStringifyWithFallback(data: any): string {

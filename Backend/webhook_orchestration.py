@@ -48,6 +48,28 @@ SMTP_USERNAME = os.getenv("SMTP_USER", "") or os.getenv("SMTP_USERNAME", "")
 SMTP_PASSWORD = os.getenv("SMTP_APP_PASSWORD", "") or os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", SMTP_USERNAME or "noreply@acme.com")
 
+# 1. Map all PayMongo and Simulator event types to normalized actions
+PAID_EVENTS = {
+    "checkout_session.payment.paid",
+    "payment.paid",
+    "qr.paid",
+    "qrph.paid",
+    "payment_intent.succeeded",
+}
+FAILED_EVENTS = {
+    "payment.failed",
+    "checkout_session.payment.failed",
+    "payment_intent.payment_failed",
+    "source.failed",
+}
+EXPIRED_EVENTS = {
+    "checkout_session.expired",
+    "qr.expired",
+    "qrph.expired",
+}
+
+TERMINAL_ATTEMPT_STATUSES = {"succeeded", "failed", "expired", "cancelled"}
+
 # Authoritative Server-Side Product Catalog (in PHP centavos - prevents price tampering)
 AUTHORITATIVE_PRICE_CATALOG_MINOR: Dict[str, int] = {
     "product a": 25000,   # PHP 250.00
@@ -75,21 +97,30 @@ def extract_price_from_text(text: Optional[str]) -> Optional[int]:
     if not text:
         return None
     import re
-    # 1. Match standard currency indicators (₱, PHP, Php) first to avoid misinterpreting part codes like P1 or P2
-    m = re.search(r'(?:₱|PHP|Php|php)\s*([\d,]+(?:\.\d{1,2})?)', text)
-    if not m:
-        # 2. Match standalone P / Php with word boundary and at least 2 digits or explicit decimal (e.g. P450, P500.00)
-        m = re.search(r'\b(?:Php?\.?|P\.?)\s*([\d,]{2,}(?:\.\d{1,2})?|\d+(?:\.\d{1,2}))', text)
-    if m:
+    # 1. Match explicit Philippine Peso symbol ₱ or PHP first (avoids mistaking 'P2 Reviewer' as ₱2)
+    m_sym = re.search(r'(?:[₱]|PHP|Php|php)\s*([\d,]+(?:\.\d{1,2})?)', text)
+    if m_sym:
         try:
-            val = float(m.group(1).replace(",", ""))
+            val = float(m_sym.group(1).replace(",", ""))
             return int(round(val * 100))
         except ValueError:
             pass
+
+    # 2. Check catalog lookup before bare 'P' matching
     clean_lower = text.lower().strip()
     for book_key, price_cents in AUTHORITATIVE_PRICE_CATALOG_MINOR.items():
         if book_key in clean_lower:
             return price_cents
+
+    # 3. Match bare 'P' followed by numbers with word boundary or separator
+    m_p = re.search(r'(?:^|[\s\-\(])P\s*([\d,]+(?:\.\d{1,2})?)', text)
+    if m_p:
+        try:
+            val = float(m_p.group(1).replace(",", ""))
+            return int(round(val * 100))
+        except ValueError:
+            pass
+
     return None
 
 
@@ -120,10 +151,10 @@ def resolve_bookstore_fields(
 
             if not book and any(bk in k_clean for bk in ["book", "material", "course material", "textbook"]):
                 book = v_clean
-            if not student_id and any(sk in k_clean for sk in ["student id", "enrollee id", "student / enrollee", "id number", "student no", "student_id", "student #", "student number"]):
+            if not student_id and any(sk in k_clean for sk in ["student id", "enrollee id", "student / enrollee", "id number", "student no", "student_id"]):
                 student_id = v_clean
             if not instructor and (
-                any(ik in k_clean for ik in ["instructor", "professor", "prof.", "faculty", "teacher"])
+                any(ik in k_clean for ik in ["instructor", "professor", "prof.", "faculty"])
                 or ("credit" in k_clean and "card" not in k_clean)
             ):
                 instructor = v_clean
@@ -137,17 +168,17 @@ def resolve_bookstore_fields(
     # 3. Search notes text if student_id, instructor, or book are still missing
     if notes:
         if not student_id:
-            m_sid = re.search(r'(?:Student\s*(?:/\s*Enrollee\s*)?ID(?:\s*Number)?|Student\s*Number|Student\s*#|Enrollee\s*ID|ID\s*Number|Student\s*No\.?)[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
+            m_sid = re.search(r'(?:Student\s*(?:/\s*Enrollee\s*)?ID(?:\s*Number)?|Enrollee\s*ID|ID\s*Number|Student\s*(?:No\.?|#|Number))[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
             if m_sid:
-                student_id = m_sid.group(1).strip().strip("'\"")
+                student_id = m_sid.group(1).strip()
         if not instructor:
-            m_inst = re.search(r'(?:Instructor(?:\s*Credit)?|Enrolled\s*Instructor(?:\s*to\s*Credit)?|Professor|Prof\.|Faculty(?:\s*Credit)?|Teacher)[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
+            m_inst = re.search(r'(?:Faculty\s*(?:Credit)?|Instructor(?:\s*Credit)?|Enrolled\s*Instructor(?:\s*to\s*Credit)?|Professor|Prof\.)[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
             if m_inst:
-                instructor = m_inst.group(1).strip().strip("'\"")
+                instructor = m_inst.group(1).strip()
         if not book:
-            m_bk = re.search(r'(?:Book(?:\s*/\s*Course\s*Material)?|Course\s*Material|Textbook|Title)[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
+            m_bk = re.search(r'(?:Book(?:\s*/\s*Course\s*Material)?|Course\s*Material|Textbook)[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
             if m_bk:
-                book = m_bk.group(1).strip().strip("'\"")
+                book = m_bk.group(1).strip()
 
     return book, student_id, instructor
 
@@ -176,22 +207,24 @@ class GoogleFormSubmissionPayload(BaseModel):
 # ---------------------------------------------------------------------------
 # Helper 1: Verify PayMongo Webhook Signature (Anti-Tampering)
 # ---------------------------------------------------------------------------
-def verify_paymongo_signature(raw_body: bytes, signature_header: Optional[str], secret: Optional[str] = None) -> bool:
+def verify_paymongo_signature(raw_body: bytes, signature_header: Optional[str] = None, secret: Optional[str] = None, sig_header: Optional[str] = None, webhook_secret: Optional[str] = None) -> bool:
     """
     Verifies the Paymongo-Signature header: t=<timestamp>,te=<test_sig>,li=<live_sig>
     If secret is empty in development/testing, allows sandbox test webhooks.
     """
-    target_secret = (secret if secret is not None else os.getenv("PAYMONGO_WEBHOOK_SECRET", "")).strip()
+    actual_sig = sig_header if sig_header is not None else signature_header
+    actual_sec = webhook_secret if webhook_secret is not None else secret
+    target_secret = (actual_sec if actual_sec is not None else os.getenv("PAYMONGO_WEBHOOK_SECRET", "")).strip()
     if not target_secret:
         return True
-    if not signature_header:
+    if not actual_sig:
         return False
 
     parts = {}
-    for item in signature_header.split(","):
+    for item in actual_sig.split(","):
         if "=" in item:
             k, v = item.strip().split("=", 1)
-            parts[k] = v
+            parts[k.strip()] = v.strip()
 
     timestamp = parts.get("t")
     test_sig = parts.get("te")
@@ -212,6 +245,164 @@ def verify_paymongo_signature(raw_body: bytes, signature_header: Optional[str], 
     if test_sig and hmac.compare_digest(expected_sig, test_sig):
         return True
     return False
+
+
+def resolve_attempt_and_order(db: Session, resource: dict, OrderModel=Order, PaymentAttemptModel=PaymentAttempt):
+    """
+    Resolves PaymentAttempt and Order across checkout_session (cs_...),
+    payment (pay_...), and qrph resources using metadata first, then provider_payment_id.
+    """
+    resource_id = resource.get("id")
+    attrs = resource.get("attributes") or {}
+    metadata = attrs.get("metadata") or {}
+
+    # Also check nested payments array if this is a checkout_session payload
+    payments_list = attrs.get("payments") or []
+    if not metadata and payments_list:
+        first_payment_attrs = (payments_list[0].get("attributes") if isinstance(payments_list[0], dict) else {}) or {}
+        metadata = first_payment_attrs.get("metadata") or {}
+
+    attempt_id = metadata.get("payment_attempt_id")
+    order_id = metadata.get("order_id")
+
+    attempt = None
+    order = None
+
+    # Priority 1: Exact payment_attempt_id from metadata
+    if attempt_id:
+        attempt = db.query(PaymentAttemptModel).filter(PaymentAttemptModel.id == attempt_id).first()
+
+    # Priority 2: Match provider_payment_id (works for cs_... and cs_sim_...)
+    if not attempt and resource_id:
+        attempt = (
+            db.query(PaymentAttemptModel)
+            .filter(PaymentAttemptModel.provider_payment_id == resource_id)
+            .first()
+        )
+
+    # Priority 3: Check checkout_session_id inside a payment resource
+    checkout_session_id = attrs.get("checkout_session_id") or metadata.get("checkout_session_id")
+    if not attempt and checkout_session_id:
+        attempt = (
+            db.query(PaymentAttemptModel)
+            .filter(PaymentAttemptModel.provider_payment_id == checkout_session_id)
+            .first()
+        )
+
+    # Priority 4: Fallback to latest attempt for order_id
+    if not attempt and order_id:
+        attempt = (
+            db.query(PaymentAttemptModel)
+            .filter(PaymentAttemptModel.order_id == order_id)
+            .order_by(PaymentAttemptModel.created_at.desc())
+            .first()
+        )
+
+    if attempt:
+        order = db.query(OrderModel).filter(OrderModel.id == attempt.order_id).first()
+    elif order_id:
+        order = db.query(OrderModel).filter(OrderModel.id == order_id).first()
+
+    return attempt, order
+
+
+def apply_webhook_transition(
+    db: Session,
+    event_type: str,
+    resource: dict,
+    attempt,
+    order,
+    OutboxModel=FulfillmentOutbox,
+    force_override: bool = False,
+) -> dict:
+    """
+    Applies PAID, FAILED, or EXPIRED state transitions to PaymentAttempt and Order.
+    Set `force_override=True` in the Testing Simulator to allow re-testing transitions
+    even if the attempt was previously marked terminal.
+    """
+    now = datetime.now(timezone.utc)
+    attrs = resource.get("attributes") or {}
+
+    if not attempt:
+        return {"transitioned": False, "reason": "payment_attempt_not_found"}
+
+    # Guard terminal states in production webhooks unless force_override is True (Testing API)
+    if attempt.status in TERMINAL_ATTEMPT_STATUSES and not force_override:
+        return {
+            "transitioned": False,
+            "reason": f"attempt_already_in_terminal_state:{attempt.status}",
+            "attempt_status": attempt.status,
+            "order_status": order.status if order else None,
+        }
+
+    if event_type in PAID_EVENTS:
+        attempt.status = "succeeded"
+        attempt.paid_at = now
+        attempt.failure_code = None
+        attempt.failure_message = None
+        attempt.updated_at = now
+
+        if order:
+            order.status = "paid"
+            order.updated_at = now
+
+            # Enqueue fulfillment outbox record if not already queued
+            existing_outbox = (
+                db.query(OutboxModel)
+                .filter(
+                    OutboxModel.payment_attempt_id == attempt.id,
+                    OutboxModel.event_type == "order.paid",
+                )
+                .first()
+            )
+            if not existing_outbox:
+                db.add(
+                    OutboxModel(
+                        id=str(uuid.uuid4()),
+                        order_id=order.id,
+                        payment_attempt_id=attempt.id,
+                        event_type="order.paid",
+                        status="completed",
+                        created_at=now,
+                        processed_at=now,
+                    )
+                )
+
+    elif event_type in FAILED_EVENTS:
+        attempt.status = "failed"
+        attempt.failure_code = attrs.get("failed_code") or "PAYMENT_FAILED"
+        attempt.failure_message = attrs.get("failed_message") or "Payment processing failed."
+        attempt.updated_at = now
+
+        # Keep order in 'pending' so the user can retry with a new attempt,
+        # or update metadata/status as needed by your accounting workflow
+        if order and force_override and order.status == "paid":
+            order.status = "pending"
+            order.updated_at = now
+
+    elif event_type in EXPIRED_EVENTS:
+        attempt.status = "expired"
+        attempt.expires_at = now
+        attempt.failure_code = attrs.get("failed_code") or "SESSION_EXPIRED"
+        attempt.failure_message = attrs.get("failed_message") or "Checkout session expired."
+        attempt.updated_at = now
+
+        if order and force_override and order.status == "paid":
+            order.status = "pending"
+            order.updated_at = now
+
+    else:
+        return {"transitioned": False, "reason": f"unhandled_event_type:{event_type}"}
+
+    db.commit()
+    return {
+        "transitioned": True,
+        "event_type": event_type,
+        "attempt_id": attempt.id,
+        "attempt_status": attempt.status,
+        "order_id": order.id if order else None,
+        "order_status": order.status if order else None,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -622,3 +813,106 @@ async def handle_paymongo_webhook(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal webhook processing error: {str(e)}")
+
+
+class SimulatePaymentAttemptRequest(BaseModel):
+    outcome: str = Field(..., description="'paid', 'failed', or 'expired'")
+    force_override: bool = Field(True, description="Force override terminal states")
+    failed_code: Optional[str] = None
+    failed_message: Optional[str] = None
+
+
+@router.post("/api/v1/payments/attempts/{attempt_id}/simulate", summary="Dedicated Testing Simulator for Payment Attempt")
+def simulate_payment_webhook(
+    attempt_id: str,
+    body: SimulatePaymentAttemptRequest,
+    db: Session = Depends(get_db),
+):
+    attempt = (
+        db.query(PaymentAttempt)
+        .filter(
+            (PaymentAttempt.id == attempt_id)
+            | (PaymentAttempt.provider_payment_id == attempt_id)
+            | (PaymentAttempt.order_id == attempt_id)
+        )
+        .order_by(PaymentAttempt.created_at.desc())
+        .first()
+    )
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Payment attempt not found")
+
+    order = db.query(Order).filter(Order.id == attempt.order_id).first()
+    now = datetime.now(timezone.utc)
+
+    outcome_clean = body.outcome.strip().lower()
+    event_map = {
+        "paid": ("checkout_session.payment.paid", f"evt_sim_{uuid.uuid4().hex[:12]}"),
+        "failed": ("payment.failed", f"evt_fail_{uuid.uuid4().hex[:36]}"),
+        "expired": ("checkout_session.expired", f"evt_exp_{uuid.uuid4().hex[:36]}"),
+    }
+    if outcome_clean not in event_map:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported outcome '{body.outcome}'. Must be 'paid', 'failed', or 'expired'."
+        )
+
+    event_type, provider_event_id = event_map[outcome_clean]
+
+    resource = {
+        "id": attempt.provider_payment_id or f"cs_sim_{uuid.uuid4().hex[:16]}",
+        "type": "checkout_session",
+        "attributes": {
+            "status": outcome_clean,
+            "failed_code": body.failed_code or ("DECLINED" if outcome_clean == "failed" else None),
+            "failed_message": body.failed_message or ("Simulated failure" if outcome_clean == "failed" else None),
+            "metadata": {
+                "order_id": order.id if order else attempt.order_id,
+                "payment_attempt_id": attempt.id,
+            },
+        },
+    }
+
+    synthetic_payload = {
+        "data": {
+            "id": provider_event_id,
+            "type": "event",
+            "attributes": {
+                "type": event_type,
+                "livemode": False,
+                "data": resource,
+            },
+        }
+    }
+
+    # Record in webhook_events table
+    webhook_record = WebhookEvent(
+        id=str(uuid.uuid4()),
+        provider="paymongo",
+        provider_event_id=provider_event_id,
+        event_type=event_type,
+        processing_status="received",
+        received_at=now,
+        payload=json.dumps(synthetic_payload),
+    )
+    db.add(webhook_record)
+    db.flush()
+
+    result = apply_webhook_transition(
+        db=db,
+        event_type=event_type,
+        resource=resource,
+        attempt=attempt,
+        order=order,
+        OutboxModel=FulfillmentOutbox,
+        force_override=body.force_override,
+    )
+
+    webhook_record.processing_status = "processed"
+    webhook_record.processed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {
+        "ok": True,
+        "provider_event_id": provider_event_id,
+        **result,
+    }
