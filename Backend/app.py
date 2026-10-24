@@ -23,6 +23,8 @@ from services.payment_orchestrator import PaymentOrchestrator
 from providers.paymongo import PayMongoProvider
 from finance_routes import router as finance_router
 from integration_routes import router as integration_router
+from auth_routes import router as auth_router
+from cost_allocation_routes import router as cost_allocation_router
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -54,6 +56,8 @@ app.add_middleware(
 
 app.include_router(finance_router)
 app.include_router(integration_router)
+app.include_router(auth_router)
+app.include_router(cost_allocation_router)
 
 orchestrator = PaymentOrchestrator(provider=PayMongoProvider())
 
