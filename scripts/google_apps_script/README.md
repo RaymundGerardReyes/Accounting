@@ -43,15 +43,15 @@ To instantly generate a production-ready Google Form for course books & material
 3. Select **`generateBookstoreOrderForm`** in the function dropdown and click **Run**.
 4. The builder executes end-to-end automation:
    - **Creates Google Form**: "R.G.E Accounting Bookstore - Course Books & Materials Order Form"
-   - **Adds Professional Form Fields (Mapped 1:1 to Spreadsheet Headers)**:
-     1. **Full Name** (Required text) &rarr; *Column 2: Customer Name*
-     2. **Email Address** (Required with email format validation) &rarr; *Column 3: Email Address*
-     3. **Mobile Phone Number** (Required text with Philippine `09XX` / `+639XX` regex validation) &rarr; *Column 4: Contact Number*
-     4. **Book / Course Material Selection** (Required dropdown with official textbook prices: Financial Accounting & Reporting Vol. 1 - ₱450.00, Advanced Financial Accounting & Reporting - ₱520.00, Auditing Theory & Practice - ₱480.00, Management Advisory Services - ₱420.00, Philippine Tax Law & Principles - ₱500.00) &rarr; *Column 5: Book / Material*
-     5. **Quantity** (Required dropdown: 1, 2, 3, 4, 5, 10) &rarr; *Column 6: Quantity*
-     6. **Enrolled Instructor to Credit** (Required dropdown: Prof. Raymund Reyes, Prof. Maria Santos, Prof. Juan Carlos, Prof. Elena Gomez, External / Self-Study) &rarr; *Column 7: Instructor Credit*
-     7. **Student / Enrollee ID Number** (Optional text) &rarr; *Column 8: Student ID*
-     8. **Delivery Address / Campus Pickup Notes** (Paragraph text) &rarr; *Column 9: Notes*
+   - **Adds Professional Form Fields**:
+     1. **Email Address** (Required with email format validation)
+     2. **Full Name** (Required text)
+     3. **Mobile Phone Number** (Required text with Philippine `09XX` / `+639XX` regex validation)
+     4. **Book / Course Material Selection** (Required dropdown with official textbook prices: Financial Accounting & Reporting Vol. 1 - ₱450.00, Advanced Financial Accounting & Reporting - ₱520.00, Auditing Theory & Practice - ₱480.00, Management Advisory Services - ₱420.00, Philippine Tax Law & Principles - ₱500.00)
+     5. **Quantity** (Required dropdown: 1, 2, 3, 4, 5, 10)
+     6. **Enrolled Instructor to Credit** (Required dropdown: Prof. Raymund Reyes, Prof. Maria Santos, Prof. Juan Carlos, Prof. Elena Gomez, External / Self-Study)
+     7. **Student / Enrollee ID Number** (Optional text)
+     8. **Delivery Address / Campus Pickup Notes** (Paragraph text)
    - **Sets Destination**: Links the Form responses directly to the active Google Spreadsheet.
    - **Programmatic Trigger**: Automatically registers the `onFormSubmit` trigger so no manual trigger setup is needed.
    - **Formula-Injection Safe Headers**: Standardizes the 17 header columns with bold styling and frozen header row.
