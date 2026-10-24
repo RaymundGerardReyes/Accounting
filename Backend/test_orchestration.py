@@ -1393,7 +1393,6 @@ async def test_channel_specific_checkout_session_creation():
         assert data["checkout_url"] is not None
         assert f"method={channel}" in data["checkout_url"]
 
-        # Directly verify provider creation honors the channel array
         sess_res = await provider.create_checkout_session(
             order_id=order_id,
             order_number="ORD-TEST",
@@ -1405,6 +1404,335 @@ async def test_channel_specific_checkout_session_creation():
             payment_methods=resolve_paymongo_payment_method_types(channel),
         )
         assert sess_res.raw_response["attributes"]["payment_method_types"] == expected_types
+
+
+def test_webhook_payment_failed_by_payment_intent_id():
+    """
+    Real PayMongo wire payload: payment.failed with pay_... ID, empty metadata ({}),
+    matched to order via payment_intent_id.
+    """
+    resp_order = client.post("/api/v1/orders", json={
+        "title": "Wire Test Failed by PI",
+        "category": "product_order",
+        "reference_code": "Product A",
+        "quantity": 1
+    })
+    assert resp_order.status_code == 201
+    order_id = resp_order.json()["id"]
+
+    idemp = f"pi_fail_{uuid.uuid4().hex}"
+    resp_att = client.post(
+        f"/api/v1/orders/{order_id}/payment-attempts",
+        json={"payment_method": "qrph", "idempotency_key": idemp}
+    )
+    assert resp_att.status_code == 201
+    attempt_id = resp_att.json()["id"]
+
+    db = SessionLocal()
+    try:
+        order_rec = db.query(Order).filter(Order.id == order_id).first()
+        assert order_rec is not None
+        pi_id = order_rec.metadata_dict.get("payment_intent_id")
+        assert pi_id is not None
+    finally:
+        db.close()
+
+    provider = PayMongoProvider()
+    evt_id = f"evt_{uuid.uuid4().hex}"
+    failed_payload = {
+        "data": {
+            "id": evt_id,
+            "type": "event",
+            "attributes": {
+                "type": "payment.failed",
+                "data": {
+                    "id": f"pay_{uuid.uuid4().hex[:16]}",
+                    "type": "payment",
+                    "attributes": {
+                        "amount": 25000,
+                        "currency": "PHP",
+                        "status": "failed",
+                        "failed_code": "payment_failed",
+                        "failed_message": "QR Ph payment simulation failed.",
+                        "payment_intent_id": pi_id,
+                        "metadata": {},
+                    }
+                }
+            }
+        }
+    }
+    raw_body = json.dumps(failed_payload).encode("utf-8")
+    sig = provider.sign_simulated_payload(raw_body)
+
+    wh_resp = client.post(
+        "/api/v1/webhooks/paymongo",
+        content=raw_body,
+        headers={"Paymongo-Signature": sig, "Content-Type": "application/json"}
+    )
+    assert wh_resp.status_code == 200
+    assert wh_resp.json()["status"] == "failed"
+
+    poll_resp = client.get(f"/api/v1/payments/{attempt_id}")
+    assert poll_resp.status_code == 200
+    att_data = poll_resp.json()
+    assert att_data["status"] == "failed"
+    assert att_data["failure_code"] == "payment_failed"
+    assert att_data["failure_message"] == "QR Ph payment simulation failed."
+    assert att_data["checkout_url"] is None
+
+
+def test_webhook_payment_failed_by_description_fallback():
+    """
+    Real PayMongo wire payload: payment.failed with pay_... ID, empty metadata ({}),
+    no matching payment_intent_id, matched to order via description: '{order_number}: {title}'.
+    """
+    resp_order = client.post("/api/v1/orders", json={
+        "title": "Wire Test Failed by Description",
+        "category": "product_order",
+        "reference_code": "Product B",
+        "quantity": 1
+    })
+    assert resp_order.status_code == 201
+    order_data = resp_order.json()
+    order_id = order_data["id"]
+    order_number = order_data["order_number"]
+
+    idemp = f"desc_fail_{uuid.uuid4().hex}"
+    resp_att = client.post(
+        f"/api/v1/orders/{order_id}/payment-attempts",
+        json={"payment_method": "card", "idempotency_key": idemp}
+    )
+    assert resp_att.status_code == 201
+    attempt_id = resp_att.json()["id"]
+
+    provider = PayMongoProvider()
+    evt_id = f"evt_{uuid.uuid4().hex}"
+    failed_payload = {
+        "data": {
+            "id": evt_id,
+            "type": "event",
+            "attributes": {
+                "type": "payment.failed",
+                "data": {
+                    "id": f"pay_{uuid.uuid4().hex[:16]}",
+                    "type": "payment",
+                    "attributes": {
+                        "amount": 17800,
+                        "currency": "PHP",
+                        "status": "failed",
+                        "failed_code": "insufficient_funds",
+                        "failed_message": "Card has insufficient balance.",
+                        "payment_intent_id": "pi_unmatched_dummy",
+                        "description": f"{order_number}: Wire Test Failed by Description",
+                        "metadata": None,
+                    }
+                }
+            }
+        }
+    }
+    raw_body = json.dumps(failed_payload).encode("utf-8")
+    sig = provider.sign_simulated_payload(raw_body)
+
+    wh_resp = client.post(
+        "/api/v1/webhooks/paymongo",
+        content=raw_body,
+        headers={"Paymongo-Signature": sig, "Content-Type": "application/json"}
+    )
+    assert wh_resp.status_code == 200
+    assert wh_resp.json()["status"] == "failed"
+
+    poll_resp = client.get(f"/api/v1/payments/{attempt_id}")
+    assert poll_resp.status_code == 200
+    att_data = poll_resp.json()
+    assert att_data["status"] == "failed"
+    assert att_data["failure_code"] == "insufficient_funds"
+    assert att_data["failure_message"] == "Card has insufficient balance."
+
+
+def test_webhook_qrph_expired_wire_payload():
+    """
+    Real PayMongo wire payload: qrph.expired and qr.expired with paym_... resource ID,
+    matching via description or metadata.
+    """
+    # 1. Test qrph.expired matching via description
+    resp_order = client.post("/api/v1/orders", json={
+        "title": "Wire Test QRPH Expired",
+        "category": "product_order",
+        "reference_code": "Product C",
+        "quantity": 1
+    })
+    assert resp_order.status_code == 201
+    order_data = resp_order.json()
+    order_id = order_data["id"]
+    order_number = order_data["order_number"]
+
+    idemp = f"qrph_exp_{uuid.uuid4().hex}"
+    resp_att = client.post(
+        f"/api/v1/orders/{order_id}/payment-attempts",
+        json={"payment_method": "qrph", "idempotency_key": idemp}
+    )
+    assert resp_att.status_code == 201
+    attempt_id = resp_att.json()["id"]
+
+    provider = PayMongoProvider()
+    evt_id = f"evt_{uuid.uuid4().hex}"
+    expired_payload = {
+        "data": {
+            "id": evt_id,
+            "type": "event",
+            "attributes": {
+                "type": "qrph.expired",
+                "data": {
+                    "id": f"paym_{uuid.uuid4().hex[:16]}",
+                    "type": "payment_method",
+                    "attributes": {
+                        "status": "expired",
+                        "failed_code": "QRPH_EXPIRED",
+                        "failed_message": "QR Ph dynamic code expired before payment was completed.",
+                        "description": f"{order_number}: Wire Test QRPH Expired",
+                        "metadata": {},
+                    }
+                }
+            }
+        }
+    }
+    raw_body = json.dumps(expired_payload).encode("utf-8")
+    sig = provider.sign_simulated_payload(raw_body)
+
+    wh_resp = client.post(
+        "/api/v1/webhooks/paymongo",
+        content=raw_body,
+        headers={"Paymongo-Signature": sig, "Content-Type": "application/json"}
+    )
+    assert wh_resp.status_code == 200
+    assert wh_resp.json()["status"] == "expired"
+
+    poll_resp = client.get(f"/api/v1/payments/{attempt_id}")
+    assert poll_resp.status_code == 200
+    att_data = poll_resp.json()
+    assert att_data["status"] == "expired"
+    assert att_data["failure_code"] == "QRPH_EXPIRED"
+    assert att_data["checkout_url"] is None
+
+    # 2. Test qr.expired alias matching via metadata
+    resp_order2 = client.post("/api/v1/orders", json={
+        "title": "Wire Test QR Expired Alias",
+        "category": "product_order",
+        "reference_code": "Product D",
+        "quantity": 1
+    })
+    order_data2 = resp_order2.json()
+    order_id2 = order_data2["id"]
+
+    idemp2 = f"qr_exp_{uuid.uuid4().hex}"
+    resp_att2 = client.post(
+        f"/api/v1/orders/{order_id2}/payment-attempts",
+        json={"payment_method": "qrph", "idempotency_key": idemp2}
+    )
+    attempt_id2 = resp_att2.json()["id"]
+
+    evt_id2 = f"evt_{uuid.uuid4().hex}"
+    expired_payload2 = {
+        "data": {
+            "id": evt_id2,
+            "type": "event",
+            "attributes": {
+                "type": "qr.expired",
+                "data": {
+                    "id": f"paym_{uuid.uuid4().hex[:16]}",
+                    "type": "payment_method",
+                    "attributes": {
+                        "status": "expired",
+                        "metadata": {
+                            "payment_attempt_id": attempt_id2,
+                            "order_id": order_id2
+                        }
+                    }
+                }
+            }
+        }
+    }
+    raw_body2 = json.dumps(expired_payload2).encode("utf-8")
+    sig2 = provider.sign_simulated_payload(raw_body2)
+
+    wh_resp2 = client.post(
+        "/api/v1/webhooks/paymongo",
+        content=raw_body2,
+        headers={"Paymongo-Signature": sig2, "Content-Type": "application/json"}
+    )
+    assert wh_resp2.status_code == 200
+    assert wh_resp2.json()["status"] == "expired"
+
+    poll_resp2 = client.get(f"/api/v1/payments/{attempt_id2}")
+    assert poll_resp2.status_code == 200
+    assert poll_resp2.json()["status"] == "expired"
+
+
+@pytest.mark.asyncio
+async def test_get_checkout_session_detects_last_payment_error(monkeypatch):
+    """
+    In get_checkout_session: Inspect attrs.get("payment_intent", {}).get("attributes", {}).get("last_payment_error").
+    If session status is 'active' and no payment is paid, but last_payment_error is present,
+    return internal_status = 'failed' along with failure_code and failure_message.
+    """
+    import httpx
+    provider = PayMongoProvider()
+    provider.secret_key = "sk_test_mock_12345"
+
+    fake_cs_id = "cs_test_mock_fail_err"
+    fake_api_response = {
+        "data": {
+            "id": fake_cs_id,
+            "type": "checkout_session",
+            "attributes": {
+                "status": "active",
+                "payment_method_types": ["qrph"],
+                "payments": [],
+                "payment_intent": {
+                    "id": "pi_mock_123",
+                    "type": "payment_intent",
+                    "attributes": {
+                        "status": "awaiting_payment_method",
+                        "last_payment_error": {
+                            "code": "fraud_suspected",
+                            "detail": "Test payment simulation failed due to fraud suspected.",
+                        }
+                    }
+                },
+                "line_items": [
+                    {"amount": 25000, "currency": "PHP", "name": "Product A", "quantity": 1}
+                ],
+                "billing": {
+                    "name": "Maria Clara",
+                    "email": "maria@example.com",
+                    "phone": "+639171234567"
+                }
+            }
+        }
+    }
+
+    class MockResponse:
+        def __init__(self, json_data, status_code=200):
+            self._json_data = json_data
+            self.status_code = status_code
+
+        def json(self):
+            return self._json_data
+
+        def raise_for_status(self):
+            pass
+
+    async def mock_get(self, url, headers=None):
+        return MockResponse(fake_api_response, 200)
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    result = await provider.get_checkout_session(fake_cs_id)
+    assert result.status == "failed"
+    assert result.failure_code == "fraud_suspected"
+    assert result.failure_message == "Test payment simulation failed due to fraud suspected."
+    assert result.amount_minor == 25000
+    assert result.currency == "PHP"
 
 
 

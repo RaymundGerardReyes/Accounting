@@ -242,11 +242,29 @@ class PaymentOrchestrator:
                 metadata=session_metadata,
             )
 
+            raw_resp = session_result.raw_response or {}
+            pi_id = raw_resp.get("payment_intent_id")
+            if not pi_id and isinstance(raw_resp.get("attributes"), dict):
+                pi_obj = raw_resp["attributes"].get("payment_intent")
+                if isinstance(pi_obj, dict):
+                    pi_id = pi_obj.get("id")
+                elif isinstance(pi_obj, str):
+                    pi_id = pi_obj
+                if not pi_id:
+                    pi_id = raw_resp["attributes"].get("payment_intent_id")
+
+            if pi_id:
+                o_meta = dict(order.metadata_dict or {})
+                o_meta["payment_intent_id"] = pi_id
+                order.metadata_dict = o_meta
+                db.add(order)
+
             attempt.provider_payment_id = session_result.provider_payment_id
             attempt.checkout_url = session_result.checkout_url
             attempt.status = session_result.status
             db.commit()
             db.refresh(attempt)
+            db.refresh(order)
             return attempt
         except Exception as e:
             # Network uncertainty or gateway error
@@ -308,21 +326,21 @@ class PaymentOrchestrator:
             return {"received": True, "duplicate": True, "event_id": provider_event_id}
 
         # 4. Resolve PaymentAttempt & Order
-        resource_data = event_data.get("attributes", {}).get("data", {})
-        resource_id = resource_data.get("id")  # checkout session ID (cs_...) or payment ID
-        resource_attrs = resource_data.get("attributes", {})
-        metadata = resource_attrs.get("metadata", {})
+        resource_data = event_data.get("attributes", {}).get("data", {}) or {}
+        resource_id = resource_data.get("id")  # checkout session ID (cs_...), payment ID (pay_...), or method ID (paym_...)
+        resource_attrs = resource_data.get("attributes", {}) or {}
+        metadata = resource_attrs.get("metadata") or {}
 
         attempt = None
-        # Try finding by provider_payment_id
+        # a) Check PaymentAttempt.provider_payment_id == resource_id (standard cs_...)
         if resource_id:
             attempt = db.query(PaymentAttempt).filter(PaymentAttempt.provider_payment_id == resource_id).first()
 
-        # Try finding by payment_attempt_id in metadata
+        # b) Check metadata["payment_attempt_id"]
         if not attempt and "payment_attempt_id" in metadata:
             attempt = db.query(PaymentAttempt).filter(PaymentAttempt.id == metadata["payment_attempt_id"]).first()
 
-        # Try finding by order_id in metadata
+        # Check metadata["order_id"]
         if not attempt and "order_id" in metadata:
             attempt = (
                 db.query(PaymentAttempt)
@@ -330,6 +348,68 @@ class PaymentOrchestrator:
                 .order_by(PaymentAttempt.created_at.desc())
                 .first()
             )
+
+        # c) If resource has payment_intent_id, find the order whose metadata contains this payment_intent_id and get its latest active attempt
+        resource_pi_id = (
+            resource_attrs.get("payment_intent_id")
+            or (resource_attrs.get("payment_intent", {}).get("id") if isinstance(resource_attrs.get("payment_intent"), dict) else None)
+            or metadata.get("payment_intent_id")
+        )
+        if not attempt and resource_pi_id:
+            candidate_orders = (
+                db.query(Order)
+                .filter(Order.metadata_json.like(f"%{resource_pi_id}%"))
+                .order_by(Order.created_at.desc())
+                .all()
+            )
+            matched_order = None
+            for cand in candidate_orders:
+                if cand.metadata_dict.get("payment_intent_id") == resource_pi_id:
+                    matched_order = cand
+                    break
+
+            if matched_order:
+                attempt = (
+                    db.query(PaymentAttempt)
+                    .filter(
+                        PaymentAttempt.order_id == matched_order.id,
+                        PaymentAttempt.status.in_(["pending", "requires_action", "processing"]),
+                    )
+                    .order_by(PaymentAttempt.created_at.desc())
+                    .first()
+                )
+                if not attempt:
+                    attempt = (
+                        db.query(PaymentAttempt)
+                        .filter(PaymentAttempt.order_id == matched_order.id)
+                        .order_by(PaymentAttempt.created_at.desc())
+                        .first()
+                    )
+
+        # d) If resource has description, extract order_number (from "{order_number}: {title}") and match to the latest active attempt
+        description = resource_attrs.get("description") or metadata.get("description") or ""
+        if not attempt and description:
+            order_num_cand = description.split(":", 1)[0].strip()
+            matched_order = db.query(Order).filter(Order.order_number == order_num_cand).first()
+            if not matched_order and ":" in description:
+                matched_order = db.query(Order).filter(Order.order_number == description.strip()).first()
+            if matched_order:
+                attempt = (
+                    db.query(PaymentAttempt)
+                    .filter(
+                        PaymentAttempt.order_id == matched_order.id,
+                        PaymentAttempt.status.in_(["pending", "requires_action", "processing"]),
+                    )
+                    .order_by(PaymentAttempt.created_at.desc())
+                    .first()
+                )
+                if not attempt:
+                    attempt = (
+                        db.query(PaymentAttempt)
+                        .filter(PaymentAttempt.order_id == matched_order.id)
+                        .order_by(PaymentAttempt.created_at.desc())
+                        .first()
+                    )
 
         if not attempt:
             webhook_record.processing_status = "ignored"
@@ -372,6 +452,8 @@ class PaymentOrchestrator:
         }
         expired_event_types = {
             "checkout_session.expired",
+            "qrph.expired",
+            "qr.expired",
         }
         cancelled_event_types = {
             "payment.canceled",
@@ -434,8 +516,10 @@ class PaymentOrchestrator:
             # Rule 1: Never overwrite an existing terminal state
             if attempt.status not in terminal_states:
                 attempt.status = "expired"
-                attempt.failure_code = resource_attrs.get("failed_code") or "SESSION_EXPIRED"
-                attempt.failure_message = resource_attrs.get("failed_message") or "Checkout session expired before completion."
+                default_code = "QRPH_EXPIRED" if "qr" in event_type else "SESSION_EXPIRED"
+                default_msg = "QR code expired before completion." if "qr" in event_type else "Checkout session expired before completion."
+                attempt.failure_code = resource_attrs.get("failed_code") or resource_attrs.get("failure_code") or default_code
+                attempt.failure_message = resource_attrs.get("failed_message") or resource_attrs.get("failure_message") or default_msg
                 attempt.checkout_url = None
 
         elif event_type in cancelled_event_types:
@@ -469,7 +553,14 @@ class PaymentOrchestrator:
         # Process outbox fulfillment immediately
         self.process_fulfillment_outbox(db)
 
-        return {"received": True, "status": attempt.status, "event_id": provider_event_id}
+        return {
+            "received": True,
+            "status": attempt.status,
+            "event_id": provider_event_id,
+            "payment_attempt_id": attempt.id,
+            "order_id": attempt.order_id,
+            "order_number": order.order_number if order else None,
+        }
 
     def process_fulfillment_outbox(self, db: Session, retry_failed: bool = False) -> int:
         """

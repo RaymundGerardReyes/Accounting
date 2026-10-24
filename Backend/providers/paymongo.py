@@ -115,18 +115,39 @@ class PayMongoProvider(PaymentProvider):
                     resp.raise_for_status()
                     data = resp.json()["data"]
                     session_id = data["id"]
-                    checkout_url = data["attributes"]["checkout_url"]
+                    attrs = data.get("attributes", {})
+                    checkout_url = attrs.get("checkout_url")
+
+                    # Extract payment_intent.id from data["attributes"]
+                    pi_obj = attrs.get("payment_intent")
+                    payment_intent_id = None
+                    if isinstance(pi_obj, dict):
+                        payment_intent_id = pi_obj.get("id") or (pi_obj.get("data", {}).get("id") if isinstance(pi_obj.get("data"), dict) else None)
+                    elif isinstance(pi_obj, str):
+                        payment_intent_id = pi_obj
+                    if not payment_intent_id:
+                        pi_attr_val = attrs.get("payment_intent_id")
+                        if isinstance(pi_attr_val, dict):
+                            payment_intent_id = pi_attr_val.get("id")
+                        elif isinstance(pi_attr_val, str):
+                            payment_intent_id = pi_attr_val
+
+                    raw_resp = dict(data)
+                    if payment_intent_id:
+                        raw_resp["payment_intent_id"] = payment_intent_id
+
                     return CheckoutSessionResult(
                         provider_payment_id=session_id,
                         checkout_url=checkout_url,
                         status="requires_action",
-                        raw_response=data,
+                        raw_response=raw_resp,
                     )
             except Exception as e:
                 print(f"PayMongo API notice (falling back to Local Sandbox Simulator): {e}")
 
         # Local Sandbox Simulator Fallback
         sim_id = f"cs_sim_{uuid.uuid4().hex[:16]}"
+        sim_pi_id = f"pi_sim_{uuid.uuid4().hex[:16]}"
         attempt_id = metadata.get("payment_attempt_id") if metadata else None
         preferred_method = (metadata.get("payment_method") if metadata else None) or (payment_methods[0] if payment_methods else "card")
         target_id = attempt_id or order_id
@@ -141,11 +162,17 @@ class PayMongoProvider(PaymentProvider):
             raw_response={
                 "id": sim_id,
                 "type": "checkout_session",
+                "payment_intent_id": sim_pi_id,
                 "attributes": {
                     "checkout_url": sim_checkout_url,
                     "payment_method_types": payment_methods,
                     "status": "active",
                     "mode": "simulator",
+                    "payment_intent": {
+                        "id": sim_pi_id,
+                        "type": "payment_intent",
+                        "attributes": {},
+                    },
                 },
             },
         )
@@ -163,7 +190,7 @@ class PayMongoProvider(PaymentProvider):
                     data = resp.json()["data"]
                     attrs = data.get("attributes", {})
                     payments = attrs.get("payments", [])
-                    session_status = attrs.get("status", "active")
+                    session_status = str(attrs.get("status", "active")).strip().lower()
 
                     internal_status = "requires_action"
                     paid_at = None
@@ -198,6 +225,17 @@ class PayMongoProvider(PaymentProvider):
                         None
                     )
 
+                    # Inspect payment_intent for last_payment_error
+                    pi_obj = attrs.get("payment_intent") or {}
+                    pi_attrs = pi_obj.get("attributes", {}) if isinstance(pi_obj, dict) else {}
+                    last_payment_error = None
+                    if isinstance(pi_attrs, dict):
+                        last_payment_error = pi_attrs.get("last_payment_error")
+                    if not last_payment_error and isinstance(pi_obj, dict):
+                        last_payment_error = pi_obj.get("last_payment_error")
+                    if not last_payment_error:
+                        last_payment_error = attrs.get("last_payment_error")
+
                     if paid_payment:
                         internal_status = "succeeded"
                         p_attrs = paid_payment.get("attributes", {})
@@ -217,6 +255,26 @@ class PayMongoProvider(PaymentProvider):
                         internal_status = "cancelled"
                         failure_code = "SESSION_CANCELLED"
                         failure_message = "Checkout session was cancelled."
+                    elif session_status == "active" and last_payment_error:
+                        internal_status = "failed"
+                        if isinstance(last_payment_error, dict):
+                            failure_code = (
+                                last_payment_error.get("code")
+                                or last_payment_error.get("sub_code")
+                                or last_payment_error.get("failed_code")
+                                or last_payment_error.get("failure_code")
+                                or "PAYMENT_FAILED"
+                            )
+                            failure_message = (
+                                last_payment_error.get("detail")
+                                or last_payment_error.get("message")
+                                or last_payment_error.get("failed_message")
+                                or last_payment_error.get("failure_message")
+                                or "Payment processing failed."
+                            )
+                        else:
+                            failure_code = "PAYMENT_FAILED"
+                            failure_message = str(last_payment_error)
                     elif payments:
                         latest_payment = payments[-1]
                         payment_attrs = latest_payment.get("attributes", {})

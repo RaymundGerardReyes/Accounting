@@ -451,8 +451,22 @@ async def handle_paymongo_webhook(
             "payment.paid": "paid",
             "payment.failed": "failed",
             "checkout_session.expired": "expired",
+            "qrph.expired": "expired",
+            "qr.expired": "expired",
         }
         outcome = outcome_map.get(event_type)
+
+        if not order_no and result.get("order_number"):
+            order_no = result.get("order_number")
+
+        if (not customer_email or not gform_id) and result.get("order_id"):
+            db_order = db.query(Order).filter(Order.id == result.get("order_id")).first()
+            if db_order:
+                o_dict = db_order.metadata_dict or {}
+                customer_email = customer_email or o_dict.get("customer_email")
+                if customer_name == "Valued Customer" and o_dict.get("customer_name"):
+                    customer_name = o_dict.get("customer_name")
+                gform_id = gform_id or o_dict.get("google_forms_response_id") or o_dict.get("google_form_response_id")
 
         if outcome and customer_email:
             background_tasks.add_task(
