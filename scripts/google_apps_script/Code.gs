@@ -60,14 +60,16 @@ function onFormSubmit(e) {
     // Extract form fields from Sheet row, Form event, or Manual test run
     var formData = extractFormDataSafely(e, sheet, rowIndex);
 
-    var customerEmail = extractField(formData, ["email", "email address", "customer email", "your email"]);
-    var customerName = extractField(formData, ["name", "full name", "customer name", "your name"]) || "Valued Client";
-    var customerPhone = extractField(formData, ["phone", "mobile", "mobile number", "contact number", "cellphone"]);
-    var itemReference = extractField(formData, ["product", "item", "service", "package", "select package", "order category", "department"]) || "Product A";
+    var customerEmail = extractField(formData, ["email address", "customer email", "your email", "email"]);
+    var customerName = extractField(formData, ["customer name", "full name", "your name", "name"]) || "Valued Client";
+    var customerPhone = extractField(formData, ["contact number", "mobile phone number", "mobile number", "mobile", "cellphone", "phone"]);
+    var itemReference = extractField(formData, ["book / course material selection", "book / material", "course material", "textbook", "book", "material", "product", "item", "service", "package", "select package", "order category", "department"]) || "Product A";
     var quantityStr = extractField(formData, ["quantity", "qty", "number of items"]);
     var quantity = parseInt(quantityStr, 10);
     if (isNaN(quantity) || quantity < 1) quantity = 1;
-    var notes = extractField(formData, ["notes", "remarks", "instructions", "comments"]) || "";
+    var instructorCredit = extractField(formData, ["enrolled instructor to credit", "enrolled instructor", "instructor credit", "instructor", "professor", "prof.", "faculty", "teacher"]);
+    var studentId = extractField(formData, ["student / enrollee id number", "student / enrollee id", "student id", "enrollee id", "id number", "student number", "student no"]);
+    var notes = extractField(formData, ["delivery address / campus pickup notes", "delivery address", "campus pickup", "notes", "remarks", "instructions", "comments"]) || "";
 
     // Generate deterministic Response ID for atomic idempotency
     var rawTimestamp = formData["timestamp"] || new Date().toISOString();
@@ -77,7 +79,7 @@ function onFormSubmit(e) {
       ? "gf_" + e.response.getId()
       : "gf_" + (rowIndex || "manual") + "_" + parsedTime;
 
-    Logger.log("Processing submission for: " + customerName + " (" + customerEmail + ") | Response ID: " + responseId);
+    Logger.log("Processing submission for: " + customerName + " (" + customerEmail + ") | Book: " + itemReference + " | Credit: " + (instructorCredit || "None") + " | Response ID: " + responseId);
 
     if (!customerEmail) {
       Logger.log("Error: No customer email found in row " + rowIndex);
@@ -91,6 +93,11 @@ function onFormSubmit(e) {
       return;
     }
 
+    var orderTitle = itemReference + " (Qty: " + quantity + ") - " + customerName;
+    if (instructorCredit) {
+      orderTitle += " [Credit: " + instructorCredit + "]";
+    }
+
     // Build authoritative payload matching Backend/google_forms_routes.py
     var payload = {
       response_id: responseId,
@@ -100,11 +107,15 @@ function onFormSubmit(e) {
       customer_phone: customerPhone || null,
       item_reference: itemReference,
       reference_code: itemReference,
-      title: itemReference + " - " + customerName,
+      book_title: itemReference,
+      student_id: studentId || null,
+      instructor_credit: instructorCredit || null,
+      title: orderTitle,
       category: "product_order",
       quantity: quantity,
       payment_method: "hosted_checkout",
-      notes: notes
+      notes: notes,
+      raw_answers: formData
     };
 
     var payloadJson = JSON.stringify(payload);
@@ -135,6 +146,14 @@ function onFormSubmit(e) {
       // Write initial PENDING status & PayMongo Checkout Link to Google Sheet
       if (sheet && rowIndex >= 2) {
         ensureAndWriteColumns(sheet, rowIndex, {
+          "Customer Name": customerName,
+          "Email Address": customerEmail,
+          "Contact Number": customerPhone || "",
+          "Book / Material": itemReference,
+          "Quantity": quantity,
+          "Instructor Credit": instructorCredit || "External / Self-Study",
+          "Student ID": studentId || "N/A",
+          "Notes": notes || "",
           "Response ID": responseId,
           "Order Number": data.order_number || "",
           "PayMongo Checkout Link": data.checkout_url || "",
@@ -336,25 +355,12 @@ function resolveSheetSafely(e) {
 
 /**
  * Safely extracts form key-value pairs whether triggered from a Sheet, a Form, or a manual test run.
+ * Employs a multi-layer strategy: e.namedValues -> e.response -> Sheet row -> Diagnostics.
  */
 function extractFormDataSafely(e, sheet, rowIndex) {
   var formData = {};
 
-  // Case A: Sheet available with at least 1 data row
-  if (sheet && rowIndex && rowIndex >= 2 && sheet.getLastColumn() >= 1) {
-    var lastCol = sheet.getLastColumn();
-    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-    var rowValues = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
-    for (var i = 0; i < headers.length; i++) {
-      var headerName = String(headers[i] || "").trim().toLowerCase();
-      if (headerName) {
-        formData[headerName] = rowValues[i];
-      }
-    }
-    return formData;
-  }
-
-  // Case B: e.namedValues from Sheet trigger
+  // Layer 1: e.namedValues (Spreadsheet Form Submit event - highest fidelity for question titles)
   if (e && e.namedValues) {
     for (var key in e.namedValues) {
       if (Object.prototype.hasOwnProperty.call(e.namedValues, key)) {
@@ -362,47 +368,89 @@ function extractFormDataSafely(e, sheet, rowIndex) {
         formData[key.trim().toLowerCase()] = Array.isArray(val) ? val[0] : val;
       }
     }
-    return formData;
   }
 
-  // Case C: e.response from Google Form trigger
+  // Layer 2: e.response (FormApp Form Submit event)
   if (e && e.response && typeof e.response.getItemResponses === "function") {
     if (typeof e.response.getRespondentEmail === "function" && e.response.getRespondentEmail()) {
-      formData["email address"] = e.response.getRespondentEmail();
+      var respEmail = e.response.getRespondentEmail();
+      if (!formData["email address"]) formData["email address"] = respEmail;
+      if (!formData["email"]) formData["email"] = respEmail;
     }
     var items = e.response.getItemResponses();
     for (var j = 0; j < items.length; j++) {
-      var title = String(items[j].getItem().getTitle() || "").trim().toLowerCase();
-      formData[title] = items[j].getResponse();
+      var itemTitle = String(items[j].getItem().getTitle() || "").trim().toLowerCase();
+      if (!formData[itemTitle]) {
+        formData[itemTitle] = items[j].getResponse();
+      }
     }
+  }
+
+  // Layer 3: Sheet available with at least 1 data row (supplementary/fallback columns)
+  if (sheet && rowIndex && rowIndex >= 2 && sheet.getLastColumn() >= 1) {
+    try {
+      var lastCol = sheet.getLastColumn();
+      var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+      var rowValues = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+      for (var i = 0; i < headers.length; i++) {
+        var headerName = String(headers[i] || "").trim().toLowerCase();
+        if (headerName && (formData[headerName] === undefined || formData[headerName] === "")) {
+          formData[headerName] = rowValues[i];
+        }
+      }
+    } catch (sheetReadErr) {
+      Logger.log("Notice reading sheet row: " + sheetReadErr);
+    }
+  }
+
+  // If any fields were captured from Layer 1, 2, or 3, return them
+  if (Object.keys(formData).length > 0) {
     return formData;
   }
 
-  // Case D: Manual click on "Run" button in Apps Script Editor with an empty sheet
-  Logger.log("Manual test run detected: Using diagnostic sample submission.");
+  // Layer 4: Manual click on "Run" button in Apps Script Editor with an empty sheet
+  Logger.log("Manual test run detected: Using diagnostic bookstore sample submission.");
   return {
     "timestamp": new Date().toISOString(),
-    "full name": "Juan Dela Cruz (Test)",
+    "customer name": "Juan Dela Cruz (Test Enrollee)",
+    "full name": "Juan Dela Cruz (Test Enrollee)",
     "email address": CONFIG.SUPPORT_EMAIL.indexOf("@") !== -1 ? CONFIG.SUPPORT_EMAIL : "test.client@example.com",
+    "contact number": "09171234567",
     "mobile number": "09171234567",
-    "select package / product": "Product A",
+    "book / material": "Financial Accounting & Reporting Vol. 1 - ₱450.00",
+    "book / course material selection": "Financial Accounting & Reporting Vol. 1 - ₱450.00",
     "quantity": "1",
-    "notes / instructions": "Diagnostic test run from Apps Script IDE"
+    "instructor credit": "Prof. Maria Santos (Taxation)",
+    "enrolled instructor to credit": "Prof. Maria Santos (Taxation)",
+    "student id": "2026-ACCT-1049",
+    "student / enrollee id number": "2026-ACCT-1049",
+    "notes": "Diagnostic test run from Apps Script IDE",
+    "delivery address / campus pickup notes": "Diagnostic test run from Apps Script IDE"
   };
 }
 
 /**
  * Extracts a value from the formData map matching any candidate aliases.
+ * Two-pass algorithm: checks exact key matches for all aliases first,
+ * then falls back to substring matches to prevent short aliases from shadowing exact ones.
  */
 function extractField(formData, candidateAliases) {
+  if (!formData || !candidateAliases) return "";
+
+  // Pass 1: Exact key matches
   for (var i = 0; i < candidateAliases.length; i++) {
-    var alias = candidateAliases[i].toLowerCase();
-    if (formData[alias] !== undefined && String(formData[alias]).trim() !== "") {
-      return String(formData[alias]).trim();
+    var exactAlias = candidateAliases[i].toLowerCase();
+    if (formData[exactAlias] !== undefined && String(formData[exactAlias]).trim() !== "") {
+      return String(formData[exactAlias]).trim();
     }
+  }
+
+  // Pass 2: Substring key matches
+  for (var j = 0; j < candidateAliases.length; j++) {
+    var subAlias = candidateAliases[j].toLowerCase();
     for (var key in formData) {
       if (Object.prototype.hasOwnProperty.call(formData, key)) {
-        if (key.indexOf(alias) !== -1 && formData[key] !== undefined && String(formData[key]).trim() !== "") {
+        if (key.indexOf(subAlias) !== -1 && formData[key] !== undefined && String(formData[key]).trim() !== "") {
           return String(formData[key]).trim();
         }
       }
@@ -549,3 +597,16 @@ function sendPaymentInstructionsEmail(recipientEmail, recipientName, orderData) 
     name: CONFIG.COMPANY_NAME
   });
 }
+
+/**
+ * Convenience entry point to run FormBuilder directly from Code.gs.
+ * Creates the R.G.E Bookstore Order Form, binds spreadsheet, and sets triggers.
+ */
+function runBookstoreFormBuilder() {
+  if (typeof generateBookstoreOrderForm === "function") {
+    return generateBookstoreOrderForm();
+  } else {
+    Logger.log("Please ensure FormBuilder.gs is added to your Apps Script project.");
+  }
+}
+

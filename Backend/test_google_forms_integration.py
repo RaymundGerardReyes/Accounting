@@ -264,4 +264,176 @@ def test_notify_paymongo_webhook_outcome_mock():
         )
 
 
+def test_bookstore_order_with_instructor_credit_and_raw_answers():
+    """Verifies that bookstore orders calculate book price and parse instructor credit and student ID from raw_answers."""
+    payload = {
+        "response_id": "gf_test_bookstore_raw_01",
+        "sheet_row_index": 12,
+        "customer_name": "Alyssa Gonzaga",
+        "customer_email": "alyssa@example.edu.ph",
+        "customer_phone": "09181234567",
+        "quantity": 2,
+        "raw_answers": {
+            "timestamp": "2026-10-24T12:00:00Z",
+            "full name": "Alyssa Gonzaga",
+            "email address": "alyssa@example.edu.ph",
+            "contact number": "09181234567",
+            "book / course material selection": "Financial Accounting & Reporting Vol. 1 - ₱450.00",
+            "quantity": "2",
+            "enrolled instructor to credit": "Prof. Maria Santos (Taxation)",
+            "student / enrollee id number": "2026-ACCT-1049",
+            "delivery address / campus pickup notes": "Campus bookstore pickup"
+        }
+    }
+    headers = {"X-Google-Forms-Secret": VALID_SECRET}
+    res = client.post("/api/v1/integrations/google-forms/submit", json=payload, headers=headers)
+    assert res.status_code == 201
+    data = res.json()
+
+    # ₱450.00 * 2 = ₱900.00 = 90,000 centavos
+    assert data["amount_minor"] == 90000
+    assert data["amount_php"] == "₱900.00"
+    assert "Credit: Prof. Maria Santos (Taxation)" in data["order_title"]
+    assert data["checkout_url"] != ""
+
+    db = SessionLocal()
+    order = db.query(Order).filter(Order.id == data["order_id"]).first()
+    assert order is not None
+    meta = order.metadata_dict or {}
+    assert meta.get("instructor_credit") == "Prof. Maria Santos (Taxation)"
+    assert meta.get("student_id") == "2026-ACCT-1049"
+    assert "Financial Accounting & Reporting Vol. 1" in meta.get("book_title", "")
+    assert meta.get("customer_phone") == "+63 918 123 4567"
+    db.close()
+
+
+def test_bookstore_order_parsing_from_notes():
+    """Verifies that instructor credit and student ID are recognized when passed in notes string."""
+    payload = {
+        "response_id": "gf_test_bookstore_notes_02",
+        "sheet_row_index": 14,
+        "customer_name": "Mark Anthony Fernandez",
+        "customer_email": "mark@example.edu.ph",
+        "item_reference": "Auditing Theory & Practice - ₱480.00",
+        "quantity": 1,
+        "notes": "Instructor Credit: Prof. Raymund Reyes (Accounting & Auditing) | Student ID: 2026-BSA-8821 | Delivery to Room 302",
+    }
+    headers = {"X-Google-Forms-Secret": VALID_SECRET}
+    res = client.post("/api/v1/integrations/google-forms/submit", json=payload, headers=headers)
+    assert res.status_code == 201
+    data = res.json()
+
+    # ₱480.00 * 1 = 48,000 centavos
+    assert data["amount_minor"] == 48000
+    assert data["amount_php"] == "₱480.00"
+
+    db = SessionLocal()
+    order = db.query(Order).filter(Order.id == data["order_id"]).first()
+    assert order is not None
+    meta = order.metadata_dict or {}
+    assert meta.get("instructor_credit") == "Prof. Raymund Reyes (Accounting & Auditing)"
+    assert meta.get("student_id") == "2026-BSA-8821"
+    db.close()
+
+
+def test_bookstore_order_direct_fields():
+    """Verifies that direct book_title, student_id, and instructor_credit fields work seamlessly."""
+    payload = {
+        "response_id": "gf_test_bookstore_direct_03",
+        "sheet_row": 15,
+        "customer_name": "Camille Del Rosario",
+        "customer_email": "camille@example.edu.ph",
+        "book_title": "Advanced Financial Accounting & Reporting - ₱520.00",
+        "instructor_credit": "Prof. Juan Carlos (Finance & Advisory)",
+        "student_id": "2025-CPA-991",
+        "quantity": 1,
+    }
+    headers = {"X-Google-Forms-Secret": VALID_SECRET}
+    res = client.post("/api/v1/integrations/google-forms/submit", json=payload, headers=headers)
+    assert res.status_code == 201
+    data = res.json()
+
+    # ₱520.00 * 1 = 52,000 centavos
+    assert data["amount_minor"] == 52000
+    assert data["amount_php"] == "₱520.00"
+    assert "Prof. Juan Carlos" in data["order_title"]
+
+    db = SessionLocal()
+    order = db.query(Order).filter(Order.id == data["order_id"]).first()
+    assert order is not None
+    meta = order.metadata_dict or {}
+    assert meta.get("instructor_credit") == "Prof. Juan Carlos (Finance & Advisory)"
+    assert meta.get("student_id") == "2025-CPA-991"
+    assert "Advanced Financial Accounting & Reporting" in meta.get("book_title", "")
+    db.close()
+
+
+def test_bookstore_order_with_part_number_in_title_and_peso_sign():
+    """Verifies that titles with part/paper numbers like 'P2' or 'P1' do not misparse currency as ₱2."""
+    payload = {
+        "response_id": "gf_test_bookstore_part_num_04",
+        "sheet_row": 16,
+        "customer_name": "Patricia Cruz",
+        "customer_email": "patricia@example.edu.ph",
+        "book_title": "P2 Reviewer (Practical Accounting 2) - ₱450.00",
+        "quantity": 1,
+        "notes": "Faculty Credit: Prof. Elena Gomez (Management Accounting) | Student #: 2026-BSA-7711",
+    }
+    headers = {"X-Google-Forms-Secret": VALID_SECRET}
+    res = client.post("/api/v1/integrations/google-forms/submit", json=payload, headers=headers)
+    assert res.status_code == 201
+    data = res.json()
+
+    # Must be ₱450.00 (45,000 centavos), NOT ₱2.00 (200 centavos)
+    assert data["amount_minor"] == 45000
+    assert data["amount_php"] == "₱450.00"
+    assert "Elena Gomez" in data["order_title"]
+
+    db = SessionLocal()
+    order = db.query(Order).filter(Order.id == data["order_id"]).first()
+    assert order is not None
+    meta = order.metadata_dict or {}
+    assert meta.get("instructor_credit") == "Prof. Elena Gomez (Management Accounting)"
+    assert meta.get("student_id") == "2026-BSA-7711"
+    db.close()
+
+
+def test_bookstore_order_credit_card_not_confused_with_instructor_credit():
+    """Verifies that a 'Credit Card' field in raw_answers does not falsely match as instructor credit."""
+    payload = {
+        "response_id": "gf_test_bookstore_cc_guard_05",
+        "sheet_row": 17,
+        "customer_name": "Lorenzo Miguel Tan",
+        "customer_email": "lorenzo@example.edu.ph",
+        "item_reference": "Philippine Tax Law & Principles - ₱500.00",
+        "quantity": 2,
+        "raw_answers": {
+            "book": "Philippine Tax Law & Principles - ₱500.00",
+            "quantity": "2",
+            "credit card type": "MasterCard Gold",
+            "enrolled instructor to credit": "Prof. Maria Santos (Taxation)",
+            "student id": "2026-TAX-4410",
+        }
+    }
+    headers = {"X-Google-Forms-Secret": VALID_SECRET}
+    res = client.post("/api/v1/integrations/google-forms/submit", json=payload, headers=headers)
+    assert res.status_code == 201
+    data = res.json()
+
+    # ₱500.00 * 2 = 100,000 centavos
+    assert data["amount_minor"] == 100000
+    assert data["amount_php"] == "₱1,000.00"
+
+    db = SessionLocal()
+    order = db.query(Order).filter(Order.id == data["order_id"]).first()
+    assert order is not None
+    meta = order.metadata_dict or {}
+    assert meta.get("instructor_credit") == "Prof. Maria Santos (Taxation)"
+    assert meta.get("instructor_credit") != "MasterCard Gold"
+    assert meta.get("student_id") == "2026-TAX-4410"
+    db.close()
+
+
+
+
 

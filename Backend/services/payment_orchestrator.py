@@ -126,9 +126,13 @@ class PaymentOrchestrator:
             else:
                 amount_minor = 10000
 
-        order_count = db.query(Order).count() + 1
         prefix = "ORD" if category == "product_order" else "INV"
-        order_number = f"{prefix}-{datetime.now().strftime('%Y%m')}-{order_count:04d}"
+        ym = datetime.now().strftime('%Y%m')
+        order_count = db.query(Order).count() + 1
+        order_number = f"{prefix}-{ym}-{order_count:04d}"
+        while db.query(Order).filter(Order.order_number == order_number).first() is not None:
+            order_count += 1
+            order_number = f"{prefix}-{ym}-{order_count:04d}"
 
         meta = dict(metadata or {})
         if meta.get("customer_phone"):

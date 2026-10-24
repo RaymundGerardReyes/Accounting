@@ -181,6 +181,105 @@ def notify_paymongo_webhook_outcome(
             print(f"[Google Sheets Callback Notice] {gas_err}")
 
 
+# Authoritative Bookstore Catalog (PHP Centavos)
+BOOKSTORE_CATALOG_MINOR: Dict[str, int] = {
+    "financial accounting & reporting vol. 1": 45000,
+    "financial accounting and reporting vol. 1": 45000,
+    "financial accounting & reporting": 45000,
+    "financial accounting and reporting": 45000,
+    "advanced financial accounting & reporting": 52000,
+    "advanced financial accounting and reporting": 52000,
+    "auditing theory & practice": 48000,
+    "auditing theory and practice": 48000,
+    "auditing theory": 48000,
+    "management advisory services": 42000,
+    "philippine tax law & principles": 50000,
+    "philippine tax law and principles": 50000,
+}
+
+
+def extract_price_from_text(text: Optional[str]) -> Optional[int]:
+    """Extracts centavo amount from strings like '₱450.00', 'PHP 520', '480.00', or catalog lookup."""
+    if not text:
+        return None
+    import re
+    # 1. Match standard currency indicators (₱, PHP, Php) first to avoid misinterpreting part codes like P1 or P2
+    m = re.search(r'(?:₱|PHP|Php|php)\s*([\d,]+(?:\.\d{1,2})?)', text)
+    if not m:
+        # 2. Match standalone P / Php with word boundary and at least 2 digits or explicit decimal (e.g. P450, P500.00)
+        m = re.search(r'\b(?:Php?\.?|P\.?)\s*([\d,]{2,}(?:\.\d{1,2})?|\d+(?:\.\d{1,2}))', text)
+    if m:
+        try:
+            val = float(m.group(1).replace(",", ""))
+            return int(round(val * 100))
+        except ValueError:
+            pass
+    clean_lower = text.lower().strip()
+    for book_key, price_cents in BOOKSTORE_CATALOG_MINOR.items():
+        if book_key in clean_lower:
+            return price_cents
+    return None
+
+
+def resolve_bookstore_fields(
+    raw_answers: Optional[Dict[str, Any]],
+    notes: Optional[str],
+    direct_book: Optional[str] = None,
+    direct_student_id: Optional[str] = None,
+    direct_instructor: Optional[str] = None,
+    reference_code: Optional[str] = None,
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Extracts book reference, student ID, and instructor credit from direct fields,
+    raw_answers map, or notes string.
+    """
+    import re
+    book = (direct_book or "").strip() or None
+    student_id = (direct_student_id or "").strip() or None
+    instructor = (direct_instructor or "").strip() or None
+
+    # 1. Search raw_answers dictionary
+    if raw_answers:
+        for k, v in raw_answers.items():
+            if not v:
+                continue
+            k_clean = str(k).strip().lower()
+            v_clean = str(v).strip()
+
+            if not book and any(bk in k_clean for bk in ["book", "material", "course material", "textbook"]):
+                book = v_clean
+            if not student_id and any(sk in k_clean for sk in ["student id", "enrollee id", "student / enrollee", "id number", "student no", "student_id", "student #", "student number"]):
+                student_id = v_clean
+            if not instructor and (
+                any(ik in k_clean for ik in ["instructor", "professor", "prof.", "faculty", "teacher"])
+                or ("credit" in k_clean and "card" not in k_clean)
+            ):
+                instructor = v_clean
+
+    # 2. Check reference_code if book still not found
+    if not book and reference_code and reference_code.lower() != "product a":
+        ref_lower = reference_code.lower()
+        if any(bk in ref_lower for bk in BOOKSTORE_CATALOG_MINOR) or "₱" in reference_code or "php" in ref_lower:
+            book = reference_code
+
+    # 3. Search notes text if student_id, instructor, or book are still missing
+    if notes:
+        if not student_id:
+            m_sid = re.search(r'(?:Student\s*(?:/\s*Enrollee\s*)?ID(?:\s*Number)?|Student\s*Number|Student\s*#|Enrollee\s*ID|ID\s*Number|Student\s*No\.?)[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
+            if m_sid:
+                student_id = m_sid.group(1).strip().strip("'\"")
+        if not instructor:
+            m_inst = re.search(r'(?:Instructor(?:\s*Credit)?|Enrolled\s*Instructor(?:\s*to\s*Credit)?|Professor|Prof\.|Faculty(?:\s*Credit)?|Teacher)[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
+            if m_inst:
+                instructor = m_inst.group(1).strip().strip("'\"")
+        if not book:
+            m_bk = re.search(r'(?:Book(?:\s*/\s*Course\s*Material)?|Course\s*Material|Textbook|Title)[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
+            if m_bk:
+                book = m_bk.group(1).strip().strip("'\"")
+
+    return book, student_id, instructor
+
+
 class GoogleFormSubmissionRequest(BaseModel):
     response_id: str = Field(..., description="Unique Google Form Response ID")
     sheet_row_index: Optional[int] = Field(None, description="Row index in connected Google Sheet")
@@ -197,6 +296,9 @@ class GoogleFormSubmissionRequest(BaseModel):
     payment_method: str = Field("hosted_checkout", description="Payment channel: hosted_checkout, qrph, gcash_maya, card")
     notes: Optional[str] = Field(None, description="Optional notes or instructions from the form")
     raw_answers: Optional[Dict[str, Any]] = Field(None, description="Raw form answers map for audit trail")
+    student_id: Optional[str] = Field(None, description="Student or CPA review enrollee ID number")
+    instructor_credit: Optional[str] = Field(None, description="Enrolled faculty instructor to credit")
+    book_title: Optional[str] = Field(None, description="Course book or educational material")
 
 
 class GoogleFormSubmissionResponse(BaseModel):
@@ -280,9 +382,36 @@ async def submit_google_form(
 
     # 3. Format customer contact info & resolve field aliases
     formatted_phone = format_philippine_phone(req.customer_phone) if req.customer_phone else None
-    ref_code = (req.reference_code or req.item_reference or "Product A").strip()
     row_idx = req.sheet_row if req.sheet_row is not None else req.sheet_row_index
-    computed_title = req.title.strip() if req.title else f"{ref_code} (Qty: {req.quantity}) - {req.customer_name.strip()}"
+
+    # Resolve bookstore items, student ID, and instructor credit from direct fields, raw_answers, and notes
+    book_ref, student_id, instructor_credit = resolve_bookstore_fields(
+        raw_answers=req.raw_answers,
+        notes=req.notes,
+        direct_book=req.book_title,
+        direct_student_id=req.student_id,
+        direct_instructor=req.instructor_credit,
+        reference_code=req.reference_code or req.item_reference,
+    )
+
+    raw_ref = (req.reference_code or req.item_reference or "").strip()
+    if (not raw_ref or raw_ref.lower() == "product a") and book_ref:
+        ref_code = book_ref
+    else:
+        ref_code = raw_ref or "Product A"
+
+    # Compute authoritative pricing for bookstore materials if not explicitly provided
+    resolved_amount_minor = req.amount_minor
+    if (resolved_amount_minor is None or resolved_amount_minor <= 0) and (book_ref or ref_code):
+        unit_price = extract_price_from_text(book_ref or ref_code)
+        if unit_price:
+            resolved_amount_minor = unit_price * req.quantity
+
+    if req.title:
+        computed_title = req.title.strip()
+    else:
+        credit_tag = f" [Credit: {instructor_credit}]" if instructor_credit else ""
+        computed_title = f"{ref_code} (Qty: {req.quantity}) - {req.customer_name.strip()}{credit_tag}"
 
     meta = {
         "source": "google_forms",
@@ -294,6 +423,9 @@ async def submit_google_form(
         "customer_email": req.customer_email.strip().lower(),
         "customer_phone": formatted_phone or req.customer_phone,
         "reference_code": ref_code,
+        "book_title": book_ref or ref_code,
+        "student_id": student_id,
+        "instructor_credit": instructor_credit,
         "notes": req.notes,
         "raw_answers": req.raw_answers,
     }
@@ -305,7 +437,7 @@ async def submit_google_form(
             title=computed_title,
             category=req.category if req.category in ("product_order", "department_invoice") else "product_order",
             reference_code=ref_code,
-            amount_minor=req.amount_minor,
+            amount_minor=resolved_amount_minor,
             quantity=req.quantity,
             user_id="google_forms_agent",
             metadata=meta,

@@ -32,16 +32,49 @@ Even if no Google Sheet is connected or active, the script continues non-blockin
 
 ---
 
+---
+
+## Instant Bookstore Form Builder (`FormBuilder.gs`)
+
+To instantly generate a production-ready Google Form for course books & materials with enrolled instructor credit tracking:
+
+1. In your Google Sheet, open **Extensions $\rightarrow$ Apps Script**.
+2. Add both [`scripts/google_apps_script/Code.gs`](./Code.gs) and [`scripts/google_apps_script/FormBuilder.gs`](./FormBuilder.gs) to your project.
+3. Select **`generateBookstoreOrderForm`** in the function dropdown and click **Run**.
+4. The builder executes end-to-end automation:
+   - **Creates Google Form**: "R.G.E Accounting Bookstore - Course Books & Materials Order Form"
+   - **Adds Professional Form Fields (Mapped 1:1 to Spreadsheet Headers)**:
+     1. **Full Name** (Required text) &rarr; *Column 2: Customer Name*
+     2. **Email Address** (Required with email format validation) &rarr; *Column 3: Email Address*
+     3. **Mobile Phone Number** (Required text with Philippine `09XX` / `+639XX` regex validation) &rarr; *Column 4: Contact Number*
+     4. **Book / Course Material Selection** (Required dropdown with official textbook prices: Financial Accounting & Reporting Vol. 1 - ₱450.00, Advanced Financial Accounting & Reporting - ₱520.00, Auditing Theory & Practice - ₱480.00, Management Advisory Services - ₱420.00, Philippine Tax Law & Principles - ₱500.00) &rarr; *Column 5: Book / Material*
+     5. **Quantity** (Required dropdown: 1, 2, 3, 4, 5, 10) &rarr; *Column 6: Quantity*
+     6. **Enrolled Instructor to Credit** (Required dropdown: Prof. Raymund Reyes, Prof. Maria Santos, Prof. Juan Carlos, Prof. Elena Gomez, External / Self-Study) &rarr; *Column 7: Instructor Credit*
+     7. **Student / Enrollee ID Number** (Optional text) &rarr; *Column 8: Student ID*
+     8. **Delivery Address / Campus Pickup Notes** (Paragraph text) &rarr; *Column 9: Notes*
+   - **Sets Destination**: Links the Form responses directly to the active Google Spreadsheet.
+   - **Programmatic Trigger**: Automatically registers the `onFormSubmit` trigger so no manual trigger setup is needed.
+   - **Formula-Injection Safe Headers**: Standardizes the 17 header columns with bold styling and frozen header row.
+
+### Randomized Test Submission Generator
+To simulate realistic external buyers purchasing course books with instructor credit:
+- In Apps Script, select **`generateRandomBookstoreSubmissions`** and click **Run**.
+- Simulates realistic student names, Philippine numbers, textbook selections, and enrolled instructor credits end-to-end.
+
+---
+
 ## 4-Step Setup & Deployment Guide
 
 ### Step 1: Create or Link Your Google Form
-1. Open your Google Form with the recommended question titles:
+1. Run `generateBookstoreOrderForm()` from `FormBuilder.gs` (recommended), or manually link your Google Form with the recommended question titles:
    - **Full Name** (Short answer, Required)
    - **Email Address** (Short answer, Required)
    - **Mobile Number** (Short answer, Optional)
-   - **Package / Product** (Dropdown / Radio, e.g. `Product A`, `Product B`, `Product C`)
+   - **Book / Material** or **Package / Product** (Dropdown / Radio)
    - **Quantity** (Short answer / Number, Default: `1`)
-   - **Notes / Instructions** (Paragraph, Optional)
+   - **Enrolled Instructor to Credit** (Dropdown / Radio)
+   - **Student / Enrollee ID Number** (Short answer, Optional)
+   - **Delivery Address / Notes** (Paragraph, Optional)
 2. Go to the **Responses** tab and click **Link to Sheets** (or **View in Sheets**).
 
 ### Step 2: Paste the Hardened Code

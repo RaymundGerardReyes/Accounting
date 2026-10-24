@@ -55,7 +55,101 @@ AUTHORITATIVE_PRICE_CATALOG_MINOR: Dict[str, int] = {
     "product c": 15600,   # PHP 156.00
     "product d": 19500,   # PHP 195.00
     "product e": 11200,   # PHP 112.00
+    "financial accounting & reporting vol. 1": 45000,
+    "financial accounting and reporting vol. 1": 45000,
+    "financial accounting & reporting": 45000,
+    "financial accounting and reporting": 45000,
+    "advanced financial accounting & reporting": 52000,
+    "advanced financial accounting and reporting": 52000,
+    "auditing theory & practice": 48000,
+    "auditing theory and practice": 48000,
+    "auditing theory": 48000,
+    "management advisory services": 42000,
+    "philippine tax law & principles": 50000,
+    "philippine tax law and principles": 50000,
 }
+
+
+def extract_price_from_text(text: Optional[str]) -> Optional[int]:
+    """Extracts centavo amount from strings like '₱450.00', 'PHP 520', '480.00', or catalog lookup."""
+    if not text:
+        return None
+    import re
+    # 1. Match standard currency indicators (₱, PHP, Php) first to avoid misinterpreting part codes like P1 or P2
+    m = re.search(r'(?:₱|PHP|Php|php)\s*([\d,]+(?:\.\d{1,2})?)', text)
+    if not m:
+        # 2. Match standalone P / Php with word boundary and at least 2 digits or explicit decimal (e.g. P450, P500.00)
+        m = re.search(r'\b(?:Php?\.?|P\.?)\s*([\d,]{2,}(?:\.\d{1,2})?|\d+(?:\.\d{1,2}))', text)
+    if m:
+        try:
+            val = float(m.group(1).replace(",", ""))
+            return int(round(val * 100))
+        except ValueError:
+            pass
+    clean_lower = text.lower().strip()
+    for book_key, price_cents in AUTHORITATIVE_PRICE_CATALOG_MINOR.items():
+        if book_key in clean_lower:
+            return price_cents
+    return None
+
+
+def resolve_bookstore_fields(
+    raw_answers: Optional[Dict[str, Any]],
+    notes: Optional[str],
+    direct_book: Optional[str] = None,
+    direct_student_id: Optional[str] = None,
+    direct_instructor: Optional[str] = None,
+    reference_code: Optional[str] = None,
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Extracts book reference, student ID, and instructor credit from direct fields,
+    raw_answers map, or notes string.
+    """
+    import re
+    book = (direct_book or "").strip() or None
+    student_id = (direct_student_id or "").strip() or None
+    instructor = (direct_instructor or "").strip() or None
+
+    # 1. Search raw_answers dictionary
+    if raw_answers:
+        for k, v in raw_answers.items():
+            if not v:
+                continue
+            k_clean = str(k).strip().lower()
+            v_clean = str(v).strip()
+
+            if not book and any(bk in k_clean for bk in ["book", "material", "course material", "textbook"]):
+                book = v_clean
+            if not student_id and any(sk in k_clean for sk in ["student id", "enrollee id", "student / enrollee", "id number", "student no", "student_id", "student #", "student number"]):
+                student_id = v_clean
+            if not instructor and (
+                any(ik in k_clean for ik in ["instructor", "professor", "prof.", "faculty", "teacher"])
+                or ("credit" in k_clean and "card" not in k_clean)
+            ):
+                instructor = v_clean
+
+    # 2. Check reference_code if book still not found
+    if not book and reference_code and reference_code.lower() != "product a":
+        ref_lower = reference_code.lower()
+        if any(bk in ref_lower for bk in AUTHORITATIVE_PRICE_CATALOG_MINOR) or "₱" in reference_code or "php" in ref_lower:
+            book = reference_code
+
+    # 3. Search notes text if student_id, instructor, or book are still missing
+    if notes:
+        if not student_id:
+            m_sid = re.search(r'(?:Student\s*(?:/\s*Enrollee\s*)?ID(?:\s*Number)?|Student\s*Number|Student\s*#|Enrollee\s*ID|ID\s*Number|Student\s*No\.?)[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
+            if m_sid:
+                student_id = m_sid.group(1).strip().strip("'\"")
+        if not instructor:
+            m_inst = re.search(r'(?:Instructor(?:\s*Credit)?|Enrolled\s*Instructor(?:\s*to\s*Credit)?|Professor|Prof\.|Faculty(?:\s*Credit)?|Teacher)[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
+            if m_inst:
+                instructor = m_inst.group(1).strip().strip("'\"")
+        if not book:
+            m_bk = re.search(r'(?:Book(?:\s*/\s*Course\s*Material)?|Course\s*Material|Textbook|Title)[:=\s]+([^\n|,;]+)', notes, re.IGNORECASE)
+            if m_bk:
+                book = m_bk.group(1).strip().strip("'\"")
+
+    return book, student_id, instructor
 
 
 class GoogleFormSubmissionPayload(BaseModel):
@@ -74,6 +168,9 @@ class GoogleFormSubmissionPayload(BaseModel):
     sheet_row: Optional[int] = Field(None, description="Row index in sheet")
     sheet_row_index: Optional[int] = Field(None, description="Alias for sheet_row")
     raw_answers: Optional[Dict[str, Any]] = Field(None, description="Raw form answers")
+    student_id: Optional[str] = Field(None, description="Student or CPA review enrollee ID number")
+    instructor_credit: Optional[str] = Field(None, description="Enrolled faculty instructor to credit")
+    book_title: Optional[str] = Field(None, description="Course book or educational material")
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +378,22 @@ async def ingest_google_form_submission(
     if not clean_response_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="response_id is required.")
 
-    ref_code = (payload.item_reference or payload.reference_code or "Product A").strip()
+    # Resolve bookstore items, student ID, and instructor credit
+    book_ref, student_id, instructor_credit = resolve_bookstore_fields(
+        raw_answers=payload.raw_answers,
+        notes=payload.notes,
+        direct_book=payload.book_title,
+        direct_student_id=payload.student_id,
+        direct_instructor=payload.instructor_credit,
+        reference_code=payload.item_reference or payload.reference_code,
+    )
+
+    raw_ref = (payload.item_reference or payload.reference_code or "").strip()
+    if (not raw_ref or raw_ref.lower() == "product a") and book_ref:
+        ref_code = book_ref
+    else:
+        ref_code = raw_ref or "Product A"
+
     qty = max(1, int(payload.quantity))
     target_row = payload.sheet_row if payload.sheet_row is not None else payload.sheet_row_index
 
@@ -322,6 +434,13 @@ async def ingest_google_form_submission(
     # 2. Format customer phone
     formatted_phone = format_philippine_phone(payload.customer_phone) if payload.customer_phone else None
 
+    # Compute authoritative pricing for bookstore materials if not explicitly provided
+    resolved_amount_minor = payload.amount_minor
+    if (resolved_amount_minor is None or resolved_amount_minor <= 0) and (book_ref or ref_code):
+        unit_price = extract_price_from_text(book_ref or ref_code)
+        if unit_price:
+            resolved_amount_minor = unit_price * qty
+
     # 3. Metadata for audit trail & reverse sync
     meta = {
         "source": "google_forms",
@@ -332,11 +451,16 @@ async def ingest_google_form_submission(
         "customer_name": payload.customer_name.strip(),
         "customer_email": payload.customer_email.strip().lower(),
         "customer_phone": formatted_phone or payload.customer_phone,
+        "reference_code": ref_code,
+        "book_title": book_ref or ref_code,
+        "student_id": student_id,
+        "instructor_credit": instructor_credit,
         "notes": payload.notes,
         "raw_answers": payload.raw_answers,
     }
 
-    title = payload.title or f"{ref_code} (Qty: {qty}) - {payload.customer_name.strip()}"
+    credit_tag = f" [Credit: {instructor_credit}]" if instructor_credit else ""
+    title = payload.title or f"{ref_code} (Qty: {qty}) - {payload.customer_name.strip()}{credit_tag}"
 
     # 4. Create Order via PaymentOrchestrator
     try:
@@ -345,7 +469,7 @@ async def ingest_google_form_submission(
             title=title,
             category=payload.category if payload.category in ("product_order", "department_invoice") else "product_order",
             reference_code=ref_code,
-            amount_minor=payload.amount_minor,
+            amount_minor=resolved_amount_minor,
             quantity=qty,
             user_id="google_forms_agent",
             metadata=meta,
