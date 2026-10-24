@@ -45,10 +45,31 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware for Next.js frontend
+# CORS middleware for Next.js frontend & Cloudflare domain
+FRONTEND_ORIGIN = os.getenv("NEXT_PUBLIC_APP_DOMAIN") or os.getenv("APP_DOMAIN") or os.getenv("NEXT_PUBLIC_APP_URL")
+
+allowed_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5000",
+    "http://127.0.0.1:5000",
+]
+
+if FRONTEND_ORIGIN:
+    clean_origin = FRONTEND_ORIGIN.strip().rstrip("/")
+    if clean_origin.startswith("http://") or clean_origin.startswith("https://"):
+        if clean_origin not in allowed_origins:
+            allowed_origins.append(clean_origin)
+    else:
+        allowed_origins.append(f"https://{clean_origin}")
+        allowed_origins.append(f"http://{clean_origin}")
+
+if "*" not in allowed_origins:
+    allowed_origins.append("*")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
