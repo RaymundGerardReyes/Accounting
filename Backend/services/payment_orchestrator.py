@@ -328,8 +328,8 @@ class PaymentOrchestrator:
         # 4. Resolve PaymentAttempt & Order
         resource_data = event_data.get("attributes", {}).get("data", {}) or {}
         resource_id = resource_data.get("id")  # checkout session ID (cs_...), payment ID (pay_...), or method ID (paym_...)
-        resource_attrs = resource_data.get("attributes", {}) or {}
-        metadata = resource_attrs.get("metadata") or {}
+        resource_attrs = resource_data.get("attributes") or resource_data
+        metadata = resource_attrs.get("metadata") or resource_data.get("metadata") or {}
 
         attempt = None
         # a) Check PaymentAttempt.provider_payment_id == resource_id (standard cs_...)
@@ -443,6 +443,7 @@ class PaymentOrchestrator:
             "checkout_session.payment.paid",
             "payment.paid",
             "payment_intent.succeeded",
+            "qr.paid",
         }
         failed_event_types = {
             "payment.failed",
@@ -459,6 +460,10 @@ class PaymentOrchestrator:
             "payment.canceled",
             "payment_intent.cancelled",
             "checkout_session.cancelled",
+        }
+        refund_event_types = {
+            "refund.succeeded",
+            "payment.refunded",
         }
 
         terminal_states = {"succeeded", "failed", "cancelled", "expired"}
@@ -529,6 +534,13 @@ class PaymentOrchestrator:
                 attempt.failure_code = resource_attrs.get("failed_code") or "SESSION_CANCELLED"
                 attempt.failure_message = resource_attrs.get("failed_message") or "Payment checkout was cancelled."
                 attempt.checkout_url = None
+
+        elif event_type in refund_event_types:
+            attempt.status = "refunded"
+            if order:
+                order.status = "refunded"
+            attempt.failure_code = "REFUND_PROCESSED"
+            attempt.failure_message = resource_attrs.get("reason") or "Payment was refunded."
 
         webhook_record.processing_status = "processed"
         webhook_record.processed_at = utc_now()

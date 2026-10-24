@@ -33,6 +33,9 @@ async function proxyRequest(
     "accept",
     "cf-connecting-ip",
     "cf-ray",
+    "paymongo-signature",
+    "x-google-forms-secret",
+    "x-google-forms-signature",
   ]
 
   for (const name of forwardHeaderNames) {

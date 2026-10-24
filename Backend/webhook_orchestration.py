@@ -453,6 +453,8 @@ async def handle_paymongo_webhook(
             "checkout_session.expired": "expired",
             "qrph.expired": "expired",
             "qr.expired": "expired",
+            "qr.paid": "paid",
+            "refund.succeeded": "refunded",
         }
         outcome = outcome_map.get(event_type)
 
