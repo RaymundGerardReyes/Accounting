@@ -25,6 +25,8 @@ from finance_routes import router as finance_router
 from integration_routes import router as integration_router
 from auth_routes import router as auth_router
 from cost_allocation_routes import router as cost_allocation_router
+from google_forms_routes import router as google_forms_router
+from webhook_orchestration import router as webhook_orchestration_router
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -79,6 +81,8 @@ app.include_router(finance_router)
 app.include_router(integration_router)
 app.include_router(auth_router)
 app.include_router(cost_allocation_router)
+app.include_router(google_forms_router)
+app.include_router(webhook_orchestration_router)
 
 orchestrator = PaymentOrchestrator(provider=PayMongoProvider())
 

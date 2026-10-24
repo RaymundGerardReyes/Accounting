@@ -450,6 +450,22 @@ class PaymentOrchestrator:
         webhook_record.processed_at = utc_now()
         db.commit()
 
+        # If order originated from Google Forms or webhook URL configured, notify on terminal state transitions
+        if order and attempt.status in ("failed", "expired", "cancelled"):
+            o_meta = order.metadata_dict if hasattr(order, "metadata_dict") else {}
+            gform_id = (o_meta or {}).get("google_form_response_id") or (o_meta or {}).get("google_forms_response_id")
+            if gform_id or os.getenv("GOOGLE_APPS_SCRIPT_WEBHOOK_URL"):
+                try:
+                    from google_forms_routes import sync_status_to_google_sheet
+                    sync_status_to_google_sheet(
+                        response_id=gform_id or order.order_number,
+                        order_number=order.order_number,
+                        payment_status=attempt.status.upper(),
+                        failure_reason=attempt.failure_message,
+                    )
+                except Exception as sync_exc:
+                    print(f"Google Sheet reverse sync notice: {sync_exc}")
+
         # Process outbox fulfillment immediately
         self.process_fulfillment_outbox(db)
 
@@ -603,6 +619,20 @@ class PaymentOrchestrator:
 
                         receipt_data["smtp_delivery"] = smtp_delivery_result
                         persist_receipt_on_order(db, order, attempt, receipt_data)
+
+                        # Sync back to Google Sheet if order was ingested via Google Forms or webhook URL configured
+                        gform_id = (meta or {}).get("google_form_response_id") or (meta or {}).get("google_forms_response_id")
+                        if gform_id or os.getenv("GOOGLE_APPS_SCRIPT_WEBHOOK_URL"):
+                            try:
+                                from google_forms_routes import sync_status_to_google_sheet
+                                sync_status_to_google_sheet(
+                                    response_id=gform_id or order.order_number,
+                                    order_number=order.order_number,
+                                    payment_status="PAID",
+                                    official_receipt_no=receipt_data.get("official_receipt_number"),
+                                )
+                            except Exception as sync_exc:
+                                print(f"Google Sheet reverse sync notice: {sync_exc}")
                 except Exception as outbox_receipt_err:
                     print(f"Outbox receipt generation notice: {outbox_receipt_err}")
 

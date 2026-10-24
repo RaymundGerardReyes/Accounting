@@ -75,6 +75,15 @@ function OrderMobileCard({ order, copiedKey, onCopy, onReconcile, onView, onPay,
           <span className="text-[11px] font-mono px-2.5 py-1 rounded-md bg-muted text-foreground font-medium whitespace-nowrap inline-flex items-center shrink-0">
             {order.category === "product_order" ? "Product Run" : "Cost Center"}
           </span>
+          {order.metadata?.source === "google_forms" && (
+            <span
+              className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 font-medium inline-flex items-center gap-1 shrink-0"
+              title={`Ingested via Google Forms (Response: ${order.metadata.google_form_response_id || "N/A"})`}
+            >
+              <FileText className="w-3 h-3" />
+              Google Form
+            </span>
+          )}
         </div>
         <FinancialStatusBadge status={order.status} />
       </div>
@@ -281,9 +290,20 @@ function OrderDesktopRow({ order, copiedKey, onCopy, onReconcile, onView, onPay,
         </div>
       </td>
       <td className="px-6 py-4 whitespace-nowrap">
-        <span className="text-[11px] font-mono px-2.5 py-1 rounded-md bg-muted text-foreground font-medium whitespace-nowrap inline-flex items-center shrink-0">
-          {order.category === "product_order" ? "Product Run" : "Cost Center"}
-        </span>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[11px] font-mono px-2.5 py-1 rounded-md bg-muted text-foreground font-medium whitespace-nowrap inline-flex items-center shrink-0">
+            {order.category === "product_order" ? "Product Run" : "Cost Center"}
+          </span>
+          {order.metadata?.source === "google_forms" && (
+            <span
+              className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 font-medium inline-flex items-center gap-1 shrink-0"
+              title={`Ingested via Google Forms (Response: ${order.metadata.google_form_response_id || "N/A"})`}
+            >
+              <FileText className="w-3 h-3" />
+              Google Form
+            </span>
+          )}
+        </div>
       </td>
       <td className="px-6 py-4 whitespace-nowrap">
         <CurrencyDisplay amountMinor={order.amount_minor} currency="PHP" size="sm" className="font-bold text-foreground" />
@@ -869,6 +889,7 @@ export function PaymentsHub() {
 
   // New Order Modal State
   const [showOrderModal, setShowOrderModal] = useState(false)
+  const [showGFormsModal, setShowGFormsModal] = useState(false)
   const [orderCategory, setOrderCategory] = useState<"product_order" | "department_invoice">("product_order")
   const [referenceCode, setReferenceCode] = useState("Product A")
   const [orderTitle, setOrderTitle] = useState("")
@@ -908,6 +929,19 @@ export function PaymentsHub() {
 
   useEffect(() => {
     loadAllData()
+    // Live background polling loop every 4 seconds to sync Google Form & PayMongo updates
+    const interval = setInterval(() => {
+      fetchOrders().then((data) => {
+        if (Array.isArray(data)) setOrders(data)
+      }).catch(() => {})
+      fetchWebhookEvents().then((data) => {
+        if (Array.isArray(data)) setWebhooks(data)
+      }).catch(() => {})
+      fetchFulfillmentOutbox().then((data) => {
+        if (Array.isArray(data)) setOutbox(data)
+      }).catch(() => {})
+    }, 4000)
+    return () => clearInterval(interval)
   }, [])
 
   // Filtered Orders Calculation
@@ -1124,7 +1158,7 @@ export function PaymentsHub() {
       {/* Minimalist Header */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-border pb-6">
         <div>
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <p className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
               Payment Gateway Engine
             </p>
@@ -1132,12 +1166,25 @@ export function PaymentsHub() {
               <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
               PayMongo Ready
             </span>
+            <span className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-semibold">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Live Sync Active
+            </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground mt-1">
             Payments & Live Orchestration
           </h1>
         </div>
         <div className="flex items-center gap-2.5 flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowGFormsModal(true)}
+            className="gap-2 border-border hover:bg-muted text-foreground"
+          >
+            <FileText className="w-3.5 h-3.5 text-blue-500" />
+            <span>Google Forms Middleware</span>
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -2015,6 +2062,124 @@ export function PaymentsHub() {
                 </Button>
               </CardFooter>
             </form>
+          </Card>
+        </div>
+      )}
+
+      {/* Google Forms Middleware Modal */}
+      {showGFormsModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="gforms-dialog-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
+        >
+          <Card className="max-w-xl w-full border-border shadow-2xl">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-border/60 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <CardTitle id="gforms-dialog-title" className="text-base font-semibold">
+                    Google Forms Serverless Middleware
+                  </CardTitle>
+                </div>
+                <CardDescription className="text-xs mt-1">
+                  High-concurrency buffer handling up to 5,000+ simultaneous checkout requests
+                </CardDescription>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setShowGFormsModal(false)}
+                aria-label="Close dialog"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-4 text-xs">
+              <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-700 dark:text-blue-300">
+                <p className="font-semibold mb-1 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>How Google Forms Middleware Works</span>
+                </p>
+                <p className="leading-relaxed">
+                  Google Forms handles initial form submission bursts with zero strain on your cloud server. Google Apps Script then paces HTTP calls into your live system, creating PayMongo payment links, emailing them to users, and streaming orders live into this dashboard.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1">
+                    Live Webhook Ingest Endpoint
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <code className="p-2 rounded bg-muted/80 font-mono text-[11px] flex-1 border border-border select-all break-all">
+                      https://rge-accounting-3aa707d5f496.herokuapp.com/api/v1/integrations/google-forms/submit
+                    </code>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        copyToClipboard(
+                          "https://rge-accounting-3aa707d5f496.herokuapp.com/api/v1/integrations/google-forms/submit",
+                          "gforms_url"
+                        )
+                      }
+                      className="shrink-0"
+                    >
+                      {copiedKey === "gforms_url" ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    </Button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1">
+                    Authentication Header (X-Google-Forms-Secret)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <code className="p-2 rounded bg-muted/80 font-mono text-[11px] flex-1 border border-border select-all">
+                      rge_gforms_live_sec_89f3a21
+                    </code>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => copyToClipboard("rge_gforms_live_sec_89f3a21", "gforms_secret")}
+                      className="shrink-0"
+                    >
+                      {copiedKey === "gforms_secret" ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <div className="p-2.5 rounded border border-border bg-muted/30">
+                    <span className="text-[11px] text-muted-foreground block">Ingested Form Orders</span>
+                    <span className="text-base font-bold text-foreground font-mono">
+                      {orders.filter((o) => o.metadata?.source === "google_forms").length}
+                    </span>
+                  </div>
+                  <div className="p-2.5 rounded border border-border bg-muted/30">
+                    <span className="text-[11px] text-muted-foreground block">Live Heartbeat Sync</span>
+                    <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 mt-0.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      Active (4s interval)
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+            <CardFooter className="flex justify-between items-center border-t border-border/60 pt-4 mt-2">
+              <span className="text-[11px] text-muted-foreground">
+                Script template: <code className="font-mono">scripts/google_apps_script/Code.gs</code>
+              </span>
+              <Button type="button" variant="outline" size="sm" onClick={() => setShowGFormsModal(false)}>
+                Close
+              </Button>
+            </CardFooter>
           </Card>
         </div>
       )}

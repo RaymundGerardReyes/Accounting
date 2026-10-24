@@ -101,6 +101,20 @@ PayMongo sends `Paymongo-Signature: t=<timestamp>,te=<test_signature>,li=<live_s
   - Always enforce `connect_args={"sslmode": "require"}` for remote `postgresql://` connections on Heroku.
   - Implement an immediate fallback to local SQLite (`sqlite:///accounting_payments.db`) if primary PostgreSQL connection validation fails, guaranteeing that the web dyno always passes its readiness probe.
 
+## 11. High-Concurrency Intake via Serverless Google Forms & Apps Script Buffer
+- **Serverless Form Middleware**:
+  - Route external high-traffic intake (e.g. 1,000 to 5,000 concurrent users) through Google Forms and linked Google Sheets.
+  - Google Forms buffers sudden traffic surges globally with zero server infrastructure cost or dyno exhaustion.
+- **Google Apps Script Orchestration (`onFormSubmit`)**:
+  - Bind an `onFormSubmit(e)` event trigger in Google Sheets Apps Script.
+  - Dispatch requests to backend endpoint `POST /api/v1/integrations/google-forms/submit` authenticated with `X-Google-Forms-Secret`.
+  - Pass form response ID to enforce atomic idempotency (`google_forms:<response_id>`).
+- **PayMongo Checkout Delivery & Live Sheet Sync**:
+  - The backend computes authoritative centavo pricing server-side and returns the PayMongo `checkout_url`.
+  - Apps Script writes `Order Number` and `PayMongo Checkout URL` back to the Google Sheet row and sends a branded email to the user with the payment link.
+  - Live PayMongo webhooks (`checkout_session.payment.paid`) update backend state, triggering instant synchronization in `payments-hub.tsx`.
+
+
 
 
 
