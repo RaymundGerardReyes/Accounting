@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import dynamic from "next/dynamic"
+import { useAuth } from "@/lib/auth-context"
 import {
   Sidebar,
   APP_NAVIGATION_ITEMS,
@@ -10,7 +11,7 @@ import {
 } from "@/components/sidebar"
 import { Dashboard } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
-import { Menu, X, ChevronRight, ShieldCheck } from "lucide-react"
+import { Menu, X, ChevronRight, ShieldCheck, UserCheck, LogOut, Loader2 } from "lucide-react"
 
 // Dynamic imports with graceful loading fallbacks for code-split modules
 const PaymentsHub = dynamic(
@@ -66,7 +67,7 @@ const Configuration = dynamic(
   {
     loading: () => (
       <div className="p-8 text-xs font-mono text-muted-foreground">
-        Loading configuration...
+        Loading system configuration...
       </div>
     ),
     ssr: false,
@@ -93,6 +94,7 @@ export type PageId =
   | "finance"
 
 export default function Home() {
+  const { authenticated, loading, user, logout, switchPersona, allUsers } = useAuth()
   const [activeTab, setActiveTab] = React.useState<PageId>("dashboard")
   const [selectedDepartment, setSelectedDepartment] = React.useState<string>("manufacturing")
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
@@ -133,6 +135,33 @@ export default function Home() {
   const handleModuleChange = (nextTab: AppModuleId | string) => {
     setActiveTab(nextTab as PageId)
     setMobileMenuOpen(false)
+  }
+
+  // Show authentication verification screen if loading or unauthenticated
+  if (loading) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
+            Authenticating enterprise session...
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!authenticated) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
+            Redirecting to corporate authentication portal...
+          </p>
+        </div>
+      </div>
+    )
   }
 
   const renderModuleContent = () => {
@@ -180,17 +209,9 @@ export default function Home() {
   }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
-      {/* Skip to main content link for keyboard accessibility */}
-      <a
-        href="#main-financial-workspace"
-        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-md focus:shadow-md"
-      >
-        Skip to main financial workspace
-      </a>
-
-      {/* Desktop Persistent Sidebar */}
-      <div className="hidden md:flex h-full">
+    <div className="flex h-screen overflow-hidden bg-background text-foreground">
+      {/* Desktop Sidebar */}
+      <div className="hidden md:flex shrink-0">
         <Sidebar
           activeTab={activeTab}
           setActiveTab={handleModuleChange}
@@ -268,8 +289,43 @@ export default function Home() {
             </nav>
           </div>
 
-          {/* Right Global Controls: Audit Mode & Status */}
+          {/* Right Global Controls: Authenticated User Profile & Audit Mode */}
           <div className="flex items-center gap-3 shrink-0">
+            {user && (
+              <div className="flex items-center gap-2 bg-muted/50 border border-border px-2.5 py-1 rounded-md text-xs">
+                <UserCheck className="h-3.5 w-3.5 text-primary shrink-0" />
+                <span className="font-medium text-foreground truncate max-w-[120px] sm:max-w-[160px]">
+                  {user.full_name}
+                </span>
+                <span className="text-[10px] font-mono text-muted-foreground hidden sm:inline">
+                  ({(user.roles && user.roles.length > 0 ? user.roles[0] : "user")})
+                </span>
+                {allUsers && allUsers.length > 1 && (
+                  <select
+                    className="text-[10px] bg-background border border-border rounded px-1 py-0.5 ml-1 font-mono text-foreground"
+                    value={user.id}
+                    onChange={(e) => switchPersona(e.target.value)}
+                    title="Switch Persona / Role"
+                  >
+                    {allUsers.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.full_name} ({u.roles?.[0] || "user"})
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 ml-1 text-muted-foreground hover:text-destructive"
+                  onClick={() => logout()}
+                  title="Sign Out"
+                >
+                  <LogOut className="h-3 w-3" />
+                </Button>
+              </div>
+            )}
+
             <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted text-xs font-mono text-foreground border border-border">
               <ShieldCheck className="h-3.5 w-3.5 text-secondary" aria-hidden="true" />
               <span>CPA Audit Trail: Enforced</span>

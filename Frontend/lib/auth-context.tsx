@@ -93,8 +93,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refreshSession])
 
   useEffect(() => {
-    if (!loading && !authenticated && pathname === "/") {
-      // Allow dashboard to view in dev or redirect if configured
+    // Strictly guard protected routes: redirect unauthenticated users to /login
+    if (!loading && !authenticated) {
+      const isPublicRoute =
+        pathname === "/login" ||
+        pathname.startsWith("/checkout") ||
+        pathname.startsWith("/payment") ||
+        pathname.startsWith("/api")
+
+      if (!isPublicRoute) {
+        router.replace("/login")
+      }
     }
   }, [loading, authenticated, pathname, router])
 
@@ -190,4 +199,3 @@ export function useAuth() {
   }
   return context
 }
-

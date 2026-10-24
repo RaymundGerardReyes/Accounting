@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from database import get_db, SessionLocal
-from finance_models import FinanceUser
+from finance_models import FinanceUser, RoleAssignment
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication & Session"])
 
@@ -42,6 +42,17 @@ def extract_session_token(request: Request, authorization: Optional[str] = None)
     return None
 
 
+def _get_user_roles(db: Session, user_id: str) -> List[str]:
+    try:
+        roles = db.query(RoleAssignment.role).filter(
+            RoleAssignment.user_id == user_id,
+            RoleAssignment.is_active == 1
+        ).all()
+        return [r[0] for r in roles] if roles else ["employee"]
+    except Exception:
+        return ["employee"]
+
+
 def get_all_users_fallback(db: Session) -> List[Dict[str, Any]]:
     users = db.query(FinanceUser).order_by(FinanceUser.employee_code.asc()).all()
     result = []
@@ -55,7 +66,7 @@ def get_all_users_fallback(db: Session) -> List[Dict[str, Any]]:
             "cost_center_id": u.cost_center_id,
             "employee_group": u.employee_group,
             "status": u.status,
-            "roles": [r.role_name for r in u.role_assignments],
+            "roles": _get_user_roles(db, u.id),
         })
     return result
 
@@ -109,7 +120,7 @@ def validate_session(raw_token: Optional[str], db: Session) -> Dict[str, Any]:
                     "cost_center_id": u.cost_center_id,
                     "employee_group": u.employee_group,
                     "status": u.status,
-                    "roles": [r.role_name for r in u.role_assignments],
+                    "roles": _get_user_roles(db, u.id),
                 },
             }
     return {"authenticated": False, "user": None}
@@ -209,7 +220,7 @@ def login_with_credentials(
             "cost_center_id": u.cost_center_id,
             "employee_group": u.employee_group,
             "status": u.status,
-            "roles": [r.role_name for r in u.role_assignments],
+            "roles": _get_user_roles(db, u.id),
         }
         session_token = f"sess_{u.id}_{secrets.token_hex(16)}"
 
@@ -367,7 +378,7 @@ def switch_active_persona(
         "cost_center_id": u.cost_center_id,
         "employee_group": u.employee_group,
         "status": u.status,
-        "roles": [r.role_name for r in u.role_assignments],
+        "roles": _get_user_roles(db, u.id),
     }
     return {"authenticated": True, "user": target_profile}
 
@@ -382,4 +393,3 @@ def logout_session(
     """Revokes session and clears cookies."""
     response.delete_cookie(SESSION_COOKIE_NAME, path="/")
     return {"authenticated": False}
-
