@@ -88,7 +88,7 @@ To simulate realistic external buyers purchasing course books with instructor cr
      SPREADSHEET_ID: "", // Optional: only needed if script is standalone
      SHEET_TAB_NAME: "", // Optional: tab name, leave empty for first tab
      COMPANY_NAME: "R.G.E Accounting Firm Inc.",
-     SUPPORT_EMAIL: "raymundgerardrestaca@gmail.com",
+     SUPPORT_EMAIL: "support@rge-accounting.com",
      SEND_CUSTOMER_EMAIL: true
    };
    ```

@@ -848,6 +848,17 @@ export function PaymentsHub() {
   const [actionLoading, setActionLoading] = useState(false)
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  const appOrigin = (typeof window !== "undefined" && window.location.origin)
+    ? window.location.origin
+    : (process.env.NEXT_PUBLIC_APP_DOMAIN || process.env.NEXT_PUBLIC_APP_URL || "https://rge-accounting-3aa707d5f496.herokuapp.com")
+  const gformsIngestUrl = `${appOrigin.replace(/\/$/, "")}/api/v1/integrations/google-forms/submit`
+  const gformsSecret = process.env.NEXT_PUBLIC_GOOGLE_FORMS_SECRET || "rge_gforms_live_sec_89f3a21"
 
   const copyToClipboard = (text: string, key: string) => {
     try {
@@ -2112,7 +2123,7 @@ export function PaymentsHub() {
                   </label>
                   <div className="flex items-center gap-2">
                     <code className="p-2 rounded bg-muted/80 font-mono text-[11px] flex-1 border border-border select-all break-all">
-                      https://rge-accounting-3aa707d5f496.herokuapp.com/api/v1/integrations/google-forms/submit
+                      {mounted ? gformsIngestUrl : "https://rge-accounting-3aa707d5f496.herokuapp.com/api/v1/integrations/google-forms/submit"}
                     </code>
                     <Button
                       type="button"
@@ -2120,7 +2131,7 @@ export function PaymentsHub() {
                       size="sm"
                       onClick={() =>
                         copyToClipboard(
-                          "https://rge-accounting-3aa707d5f496.herokuapp.com/api/v1/integrations/google-forms/submit",
+                          gformsIngestUrl,
                           "gforms_url"
                         )
                       }
@@ -2137,13 +2148,13 @@ export function PaymentsHub() {
                   </label>
                   <div className="flex items-center gap-2">
                     <code className="p-2 rounded bg-muted/80 font-mono text-[11px] flex-1 border border-border select-all">
-                      rge_gforms_live_sec_89f3a21
+                      {gformsSecret}
                     </code>
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => copyToClipboard("rge_gforms_live_sec_89f3a21", "gforms_secret")}
+                      onClick={() => copyToClipboard(gformsSecret, "gforms_secret")}
                       className="shrink-0"
                     >
                       {copiedKey === "gforms_secret" ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}

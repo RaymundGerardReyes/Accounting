@@ -797,12 +797,13 @@ def test_official_receipt_and_acknowledgement_report_flow(monkeypatch):
         },
     )
     # 1. Create order
+    test_email = "customer.test@rge.ph"
     resp_order = client.post("/api/v1/orders", json={
         "title": "Official Receipt Validation Order",
         "category": "product_order",
         "reference_code": "Product A",
         "quantity": 2,
-        "metadata": {"customer_email": "raymundgerardrestaca@gmail.com"}
+        "metadata": {"customer_email": test_email}
     })
     assert resp_order.status_code == 201
     order_id = resp_order.json()["id"]
@@ -872,11 +873,11 @@ def test_official_receipt_and_acknowledgement_report_flow(monkeypatch):
     # 9. Test Resend Receipt Email Endpoint with custom email
     email_res = client.post(
         f"/api/v1/payments/{attempt_id}/receipt/email",
-        json={"to_email": "raymundgerardrestaca@gmail.com"}
+        json={"to_email": test_email}
     )
     assert email_res.status_code == 200
     assert email_res.json()["success"] is True
-    assert email_res.json()["recipient"] == "raymundgerardrestaca@gmail.com"
+    assert email_res.json()["recipient"] == test_email
 
     # 10. Test Multi-Reference Resolution: Query by Provider Checkout Session ID (cs_...)
     provider_pm_id = poll_data["provider_payment_id"]
