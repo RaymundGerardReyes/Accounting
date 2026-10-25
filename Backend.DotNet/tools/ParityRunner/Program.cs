@@ -226,6 +226,22 @@ webhookTask.Wait();
 var webhookRes = webhookTask.Result;
 Assert("ReceivePayMongoWebhookHandler parses evt_test_999 and returns received", webhookRes.IsSuccess && webhookRes.Value.ProviderEventId == "evt_test_999" && webhookRes.Value.ProcessingStatus == "received");
 
+// 10. Test Tests.Common Infrastructure (FakeClock, WebhookSigner, Builders)
+Console.WriteLine("\n--- Testing Tests.Common Infrastructure ---");
+var fakeClock = new Rge.Tests.Common.Time.FakeClock(new DateTimeOffset(2026, 10, 25, 0, 0, 0, TimeSpan.Zero));
+fakeClock.Advance(TimeSpan.FromHours(8));
+Assert("FakeClock advances time deterministically", fakeClock.UtcNow.Hour == 8);
+
+string validSigHeader = Rge.Tests.Common.Webhooks.WebhookSigner.CreateSignatureHeader(
+    sampleWebhookPayload, "whsec_test_abc", 1729845000, isLive: false, tamper: false);
+Assert("WebhookSigner produces test signature header format (te=)", validSigHeader.Contains("te=", StringComparison.Ordinal) && validSigHeader.Contains("t=1729845000", StringComparison.Ordinal));
+
+var builtAttempt = new Rge.Tests.Common.Builders.PaymentAttemptBuilder()
+    .WithOrderId("ord-builder-1")
+    .WithPaymentMethod("gcash")
+    .BuildSucceeded("cs_builder_999");
+Assert("PaymentAttemptBuilder constructs aggregate in Succeeded state", builtAttempt.Status == Rge.Payments.Domain.PaymentAttempts.PaymentAttemptStatus.Succeeded && builtAttempt.OrderId == "ord-builder-1");
+
 Console.WriteLine("\n==============================================================");
 Console.WriteLine($" RESULTS: {passed} PASSED, {failed} FAILED");
 Console.WriteLine("==============================================================");

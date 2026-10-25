@@ -146,6 +146,16 @@
           "Rge.Payments.Application": "[1.0.0, )",
           "Rge.Payments.Domain": "[1.0.0, )"
         }
+      },
+      "rge.tests.common": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.BuildingBlocks.Infrastructure": "[1.0.0, )",
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )",
+          "Rge.Finance.Domain": "[1.0.0, )",
+          "Rge.Payments.Domain": "[1.0.0, )"
+        }
       }
     }
   }

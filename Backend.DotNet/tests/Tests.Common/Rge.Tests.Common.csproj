@@ -1,6 +1,14 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <IsPackable>false</IsPackable>
-    <IsTestProject>true</IsTestProject>
+    <IsTestProject>false</IsTestProject>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BuildingBlocks\Rge.BuildingBlocks.SharedKernel\Rge.BuildingBlocks.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\src\BuildingBlocks\Rge.BuildingBlocks.Application\Rge.BuildingBlocks.Application.csproj" />
+    <ProjectReference Include="..\..\src\BuildingBlocks\Rge.BuildingBlocks.Infrastructure\Rge.BuildingBlocks.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Payments\Rge.Payments.Domain\Rge.Payments.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Finance\Rge.Finance.Domain\Rge.Finance.Domain.csproj" />
+  </ItemGroup>
 </Project>

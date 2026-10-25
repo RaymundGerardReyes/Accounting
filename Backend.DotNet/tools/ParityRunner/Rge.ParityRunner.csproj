@@ -18,5 +18,6 @@
     <ProjectReference Include="..\..\src\Modules\Payments\Rge.Payments.Infrastructure\Rge.Payments.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Modules\Identity\Rge.Identity.Infrastructure\Rge.Identity.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Modules\Documents\Rge.Documents.Infrastructure\Rge.Documents.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\tests\Tests.Common\Rge.Tests.Common.csproj" />
   </ItemGroup>
 </Project>
