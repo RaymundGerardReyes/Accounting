@@ -78,3 +78,4 @@ public sealed class ApprovalHistoryEntry : Entity<string>
             decidedAt: decidedAt ?? DateTimeOffset.UtcNow);
     }
 }
+

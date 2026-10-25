@@ -25,3 +25,4 @@ public interface IUnitOfWork
     /// </summary>
     bool HasActiveTransaction { get; }
 }
+

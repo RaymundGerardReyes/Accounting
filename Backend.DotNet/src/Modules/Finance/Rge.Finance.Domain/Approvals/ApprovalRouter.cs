@@ -85,3 +85,4 @@ public static class ApprovalRouter
             $"Amount {amountMinor} centavos exceeds maximum approval limit ({maxAllowed} centavos) for user '{actorId}' in '{workflow}/{stage}'."));
     }
 }
+

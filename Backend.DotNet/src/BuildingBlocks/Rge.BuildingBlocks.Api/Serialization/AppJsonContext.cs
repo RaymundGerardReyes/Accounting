@@ -17,3 +17,4 @@ namespace Rge.BuildingBlocks.Api.Serialization;
 [JsonSerializable(typeof(Dictionary<string, string>))]
 [JsonSerializable(typeof(string[]))]
 public sealed partial class AppJsonContext : JsonSerializerContext;
+
