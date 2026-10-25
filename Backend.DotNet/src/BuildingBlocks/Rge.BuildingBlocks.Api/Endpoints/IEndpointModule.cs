@@ -1,11 +1,21 @@
 using Microsoft.AspNetCore.Routing;
 
+
+
 namespace Rge.BuildingBlocks.Api.Endpoints;
 
+
+
 /// <summary>
-/// Implemented by each module's Api layer to mount its Minimal API endpoints into the Host pipeline.
+
+/// Contract implemented by each module's API project to register Minimal API route groups.
+
 /// </summary>
+
 public interface IEndpointModule
+
 {
+
     void MapEndpoints(IEndpointRouteBuilder app);
+
 }

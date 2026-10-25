@@ -3,7 +3,7 @@
         "method":  "GET",
         "path":  "/version",
         "module":  "platform",
-        "handler_ref":  "Backend.DotNet\\src\\Host\\Rge.Accounting.Host\\Program.cs:7",
+        "handler_ref":  "Backend.DotNet\\src\\Host\\Rge.Accounting.Host\\Composition\\EndpointRouteBuilderExtensions.cs:35",
         "summary":  "",
         "requires_auth":  false,
         "runtime":  "dotnet"
@@ -12,7 +12,16 @@
         "method":  "GET",
         "path":  "/health",
         "module":  "platform",
-        "handler_ref":  "Backend.DotNet\\src\\Host\\Rge.Accounting.Host\\Program.cs:27",
+        "handler_ref":  "Backend.DotNet\\src\\Host\\Rge.Accounting.Host\\Composition\\EndpointRouteBuilderExtensions.cs:43",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/health",
+        "module":  "platform",
+        "handler_ref":  "Backend.DotNet\\src\\Host\\Rge.Accounting.Host\\Composition\\EndpointRouteBuilderExtensions.cs:47",
         "summary":  "",
         "requires_auth":  false,
         "runtime":  "dotnet"

@@ -14,7 +14,7 @@ Authoritative tracking ledger for all 113 unique HTTP endpoints across the Pytho
 
 | Module | Milestone | Total Routes | Not Started | Implemented | Tested | Parity Verified | Completion % |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **platform** | `v0.1.0` | 4 | 2 | 0 | 2 | 0 | **0%** |
+| **platform** | `v0.1.0` | 4 | 1 | 1 | 2 | 0 | **0%** |
 | **identity** | `v0.2.0` | 10 | 10 | 0 | 0 | 0 | **0%** |
 | **audit** | `v0.2.0` | 1 | 1 | 0 | 0 | 0 | **0%** |
 | **receipts** | `v0.3.0` | 5 | 5 | 0 | 0 | 0 | **0%** |
@@ -23,7 +23,7 @@ Authoritative tracking ledger for all 113 unique HTTP endpoints across the Pytho
 | **documents** | `v0.5.0` | 3 | 3 | 0 | 0 | 0 | **0%** |
 | **integrations** | `v0.5.0` | 6 | 6 | 0 | 0 | 0 | **0%** |
 | **costalloc** | `v0.5.0` | 10 | 10 | 0 | 0 | 0 | **0%** |
-| **TOTAL** | - | **113** | **110** | **0** | **3** | **0** | **2.7% (Tested+Verified)** |
+| **TOTAL** | - | **113** | **109** | **1** | **3** | **0** | **2.7% (Tested+Verified)** |
 
 ---
 
@@ -31,10 +31,10 @@ Authoritative tracking ledger for all 113 unique HTTP endpoints across the Pytho
 
 | ID | Module | Method | Normalized Path | Python Handler | .NET Handler | Status | Parity Test | SoD / Auth | Audit | Milestone | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `PLT-001` | platform | **GET** | `/api/health` | `Backend/app.py:186` | - | **not-started** | - | public | no | `v0.1.0` | API Health Check |
+| `PLT-001` | platform | **GET** | `/api/health` | `Backend/app.py:186` | `Backend.DotNet/src/Host/Rge.Accounting.Host/Composition/EndpointRouteBuilderExtensions.cs:47` | **implemented** | - | public | no | `v0.1.0` | API Health Check |
 | `PLT-002` | platform | **GET** | `/api/version` | `Backend/app.py:180` | - | **not-started** | - | public | no | `v0.1.0` | API Version Info |
-| `PLT-003` | platform | **GET** | `/health` | `Backend/app.py:185` | `Backend.DotNet/src/Host/Rge.Accounting.Host/Program.cs:27` | **tested** | `Backend.DotNet/tests/Integration.Tests` | public | no | `v0.1.0` | Verified in Host Program.cs |
-| `PLT-004` | platform | **GET** | `/version` | `Backend/app.py:179` | `Backend.DotNet/src/Host/Rge.Accounting.Host/Program.cs:7` | **tested** | `Backend.DotNet/tests/Integration.Tests` | public | no | `v0.1.0` | Verified in Host Program.cs |
+| `PLT-003` | platform | **GET** | `/health` | `Backend/app.py:185` | `Backend.DotNet/src/Host/Rge.Accounting.Host/Composition/EndpointRouteBuilderExtensions.cs:43` | **tested** | `Backend.DotNet/tests/Integration.Tests` | public | no | `v0.1.0` | Verified in Host Program.cs |
+| `PLT-004` | platform | **GET** | `/version` | `Backend/app.py:179` | `Backend.DotNet/src/Host/Rge.Accounting.Host/Composition/EndpointRouteBuilderExtensions.cs:35` | **tested** | `Backend.DotNet/tests/Integration.Tests` | public | no | `v0.1.0` | Verified in Host Program.cs |
 | `IDN-001` | identity | **GET** | `/api/auth/callback/{provider}` | `Backend/auth_routes.py:343` | - | **not-started** | - | authenticated | no | `v0.2.0` |  |
 | `IDN-002` | identity | **GET** | `/api/auth/csrf` | `Backend/auth_routes.py:133` | - | **not-started** | - | authenticated | no | `v0.2.0` |  |
 | `IDN-003` | identity | **POST** | `/api/auth/login` | `Backend/auth_routes.py:164` | - | **not-started** | - | authenticated | no | `v0.2.0` |  |

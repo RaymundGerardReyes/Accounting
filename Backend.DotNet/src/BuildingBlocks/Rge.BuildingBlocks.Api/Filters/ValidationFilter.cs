@@ -1,46 +1,85 @@
-using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Http;
+
 using Rge.BuildingBlocks.Api.Http;
+
 using Rge.BuildingBlocks.SharedKernel.Results;
+
+
 
 namespace Rge.BuildingBlocks.Api.Filters;
 
+
+
 /// <summary>
-/// Minimal API endpoint filter that intercepts incoming request arguments and executes
-/// validation checks before reaching the route handler. If validation fails, returns an
-/// RFC 9457 ProblemDetails with HTTP 400 Bad Request and the correlation ID.
+
+/// Minimal API endpoint filter that rejects null request payloads or invalid states early.
+
 /// </summary>
-public sealed class ValidationFilter : IEndpointFilter
+
+public sealed class ValidationFilter<TRequest> : IEndpointFilter
+
+    where TRequest : class
+
 {
-    public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+
+    private readonly Func<TRequest, Result>? _validator;
+
+
+
+    public ValidationFilter(Func<TRequest, Result>? validator = null)
+
     {
+
+        _validator = validator;
+
+    }
+
+
+
+    public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+
+    {
+
         ArgumentNullException.ThrowIfNull(context);
+
         ArgumentNullException.ThrowIfNull(next);
 
-        foreach (var argument in context.Arguments)
+
+
+        TRequest? request = context.Arguments.OfType<TRequest>().FirstOrDefault();
+
+        if (request is null)
+
         {
-            if (argument is null)
-            {
-                continue;
-            }
 
-            var validationContext = new ValidationContext(argument);
-            var validationResults = new List<ValidationResult>();
+            var error = Error.Validation("Request.BodyRequired", "Request body is required and cannot be null.");
 
-            if (!Validator.TryValidateObject(argument, validationContext, validationResults, validateAllProperties: true))
-            {
-                var firstError = validationResults.FirstOrDefault()?.ErrorMessage ?? "Validation failed.";
-                var memberNames = string.Join(", ", validationResults.SelectMany(r => r.MemberNames));
-                var error = Error.Validation(
-                    "Request.ValidationError",
-                    $"Validation failed for {argument.GetType().Name}: {firstError} ({memberNames})");
+            return Result.Failure(error).ToHttpResult(context.HttpContext);
 
-                var problem = ProblemDetailsFactory.Create(context.HttpContext, error);
-                return Results.Problem(problem);
-            }
         }
 
-        return await next(context);
-    }
-}
 
+
+        if (_validator is not null)
+
+        {
+
+            Result validation = _validator(request);
+
+            if (validation.IsFailure)
+
+            {
+
+                return validation.ToHttpResult(context.HttpContext);
+
+            }
+
+        }
+
+
+
+        return await next(context).ConfigureAwait(false);
+
+    }
+
+}

@@ -1,8 +1,8 @@
 ﻿id,module,method,path,python_ref,dotnet_ref,status,parity_test,allowed_differences,sod_or_authz,writes_audit,milestone,notes
-"PLT-001","platform","GET","/api/health","Backend/app.py:186","-","not-started","-","none","public","no","v0.1.0","API Health Check"
+"PLT-001","platform","GET","/api/health","Backend/app.py:186","Backend.DotNet/src/Host/Rge.Accounting.Host/Composition/EndpointRouteBuilderExtensions.cs:47","implemented","-","none","public","no","v0.1.0","API Health Check"
 "PLT-002","platform","GET","/api/version","Backend/app.py:180","-","not-started","-","none","public","no","v0.1.0","API Version Info"
-"PLT-003","platform","GET","/health","Backend/app.py:185","Backend.DotNet/src/Host/Rge.Accounting.Host/Program.cs:27","tested","Backend.DotNet/tests/Integration.Tests","none","public","no","v0.1.0","Verified in Host Program.cs"
-"PLT-004","platform","GET","/version","Backend/app.py:179","Backend.DotNet/src/Host/Rge.Accounting.Host/Program.cs:7","tested","Backend.DotNet/tests/Integration.Tests","none","public","no","v0.1.0","Verified in Host Program.cs"
+"PLT-003","platform","GET","/health","Backend/app.py:185","Backend.DotNet/src/Host/Rge.Accounting.Host/Composition/EndpointRouteBuilderExtensions.cs:43","tested","Backend.DotNet/tests/Integration.Tests","none","public","no","v0.1.0","Verified in Host Program.cs"
+"PLT-004","platform","GET","/version","Backend/app.py:179","Backend.DotNet/src/Host/Rge.Accounting.Host/Composition/EndpointRouteBuilderExtensions.cs:35","tested","Backend.DotNet/tests/Integration.Tests","none","public","no","v0.1.0","Verified in Host Program.cs"
 "IDN-001","identity","GET","/api/auth/callback/{provider}","Backend/auth_routes.py:343","-","not-started","-","none","authenticated","no","v0.2.0",""
 "IDN-002","identity","GET","/api/auth/csrf","Backend/auth_routes.py:133","-","not-started","-","none","authenticated","no","v0.2.0",""
 "IDN-003","identity","POST","/api/auth/login","Backend/auth_routes.py:164","-","not-started","-","none","authenticated","no","v0.2.0",""
