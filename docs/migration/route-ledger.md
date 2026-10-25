@@ -1,0 +1,146 @@
+﻿# R.G.E Accounting Platform - Route Migration Ledger
+
+Authoritative tracking ledger for all 113 unique HTTP endpoints across the Python-to-.NET 10 migration.
+
+### Ledger State Machine:
+`not-started` -> `implemented` -> `tested` -> `parity-verified` -> `accepted-difference`
+
+> [!IMPORTANT]
+> **Parity Evidence Invariant**: A route can only transition to parity-verified with an attached, passing automated parity test artifact. Never guess statuses. Milestone releases (dotnet/vX.Y.0) require 100% of that milestone ledger rows to be parity-verified or accepted-difference.
+
+---
+
+## Summary by Module
+
+| Module | Milestone | Total Routes | Not Started | Implemented | Tested | Parity Verified | Completion % |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **platform** | `v0.1.0` | 4 | 2 | 0 | 2 | 0 | **0%** |
+| **identity** | `v0.2.0` | 10 | 10 | 0 | 0 | 0 | **0%** |
+| **audit** | `v0.2.0` | 1 | 1 | 0 | 0 | 0 | **0%** |
+| **receipts** | `v0.3.0` | 5 | 5 | 0 | 0 | 0 | **0%** |
+| **payments** | `v0.3.0` | 16 | 15 | 0 | 1 | 0 | **0%** |
+| **finance** | `v0.4.0` | 58 | 58 | 0 | 0 | 0 | **0%** |
+| **documents** | `v0.5.0` | 3 | 3 | 0 | 0 | 0 | **0%** |
+| **integrations** | `v0.5.0` | 6 | 6 | 0 | 0 | 0 | **0%** |
+| **costalloc** | `v0.5.0` | 10 | 10 | 0 | 0 | 0 | **0%** |
+| **TOTAL** | - | **113** | **110** | **0** | **3** | **0** | **2.7% (Tested+Verified)** |
+
+---
+
+## Complete Route Ledger
+
+| ID | Module | Method | Normalized Path | Python Handler | .NET Handler | Status | Parity Test | SoD / Auth | Audit | Milestone | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `PLT-001` | platform | **GET** | `/api/health` | `Backend/app.py:186` | - | **not-started** | - | public | no | `v0.1.0` | API Health Check |
+| `PLT-002` | platform | **GET** | `/api/version` | `Backend/app.py:180` | - | **not-started** | - | public | no | `v0.1.0` | API Version Info |
+| `PLT-003` | platform | **GET** | `/health` | `Backend/app.py:185` | `Backend.DotNet/src/Host/Rge.Accounting.Host/Program.cs:27` | **tested** | `Backend.DotNet/tests/Integration.Tests` | public | no | `v0.1.0` | Verified in Host Program.cs |
+| `PLT-004` | platform | **GET** | `/version` | `Backend/app.py:179` | `Backend.DotNet/src/Host/Rge.Accounting.Host/Program.cs:7` | **tested** | `Backend.DotNet/tests/Integration.Tests` | public | no | `v0.1.0` | Verified in Host Program.cs |
+| `IDN-001` | identity | **GET** | `/api/auth/callback/{provider}` | `Backend/auth_routes.py:343` | - | **not-started** | - | authenticated | no | `v0.2.0` |  |
+| `IDN-002` | identity | **GET** | `/api/auth/csrf` | `Backend/auth_routes.py:133` | - | **not-started** | - | authenticated | no | `v0.2.0` |  |
+| `IDN-003` | identity | **POST** | `/api/auth/login` | `Backend/auth_routes.py:164` | - | **not-started** | - | authenticated | no | `v0.2.0` |  |
+| `IDN-004` | identity | **POST** | `/api/auth/logout` | `Backend/auth_routes.py:437` | - | **not-started** | - | authenticated | no | `v0.2.0` |  |
+| `IDN-005` | identity | **GET** | `/api/auth/oauth/{provider}` | `Backend/auth_routes.py:284` | - | **not-started** | - | authenticated | no | `v0.2.0` |  |
+| `IDN-006` | identity | **GET** | `/api/auth/session` | `Backend/auth_routes.py:149` | - | **not-started** | - | authenticated | no | `v0.2.0` |  |
+| `IDN-007` | identity | **POST** | `/api/auth/switch-user` | `Backend/auth_routes.py:407` | - | **not-started** | - | authenticated | no | `v0.2.0` |  |
+| `IDN-008` | identity | **POST** | `/api/v1/finance/auth/act-as` | `Backend/finance_routes.py:386` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.2.0` | Dev-Only Act-As Actor Switch (Audit-Logged) |
+| `IDN-009` | identity | **GET** | `/api/v1/finance/auth/me` | `Backend/finance_routes.py:359` | - | **not-started** | - | authenticated | no | `v0.2.0` | Get Current Server-Bound Actor & Roles |
+| `IDN-010` | identity | **GET** | `/api/v1/finance/users` | `Backend/finance_routes.py:364` | - | **not-started** | - | authenticated | no | `v0.2.0` | List Finance Users & Server-Bound Role Assignments |
+| `AUD-001` | audit | **GET** | `/api/v1/finance/audit-events` | `Backend/finance_routes.py:1376` | - | **not-started** | - | authenticated | no | `v0.2.0` | List Append-Only Hash-Chained Financial Audit Events |
+| `REC-001` | receipts | **GET** | `/api/v1/orders/{order_id}/receipt` | `Backend/app.py:750` | - | **not-started** | - | authenticated | no | `v0.3.0` | Get Order Official Receipt Data |
+| `REC-002` | receipts | **GET** | `/api/v1/orders/{order_id}/receipt/pdf` | `Backend/app.py:760` | - | **not-started** | - | authenticated | no | `v0.3.0` | Download Order Official Receipt PDF |
+| `REC-003` | receipts | **GET** | `/api/v1/payments/{payment_id}/receipt` | `Backend/app.py:573` | - | **not-started** | - | authenticated | no | `v0.3.0` | Get Official Receipt & Acknowledgement Data |
+| `REC-004` | receipts | **POST** | `/api/v1/payments/{payment_id}/receipt/email` | `Backend/app.py:651` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.3.0` | Resend Official Receipt & Acknowledgement via SMTP |
+| `REC-005` | receipts | **GET** | `/api/v1/payments/{payment_id}/receipt/pdf` | `Backend/app.py:606` | - | **not-started** | - | authenticated | no | `v0.3.0` | Download or Stream Official Receipt PDF |
+| `PAY-001` | payments | **GET** | `/api/v1/admin/fulfillment-outbox` | `Backend/app.py:822` | - | **not-started** | - | system_admin | no | `v0.3.0` | List Fulfillment Outbox Records |
+| `PAY-002` | payments | **POST** | `/api/v1/admin/fulfillment-outbox/process` | `Backend/app.py:832` | - | **not-started** | - | system_admin | no | `v0.3.0` | Process Pending Fulfillment Outbox Records |
+| `PAY-003` | payments | **POST** | `/api/v1/admin/payments/{payment_id}/reconcile` | `Backend/app.py:794` | - | **not-started** | - | system_admin | no | `v0.3.0` | Reconcile Payment Attempt |
+| `PAY-004` | payments | **POST** | `/api/v1/admin/payments/reconcile-all` | `Backend/app.py:804` | - | **not-started** | - | system_admin | no | `v0.3.0` | Reconcile All Unresolved Payments |
+| `PAY-005` | payments | **GET** | `/api/v1/admin/webhook-events` | `Backend/app.py:812` | - | **not-started** | - | system_admin | no | `v0.3.0` | List Received Webhook Events |
+| `PAY-006` | payments | **GET** | `/api/v1/orders` | `Backend/app.py:321` | - | **not-started** | - | authenticated | no | `v0.3.0` | List Orders & Invoices |
+| `PAY-007` | payments | **POST** | `/api/v1/orders` | `Backend/app.py:341` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.3.0` | Create New Order or Invoice |
+| `PAY-008` | payments | **GET** | `/api/v1/orders/{order_id}` | `Backend/app.py:366` | - | **not-started** | - | authenticated | no | `v0.3.0` | Get Order Details |
+| `PAY-009` | payments | **POST** | `/api/v1/orders/{order_id}/payment-attempts` | `Backend/app.py:382` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.3.0` | Initiate Payment Attempt (PayMongo Checkout) |
+| `PAY-010` | payments | **GET** | `/api/v1/payments/{payment_id}` | `Backend/app.py:488` | - | **not-started** | - | authenticated | no | `v0.3.0` | Poll & Auto-Reconcile Payment Status |
+| `PAY-011` | payments | **POST** | `/api/v1/payments/{payment_id}/expire` | `Backend/app.py:953` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.3.0` | Expire Active Payment Attempt & Remote Gateway Session |
+| `PAY-012` | payments | **POST** | `/api/v1/payments/{payment_id}/fail` | `Backend/app.py:976` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.3.0` | Fail Active Payment Attempt |
+| `PAY-013` | payments | **POST** | `/api/v1/payments/attempts/{attempt_id}/simulate` | `Backend/app.py:945` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.3.0` | Dedicated Testing Simulator for Payment Attempt |
+| `PAY-014` | payments | **POST** | `/api/v1/sandbox/create-and-expire-test` | `Backend/app.py:1000` | - | **not-started** | - | authenticated | no | `v0.3.0` | Quick Test: Create and Expire Fresh Test Order & Attempt |
+| `PAY-015` | payments | **POST** | `/api/v1/sandbox/simulate-webhook` | `Backend/app.py:837` | - | **not-started** | - | authenticated | no | `v0.3.0` | Simulate Signed PayMongo Webhook |
+| `PAY-016` | payments | **POST** | `/api/v1/webhooks/paymongo` | `Backend/app.py:770` | `Backend.DotNet/src/Modules/Payments/Rge.Payments.Api/Webhooks/PayMongoWebhookEndpoint.cs:26` | **tested** | `Backend.DotNet/tools/ParityRunner/Program.cs` | authenticated | no | `v0.3.0` | HMAC verification and ReceivePayMongoWebhookHandler covered in ParityRunner |
+| `FIN-001` | finance | **GET** | `/api/v1/finance/approval-matrix` | `Backend/finance_routes.py:377` | - | **not-started** | - | authenticated | no | `v0.4.0` | List Configured Approval Matrix Rules |
+| `FIN-002` | finance | **GET** | `/api/v1/finance/business-confirmations` | `Backend/finance_routes.py:1301` | - | **not-started** | - | authenticated | no | `v0.4.0` | Register of Open Business & CPA Policy Confirmations (C1-C11) |
+| `FIN-003` | finance | **GET** | `/api/v1/finance/cash-advances` | `Backend/finance_routes.py:605` | - | **not-started** | - | sod_four_eyes | no | `v0.4.0` | List Cash Advances with Derived Reconciliation |
+| `FIN-004` | finance | **POST** | `/api/v1/finance/cash-advances` | `Backend/finance_routes.py:615` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Create Cash Advance Request |
+| `FIN-005` | finance | **GET** | `/api/v1/finance/cash-advances/{advance_id}` | `Backend/finance_routes.py:641` | - | **not-started** | - | sod_four_eyes | no | `v0.4.0` | Get Cash Advance Detail & Reconciliation |
+| `FIN-006` | finance | **POST** | `/api/v1/finance/cash-advances/{advance_id}/cash-return` | `Backend/finance_routes.py:761` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Record Evidenced Employee Cash Return |
+| `FIN-007` | finance | **POST** | `/api/v1/finance/cash-advances/{advance_id}/close` | `Backend/finance_routes.py:799` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Finance Controller: Authorize Final Closure & Freeze Snapshot |
+| `FIN-008` | finance | **POST** | `/api/v1/finance/cash-advances/{advance_id}/decide` | `Backend/finance_routes.py:659` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Approve, Reject, Return, or Cancel Cash Advance |
+| `FIN-009` | finance | **POST** | `/api/v1/finance/cash-advances/{advance_id}/disbursements` | `Backend/finance_routes.py:677` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Maker: Prepare Bank Disbursement |
+| `FIN-010` | finance | **POST** | `/api/v1/finance/cash-advances/{advance_id}/reimbursement-settle` | `Backend/finance_routes.py:780` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Record Evidenced Employee Excess Reimbursement Payment |
+| `FIN-011` | finance | **POST** | `/api/v1/finance/cash-advances/{advance_id}/submit` | `Backend/finance_routes.py:650` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Submit Cash Advance Request |
+| `FIN-012` | finance | **GET** | `/api/v1/finance/dashboard/summary` | `Backend/finance_routes.py:1272` | - | **not-started** | - | authenticated | no | `v0.4.0` | Database-Backed Finance Operations KPI Summary |
+| `FIN-013` | finance | **POST** | `/api/v1/finance/disbursements/{disbursement_id}/bank-approve` | `Backend/finance_routes.py:706` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Bank Approver: Authorize Disbursement |
+| `FIN-014` | finance | **POST** | `/api/v1/finance/disbursements/{disbursement_id}/exception-state` | `Backend/finance_routes.py:744` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Mark Disbursement Failed, Unknown, or Cancelled |
+| `FIN-015` | finance | **POST** | `/api/v1/finance/disbursements/{disbursement_id}/execute` | `Backend/finance_routes.py:716` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Record Manual Bank Execution Reference & Remittance Doc |
+| `FIN-016` | finance | **POST** | `/api/v1/finance/disbursements/{disbursement_id}/verify` | `Backend/finance_routes.py:696` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Verifier: Independently Verify Disbursement |
+| `FIN-017` | finance | **POST** | `/api/v1/finance/disbursements/{disbursement_id}/verify-evidence` | `Backend/finance_routes.py:734` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Evidence Verifier: Confirm Bank Evidence & Release Advance |
+| `FIN-018` | finance | **GET** | `/api/v1/finance/exception-register` | `Backend/finance_routes.py:1349` | - | **not-started** | - | authenticated | no | `v0.4.0` | List Operational Control Exception Register |
+| `FIN-019` | finance | **POST** | `/api/v1/finance/exception-register/{register_id}/resolve` | `Backend/finance_routes.py:1358` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Update or Resolve Exception Register Item |
+| `FIN-020` | finance | **GET** | `/api/v1/finance/exception-requests` | `Backend/finance_routes.py:486` | - | **not-started** | - | authenticated | no | `v0.4.0` | List Policy Exception Requests |
+| `FIN-021` | finance | **POST** | `/api/v1/finance/exception-requests` | `Backend/finance_routes.py:501` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Create Scoped Policy Exception Request |
+| `FIN-022` | finance | **POST** | `/api/v1/finance/exception-requests/{exception_id}/decide` | `Backend/finance_routes.py:525` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Approve or Reject Policy Exception Request |
+| `FIN-023` | finance | **GET** | `/api/v1/finance/expense-reports` | `Backend/finance_routes.py:820` | - | **not-started** | - | sod_four_eyes | no | `v0.4.0` | List Monthly Expense Reports |
+| `FIN-024` | finance | **POST** | `/api/v1/finance/expense-reports` | `Backend/finance_routes.py:830` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Create Monthly Expense Report |
+| `FIN-025` | finance | **GET** | `/api/v1/finance/expense-reports/{report_id}` | `Backend/finance_routes.py:851` | - | **not-started** | - | sod_four_eyes | no | `v0.4.0` | Get Expense Report Detail |
+| `FIN-026` | finance | **PATCH** | `/api/v1/finance/expense-reports/{report_id}` | `Backend/finance_routes.py:860` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Update Draft/Returned Expense Report Metadata & Evidence |
+| `FIN-027` | finance | **POST** | `/api/v1/finance/expense-reports/{report_id}/evaluate` | `Backend/finance_routes.py:905` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Dry-Run Policy Evaluation Preview |
+| `FIN-028` | finance | **POST** | `/api/v1/finance/expense-reports/{report_id}/lines` | `Backend/finance_routes.py:880` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Add Expense Line to Report |
+| `FIN-029` | finance | **POST** | `/api/v1/finance/expense-reports/{report_id}/review` | `Backend/finance_routes.py:940` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Finance Reviewer: Review Expense Lines & Apply Oldest-First Settlement |
+| `FIN-030` | finance | **POST** | `/api/v1/finance/expense-reports/{report_id}/submit` | `Backend/finance_routes.py:924` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Validate Policy & Submit Monthly Expense Report |
+| `FIN-031` | finance | **GET** | `/api/v1/finance/kpi-definitions` | `Backend/finance_routes.py:1296` | - | **not-started** | - | authenticated | no | `v0.4.0` | Explicit KPI Numerator, Denominator & Cutoff Definitions |
+| `FIN-032` | finance | **GET** | `/api/v1/finance/payables` | `Backend/finance_routes.py:1136` | - | **not-started** | - | sod_four_eyes | no | `v0.4.0` | List Accounts Payable |
+| `FIN-033` | finance | **POST** | `/api/v1/finance/payables` | `Backend/finance_routes.py:1154` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Validate Vendor Invoice & Create Account Payable |
+| `FIN-034` | finance | **POST** | `/api/v1/finance/payables/{payable_id}/payments` | `Backend/finance_routes.py:1177` | - | **not-started** | - | sod_four_eyes | yes (fn_append_audit_event) | `v0.4.0` | Maker: Prepare Payable Payment Record |
+| `FIN-035` | finance | **POST** | `/api/v1/finance/payment-records/{payment_id}/bank-approve` | `Backend/finance_routes.py:1205` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Bank Approver: Authorize Payable Payment |
+| `FIN-036` | finance | **POST** | `/api/v1/finance/payment-records/{payment_id}/exception-state` | `Backend/finance_routes.py:1251` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Mark Payment Failed, Payment_Unknown, or Cancelled |
+| `FIN-037` | finance | **POST** | `/api/v1/finance/payment-records/{payment_id}/execute` | `Backend/finance_routes.py:1215` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Record Manual Bank Payment Reference & Remittance Advice |
+| `FIN-038` | finance | **POST** | `/api/v1/finance/payment-records/{payment_id}/reconcile` | `Backend/finance_routes.py:1234` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Evidence Verifier: Verify Remittance Evidence & Reconcile Payable |
+| `FIN-039` | finance | **POST** | `/api/v1/finance/payment-records/{payment_id}/verify` | `Backend/finance_routes.py:1195` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Verifier: Independently Verify Payable Payment |
+| `FIN-040` | finance | **GET** | `/api/v1/finance/policies` | `Backend/finance_routes.py:420` | - | **not-started** | - | authenticated | no | `v0.4.0` | List Financial Policies, Versions & Rules |
+| `FIN-041` | finance | **POST** | `/api/v1/finance/policies/{policy_code}/versions` | `Backend/finance_routes.py:428` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Create Draft Policy Version |
+| `FIN-042` | finance | **POST** | `/api/v1/finance/policies/versions/{version_id}/approve` | `Backend/finance_routes.py:466` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Approve & Activate Policy Version (Author != Approver) |
+| `FIN-043` | finance | **POST** | `/api/v1/finance/policies/versions/{version_id}/retire` | `Backend/finance_routes.py:476` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Retire Active Policy Version |
+| `FIN-044` | finance | **POST** | `/api/v1/finance/policies/versions/{version_id}/submit` | `Backend/finance_routes.py:457` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Submit Policy Version for Approval |
+| `FIN-045` | finance | **GET** | `/api/v1/finance/purchase-requests` | `Backend/finance_routes.py:1062` | - | **not-started** | - | authenticated | no | `v0.4.0` | List Purchase Requests |
+| `FIN-046` | finance | **POST** | `/api/v1/finance/purchase-requests` | `Backend/finance_routes.py:1072` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Create Purchase Request |
+| `FIN-047` | finance | **GET** | `/api/v1/finance/purchase-requests/{pr_id}` | `Backend/finance_routes.py:1100` | - | **not-started** | - | authenticated | no | `v0.4.0` | Get Purchase Request Detail |
+| `FIN-048` | finance | **POST** | `/api/v1/finance/purchase-requests/{pr_id}/decide` | `Backend/finance_routes.py:1118` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Approve, Reject, Return, or Cancel Purchase Request |
+| `FIN-049` | finance | **POST** | `/api/v1/finance/purchase-requests/{pr_id}/submit` | `Backend/finance_routes.py:1109` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Submit Purchase Request |
+| `FIN-050` | finance | **GET** | `/api/v1/finance/tax-codes` | `Backend/finance_routes.py:1034` | - | **not-started** | - | authenticated | no | `v0.4.0` | List Configured Tax & Withholding Codes |
+| `FIN-051` | finance | **POST** | `/api/v1/finance/tax-codes` | `Backend/finance_routes.py:1043` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Configure or CPA-Approve Tax Code |
+| `FIN-052` | finance | **GET** | `/api/v1/finance/tracker` | `Backend/finance_routes.py:1306` | - | **not-started** | - | authenticated | no | `v0.4.0` | Centralized Finance Record Tracker (Reconciled Read Model) |
+| `FIN-053` | finance | **GET** | `/api/v1/finance/tracker/export.csv` | `Backend/finance_routes.py:1326` | - | **not-started** | - | authenticated | no | `v0.4.0` | Export Permission-Scoped, Formula-Safe UTF-8 BOM CSV |
+| `FIN-054` | finance | **POST** | `/api/v1/finance/vendor-bank-changes/{change_id}/decide` | `Backend/finance_routes.py:1024` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Approve or Reject Vendor Bank Account Change |
+| `FIN-055` | finance | **GET** | `/api/v1/finance/vendors` | `Backend/finance_routes.py:962` | - | **not-started** | - | authenticated | no | `v0.4.0` | List Vendor / Payee Master Registry |
+| `FIN-056` | finance | **POST** | `/api/v1/finance/vendors` | `Backend/finance_routes.py:972` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Create Vendor Master Record (Pending Verification) |
+| `FIN-057` | finance | **POST** | `/api/v1/finance/vendors/{vendor_id}/bank-changes` | `Backend/finance_routes.py:1005` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Request Vendor Bank Account Change |
+| `FIN-058` | finance | **POST** | `/api/v1/finance/vendors/{vendor_id}/verify` | `Backend/finance_routes.py:995` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.4.0` | Verify Vendor Master Record (Creator != Verifier) |
+| `DOC-001` | documents | **GET** | `/api/v1/finance/documents` | `Backend/finance_routes.py:573` | - | **not-started** | - | authenticated | no | `v0.5.0` | List Authorized Document References |
+| `DOC-002` | documents | **POST** | `/api/v1/finance/documents` | `Backend/finance_routes.py:548` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.5.0` | Upload Secure Document Evidence |
+| `DOC-003` | documents | **GET** | `/api/v1/finance/documents/{doc_id}/download` | `Backend/finance_routes.py:587` | - | **not-started** | - | authenticated | no | `v0.5.0` | Authorized Document Evidence Download |
+| `INT-001` | integrations | **POST** | `/api/v1/integrations/configure` | `Backend/integration_routes.py:164` | - | **not-started** | - | public | no | `v0.5.0` | Save Integration Credentials to Environment |
+| `INT-002` | integrations | **POST** | `/api/v1/integrations/email/test` | `Backend/integration_routes.py:96` | - | **not-started** | - | public | no | `v0.5.0` | Test Google Email SMTP Handshake & Dispatch |
+| `INT-003` | integrations | **GET** | `/api/v1/integrations/google-forms/status` | `Backend/google_forms_routes.py:519` | - | **not-started** | - | authenticated | no | `v0.5.0` | Check Google Forms Integration Status |
+| `INT-004` | integrations | **POST** | `/api/v1/integrations/google-forms/submit` | `Backend/google_forms_routes.py:332` | - | **not-started** | - | authenticated | no | `v0.5.0` | Ingest Google Form Response and Pair with PayMongo Checkout |
+| `INT-005` | integrations | **POST** | `/api/v1/integrations/paymongo/test` | `Backend/integration_routes.py:68` | - | **not-started** | - | public | no | `v0.5.0` | Test PayMongo API Key & Webhook Secret |
+| `INT-006` | integrations | **GET** | `/api/v1/integrations/status` | `Backend/integration_routes.py:55` | - | **not-started** | - | authenticated | no | `v0.5.0` | Get Live Integration Diagnostic Statuses |
+| `CST-001` | costalloc | **GET** | `/api/configuration` | `Backend/app.py:228` | - | **not-started** | - | public | no | `v0.5.0` | Legacy Configuration Data |
+| `CST-002` | costalloc | **PUT** | `/api/configuration` | `Backend/app.py:235` | - | **not-started** | - | public | no | `v0.5.0` | Update General Configuration |
+| `CST-003` | costalloc | **POST** | `/api/configuration/departments` | `Backend/app.py:247` | - | **not-started** | - | public | no | `v0.5.0` | Save Departments |
+| `CST-004` | costalloc | **POST** | `/api/configuration/users` | `Backend/app.py:261` | - | **not-started** | - | public | no | `v0.5.0` | Save Users |
+| `CST-005` | costalloc | **GET** | `/api/cost-allocation` | `Backend/cost_allocation_routes.py:20` | - | **not-started** | - | authenticated | no | `v0.5.0` |  |
+| `CST-006` | costalloc | **POST** | `/api/cost-allocation/department` | `Backend/cost_allocation_routes.py:126` | - | **not-started** | - | authenticated | no | `v0.5.0` |  |
+| `CST-007` | costalloc | **GET** | `/api/dashboard` | `Backend/app.py:196` | - | **not-started** | - | public | no | `v0.5.0` | Legacy Dashboard Data |
+| `CST-008` | costalloc | **GET** | `/api/department/{department_name}` | `Backend/app.py:203` | - | **not-started** | - | public | no | `v0.5.0` | Legacy Department Detail |
+| `CST-009` | costalloc | **GET** | `/api/products` | `Backend/app.py:214` | - | **not-started** | - | public | no | `v0.5.0` | Legacy Product Line Analysis |
+| `CST-010` | costalloc | **GET** | `/api/variance` | `Backend/app.py:221` | - | **not-started** | - | public | no | `v0.5.0` | Legacy Variance Analysis |

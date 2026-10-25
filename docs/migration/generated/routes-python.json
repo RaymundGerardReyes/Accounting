@@ -1,0 +1,1046 @@
+﻿[
+    {
+        "method":  "GET",
+        "path":  "/version",
+        "module":  "platform",
+        "handler_ref":  "Backend\\app.py:179",
+        "summary":  "Version Info",
+        "requires_auth":  false,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/version",
+        "module":  "platform",
+        "handler_ref":  "Backend\\app.py:180",
+        "summary":  "API Version Info",
+        "requires_auth":  false,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/health",
+        "module":  "platform",
+        "handler_ref":  "Backend\\app.py:185",
+        "summary":  "Health Check",
+        "requires_auth":  false,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/health",
+        "module":  "platform",
+        "handler_ref":  "Backend\\app.py:186",
+        "summary":  "API Health Check",
+        "requires_auth":  false,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/dashboard",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\app.py:196",
+        "summary":  "Legacy Dashboard Data",
+        "requires_auth":  false,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/department/{department_name}",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\app.py:203",
+        "summary":  "Legacy Department Detail",
+        "requires_auth":  false,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/products",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\app.py:214",
+        "summary":  "Legacy Product Line Analysis",
+        "requires_auth":  false,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/variance",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\app.py:221",
+        "summary":  "Legacy Variance Analysis",
+        "requires_auth":  false,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/configuration",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\app.py:228",
+        "summary":  "Legacy Configuration Data",
+        "requires_auth":  false,
+        "runtime":  "python"
+    },
+    {
+        "method":  "PUT",
+        "path":  "/api/configuration",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\app.py:235",
+        "summary":  "Update General Configuration",
+        "requires_auth":  false,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/configuration/departments",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\app.py:247",
+        "summary":  "Save Departments",
+        "requires_auth":  false,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/configuration/users",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\app.py:261",
+        "summary":  "Save Users",
+        "requires_auth":  false,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/orders",
+        "module":  "payments",
+        "handler_ref":  "Backend\\app.py:321",
+        "summary":  "List Orders \u0026 Invoices",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/orders",
+        "module":  "payments",
+        "handler_ref":  "Backend\\app.py:341",
+        "summary":  "Create New Order or Invoice",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/orders/{order_id}",
+        "module":  "payments",
+        "handler_ref":  "Backend\\app.py:366",
+        "summary":  "Get Order Details",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/orders/{order_id}/payment-attempts",
+        "module":  "payments",
+        "handler_ref":  "Backend\\app.py:382",
+        "summary":  "Initiate Payment Attempt (PayMongo Checkout)",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/payments/{payment_id}",
+        "module":  "payments",
+        "handler_ref":  "Backend\\app.py:488",
+        "summary":  "Poll \u0026 Auto-Reconcile Payment Status",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/payments/{payment_id}/receipt",
+        "module":  "receipts",
+        "handler_ref":  "Backend\\app.py:573",
+        "summary":  "Get Official Receipt \u0026 Acknowledgement Data",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/payments/{payment_id}/receipt/pdf",
+        "module":  "receipts",
+        "handler_ref":  "Backend\\app.py:606",
+        "summary":  "Download or Stream Official Receipt PDF",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/payments/{payment_id}/receipt/email",
+        "module":  "receipts",
+        "handler_ref":  "Backend\\app.py:651",
+        "summary":  "Resend Official Receipt \u0026 Acknowledgement via SMTP",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/orders/{order_id}/receipt",
+        "module":  "receipts",
+        "handler_ref":  "Backend\\app.py:750",
+        "summary":  "Get Order Official Receipt Data",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/orders/{order_id}/receipt/pdf",
+        "module":  "receipts",
+        "handler_ref":  "Backend\\app.py:760",
+        "summary":  "Download Order Official Receipt PDF",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/webhooks/paymongo",
+        "module":  "payments",
+        "handler_ref":  "Backend\\app.py:770",
+        "summary":  "PayMongo Webhook Receiver",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/admin/payments/{payment_id}/reconcile",
+        "module":  "payments",
+        "handler_ref":  "Backend\\app.py:794",
+        "summary":  "Reconcile Payment Attempt",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/admin/payments/reconcile-all",
+        "module":  "payments",
+        "handler_ref":  "Backend\\app.py:804",
+        "summary":  "Reconcile All Unresolved Payments",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/admin/webhook-events",
+        "module":  "payments",
+        "handler_ref":  "Backend\\app.py:812",
+        "summary":  "List Received Webhook Events",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/admin/fulfillment-outbox",
+        "module":  "payments",
+        "handler_ref":  "Backend\\app.py:822",
+        "summary":  "List Fulfillment Outbox Records",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/admin/fulfillment-outbox/process",
+        "module":  "payments",
+        "handler_ref":  "Backend\\app.py:832",
+        "summary":  "Process Pending Fulfillment Outbox Records",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/sandbox/simulate-webhook",
+        "module":  "payments",
+        "handler_ref":  "Backend\\app.py:837",
+        "summary":  "Simulate Signed PayMongo Webhook",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/payments/attempts/{attempt_id}/simulate",
+        "module":  "payments",
+        "handler_ref":  "Backend\\app.py:945",
+        "summary":  "Dedicated Testing Simulator for Payment Attempt",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/payments/{payment_id}/expire",
+        "module":  "payments",
+        "handler_ref":  "Backend\\app.py:953",
+        "summary":  "Expire Active Payment Attempt \u0026 Remote Gateway Session",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/payments/{payment_id}/fail",
+        "module":  "payments",
+        "handler_ref":  "Backend\\app.py:976",
+        "summary":  "Fail Active Payment Attempt",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/sandbox/create-and-expire-test",
+        "module":  "payments",
+        "handler_ref":  "Backend\\app.py:1000",
+        "summary":  "Quick Test: Create and Expire Fresh Test Order \u0026 Attempt",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/auth/me",
+        "module":  "identity",
+        "handler_ref":  "Backend\\finance_routes.py:359",
+        "summary":  "Get Current Server-Bound Actor \u0026 Roles",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/users",
+        "module":  "identity",
+        "handler_ref":  "Backend\\finance_routes.py:364",
+        "summary":  "List Finance Users \u0026 Server-Bound Role Assignments",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/approval-matrix",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:377",
+        "summary":  "List Configured Approval Matrix Rules",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/auth/act-as",
+        "module":  "identity",
+        "handler_ref":  "Backend\\finance_routes.py:386",
+        "summary":  "Dev-Only Act-As Actor Switch (Audit-Logged)",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/policies",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:420",
+        "summary":  "List Financial Policies, Versions \u0026 Rules",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/policies/{policy_code}/versions",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:428",
+        "summary":  "Create Draft Policy Version",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/policies/versions/{version_id}/submit",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:457",
+        "summary":  "Submit Policy Version for Approval",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/policies/versions/{version_id}/approve",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:466",
+        "summary":  "Approve \u0026 Activate Policy Version (Author != Approver)",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/policies/versions/{version_id}/retire",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:476",
+        "summary":  "Retire Active Policy Version",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/exception-requests",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:486",
+        "summary":  "List Policy Exception Requests",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/exception-requests",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:501",
+        "summary":  "Create Scoped Policy Exception Request",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/exception-requests/{exception_id}/decide",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:525",
+        "summary":  "Approve or Reject Policy Exception Request",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/documents",
+        "module":  "documents",
+        "handler_ref":  "Backend\\finance_routes.py:548",
+        "summary":  "Upload Secure Document Evidence",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/documents",
+        "module":  "documents",
+        "handler_ref":  "Backend\\finance_routes.py:573",
+        "summary":  "List Authorized Document References",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/documents/{doc_id}/download",
+        "module":  "documents",
+        "handler_ref":  "Backend\\finance_routes.py:587",
+        "summary":  "Authorized Document Evidence Download",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/cash-advances",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:605",
+        "summary":  "List Cash Advances with Derived Reconciliation",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/cash-advances",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:615",
+        "summary":  "Create Cash Advance Request",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/cash-advances/{advance_id}",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:641",
+        "summary":  "Get Cash Advance Detail \u0026 Reconciliation",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/cash-advances/{advance_id}/submit",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:650",
+        "summary":  "Submit Cash Advance Request",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/cash-advances/{advance_id}/decide",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:659",
+        "summary":  "Approve, Reject, Return, or Cancel Cash Advance",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/cash-advances/{advance_id}/disbursements",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:677",
+        "summary":  "Maker: Prepare Bank Disbursement",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/disbursements/{disbursement_id}/verify",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:696",
+        "summary":  "Verifier: Independently Verify Disbursement",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/disbursements/{disbursement_id}/bank-approve",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:706",
+        "summary":  "Bank Approver: Authorize Disbursement",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/disbursements/{disbursement_id}/execute",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:716",
+        "summary":  "Record Manual Bank Execution Reference \u0026 Remittance Doc",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/disbursements/{disbursement_id}/verify-evidence",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:734",
+        "summary":  "Evidence Verifier: Confirm Bank Evidence \u0026 Release Advance",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/disbursements/{disbursement_id}/exception-state",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:744",
+        "summary":  "Mark Disbursement Failed, Unknown, or Cancelled",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/cash-advances/{advance_id}/cash-return",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:761",
+        "summary":  "Record Evidenced Employee Cash Return",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/cash-advances/{advance_id}/reimbursement-settle",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:780",
+        "summary":  "Record Evidenced Employee Excess Reimbursement Payment",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/cash-advances/{advance_id}/close",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:799",
+        "summary":  "Finance Controller: Authorize Final Closure \u0026 Freeze Snapshot",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/expense-reports",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:820",
+        "summary":  "List Monthly Expense Reports",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/expense-reports",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:830",
+        "summary":  "Create Monthly Expense Report",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/expense-reports/{report_id}",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:851",
+        "summary":  "Get Expense Report Detail",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "PATCH",
+        "path":  "/api/v1/finance/expense-reports/{report_id}",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:860",
+        "summary":  "Update Draft/Returned Expense Report Metadata \u0026 Evidence",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/expense-reports/{report_id}/lines",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:880",
+        "summary":  "Add Expense Line to Report",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/expense-reports/{report_id}/evaluate",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:905",
+        "summary":  "Dry-Run Policy Evaluation Preview",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/expense-reports/{report_id}/submit",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:924",
+        "summary":  "Validate Policy \u0026 Submit Monthly Expense Report",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/expense-reports/{report_id}/review",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:940",
+        "summary":  "Finance Reviewer: Review Expense Lines \u0026 Apply Oldest-First Settlement",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/vendors",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:962",
+        "summary":  "List Vendor / Payee Master Registry",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/vendors",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:972",
+        "summary":  "Create Vendor Master Record (Pending Verification)",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/vendors/{vendor_id}/verify",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:995",
+        "summary":  "Verify Vendor Master Record (Creator != Verifier)",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/vendors/{vendor_id}/bank-changes",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1005",
+        "summary":  "Request Vendor Bank Account Change",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/vendor-bank-changes/{change_id}/decide",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1024",
+        "summary":  "Approve or Reject Vendor Bank Account Change",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/tax-codes",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1034",
+        "summary":  "List Configured Tax \u0026 Withholding Codes",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/tax-codes",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1043",
+        "summary":  "Configure or CPA-Approve Tax Code",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/purchase-requests",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1062",
+        "summary":  "List Purchase Requests",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/purchase-requests",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1072",
+        "summary":  "Create Purchase Request",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/purchase-requests/{pr_id}",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1100",
+        "summary":  "Get Purchase Request Detail",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/purchase-requests/{pr_id}/submit",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1109",
+        "summary":  "Submit Purchase Request",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/purchase-requests/{pr_id}/decide",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1118",
+        "summary":  "Approve, Reject, Return, or Cancel Purchase Request",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/payables",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1136",
+        "summary":  "List Accounts Payable",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/payables",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1154",
+        "summary":  "Validate Vendor Invoice \u0026 Create Account Payable",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/payables/{payable_id}/payments",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1177",
+        "summary":  "Maker: Prepare Payable Payment Record",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/payment-records/{payment_id}/verify",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1195",
+        "summary":  "Verifier: Independently Verify Payable Payment",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/payment-records/{payment_id}/bank-approve",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1205",
+        "summary":  "Bank Approver: Authorize Payable Payment",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/payment-records/{payment_id}/execute",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1215",
+        "summary":  "Record Manual Bank Payment Reference \u0026 Remittance Advice",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/payment-records/{payment_id}/reconcile",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1234",
+        "summary":  "Evidence Verifier: Verify Remittance Evidence \u0026 Reconcile Payable",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/payment-records/{payment_id}/exception-state",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1251",
+        "summary":  "Mark Payment Failed, Payment_Unknown, or Cancelled",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/dashboard/summary",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1272",
+        "summary":  "Database-Backed Finance Operations KPI Summary",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/kpi-definitions",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1296",
+        "summary":  "Explicit KPI Numerator, Denominator \u0026 Cutoff Definitions",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/business-confirmations",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1301",
+        "summary":  "Register of Open Business \u0026 CPA Policy Confirmations (C1-C11)",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/tracker",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1306",
+        "summary":  "Centralized Finance Record Tracker (Reconciled Read Model)",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/tracker/export.csv",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1326",
+        "summary":  "Export Permission-Scoped, Formula-Safe UTF-8 BOM CSV",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/exception-register",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1349",
+        "summary":  "List Operational Control Exception Register",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/exception-register/{register_id}/resolve",
+        "module":  "finance",
+        "handler_ref":  "Backend\\finance_routes.py:1358",
+        "summary":  "Update or Resolve Exception Register Item",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/audit-events",
+        "module":  "audit",
+        "handler_ref":  "Backend\\finance_routes.py:1376",
+        "summary":  "List Append-Only Hash-Chained Financial Audit Events",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/integrations/status",
+        "module":  "integrations",
+        "handler_ref":  "Backend\\integration_routes.py:55",
+        "summary":  "Get Live Integration Diagnostic Statuses",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/integrations/paymongo/test",
+        "module":  "integrations",
+        "handler_ref":  "Backend\\integration_routes.py:68",
+        "summary":  "Test PayMongo API Key \u0026 Webhook Secret",
+        "requires_auth":  false,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/integrations/email/test",
+        "module":  "integrations",
+        "handler_ref":  "Backend\\integration_routes.py:96",
+        "summary":  "Test Google Email SMTP Handshake \u0026 Dispatch",
+        "requires_auth":  false,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/integrations/configure",
+        "module":  "integrations",
+        "handler_ref":  "Backend\\integration_routes.py:164",
+        "summary":  "Save Integration Credentials to Environment",
+        "requires_auth":  false,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/auth/csrf",
+        "module":  "identity",
+        "handler_ref":  "Backend\\auth_routes.py:133",
+        "summary":  "",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/auth/session",
+        "module":  "identity",
+        "handler_ref":  "Backend\\auth_routes.py:149",
+        "summary":  "",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/auth/login",
+        "module":  "identity",
+        "handler_ref":  "Backend\\auth_routes.py:164",
+        "summary":  "",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/auth/oauth/{provider}",
+        "module":  "identity",
+        "handler_ref":  "Backend\\auth_routes.py:284",
+        "summary":  "",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/auth/callback/{provider}",
+        "module":  "identity",
+        "handler_ref":  "Backend\\auth_routes.py:343",
+        "summary":  "",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/auth/switch-user",
+        "module":  "identity",
+        "handler_ref":  "Backend\\auth_routes.py:407",
+        "summary":  "",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/auth/logout",
+        "module":  "identity",
+        "handler_ref":  "Backend\\auth_routes.py:437",
+        "summary":  "",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/cost-allocation",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\cost_allocation_routes.py:20",
+        "summary":  "",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/cost-allocation/department",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\cost_allocation_routes.py:126",
+        "summary":  "",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/integrations/google-forms/submit",
+        "module":  "integrations",
+        "handler_ref":  "Backend\\google_forms_routes.py:332",
+        "summary":  "Ingest Google Form Response and Pair with PayMongo Checkout",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/integrations/google-forms/status",
+        "module":  "integrations",
+        "handler_ref":  "Backend\\google_forms_routes.py:519",
+        "summary":  "Check Google Forms Integration Status",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/integrations/google-forms/submit",
+        "module":  "integrations",
+        "handler_ref":  "Backend\\webhook_orchestration.py:613",
+        "summary":  "",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/webhooks/paymongo",
+        "module":  "payments",
+        "handler_ref":  "Backend\\webhook_orchestration.py:796",
+        "summary":  "Authoritative PayMongo Webhook Receiver",
+        "requires_auth":  true,
+        "runtime":  "python"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/payments/attempts/{attempt_id}/simulate",
+        "module":  "payments",
+        "handler_ref":  "Backend\\webhook_orchestration.py:904",
+        "summary":  "Dedicated Testing Simulator for Payment Attempt",
+        "requires_auth":  true,
+        "runtime":  "python"
+    }
+]

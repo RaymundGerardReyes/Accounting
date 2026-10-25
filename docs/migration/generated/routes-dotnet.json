@@ -1,0 +1,29 @@
+﻿[
+    {
+        "method":  "GET",
+        "path":  "/version",
+        "module":  "platform",
+        "handler_ref":  "Backend.DotNet\\src\\Host\\Rge.Accounting.Host\\Program.cs:7",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/health",
+        "module":  "platform",
+        "handler_ref":  "Backend.DotNet\\src\\Host\\Rge.Accounting.Host\\Program.cs:27",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/webhooks/paymongo",
+        "module":  "payments",
+        "handler_ref":  "Backend.DotNet\\src\\Modules\\Payments\\Rge.Payments.Api\\Webhooks\\PayMongoWebhookEndpoint.cs:26",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    }
+]
