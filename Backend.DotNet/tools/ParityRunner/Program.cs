@@ -161,6 +161,31 @@ var sample = new { AmountMinor = 10000, OrderNumber = "ORD-001" };
 string snakeJson = JsonSerializer.Serialize(sample, jsonOpts);
 Assert("JsonDefaults serializes snake_case keys", snakeJson.Contains("\"amount_minor\":10000", StringComparison.Ordinal) && snakeJson.Contains("\"order_number\":\"ORD-001\"", StringComparison.Ordinal));
 
+// 8. Test Security Infrastructure (Pillars 1-3)
+Console.WriteLine("\n--- Testing Security Infrastructure (Pillars 1-3) ---");
+var (rawToken, tokenHash) = Rge.Identity.Infrastructure.SessionTokenHasher.CreateSessionToken();
+Assert("Session token raw is non-empty and 43+ chars", !string.IsNullOrEmpty(rawToken) && rawToken.Length >= 43);
+Assert("Session token hash matches re-hash", Rge.Identity.Infrastructure.SessionTokenHasher.HashToken(rawToken) == tokenHash);
+
+byte[] testKey = new byte[32];
+RandomNumberGenerator.Fill(testKey);
+var encService = new Rge.BuildingBlocks.Infrastructure.Crypto.FieldEncryptionService(testKey);
+string secretData = "0123-4567-8901 (BDO Bank Account)";
+string cipher = encService.Encrypt(secretData, "account_aad");
+Assert("FieldEncryptionService ciphertext starts with v1:", cipher.StartsWith("v1:", StringComparison.Ordinal));
+string decrypted = encService.Decrypt(cipher, "account_aad");
+Assert("FieldEncryptionService decrypts to original plaintext", decrypted == secretData);
+
+byte[] pdfHeader = [0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x37];
+var magicRes = Rge.Documents.Infrastructure.MagicByteValidator.ValidateAndCreateSafeName("invoice.pdf", 1024, pdfHeader);
+Assert("MagicByteValidator detects application/pdf", magicRes.IsSuccess && magicRes.Value.DetectedMimeType == "application/pdf");
+
+var traversalRes = Rge.Documents.Infrastructure.MagicByteValidator.ValidateAndCreateSafeName("../evil.pdf", 1024, pdfHeader);
+Assert("MagicByteValidator blocks path traversal", !traversalRes.IsSuccess && traversalRes.Error.Code == "Documents.PathTraversalDetected");
+
+string escapedFormula = Rge.Finance.Infrastructure.Reporting.CsvInjectionSafeWriter.EscapeCell("=cmd|'/C calc'!A0");
+Assert("CsvInjectionSafeWriter neutralizes = formula prefix", escapedFormula.StartsWith("'=", StringComparison.Ordinal));
+
 Console.WriteLine("\n==============================================================");
 Console.WriteLine($" RESULTS: {passed} PASSED, {failed} FAILED");
 Console.WriteLine("==============================================================");

@@ -12,6 +12,9 @@
     <ProjectReference Include="..\..\src\BuildingBlocks\Rge.BuildingBlocks.Infrastructure\Rge.BuildingBlocks.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\Rge.BuildingBlocks.Api\Rge.BuildingBlocks.Api.csproj" />
     <ProjectReference Include="..\..\src\Modules\Finance\Rge.Finance.Domain\Rge.Finance.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Finance\Rge.Finance.Infrastructure\Rge.Finance.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Modules\Payments\Rge.Payments.Domain\Rge.Payments.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Identity\Rge.Identity.Infrastructure\Rge.Identity.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Documents\Rge.Documents.Infrastructure\Rge.Documents.Infrastructure.csproj" />
   </ItemGroup>
 </Project>
