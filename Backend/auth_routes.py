@@ -86,7 +86,7 @@ def get_all_users(db: Session) -> List[Dict[str, Any]]:
         if parsed:
             return parsed
     except Exception:
-        pass
+        db.rollback()
     return get_all_users_fallback(db)
 
 
@@ -101,7 +101,7 @@ def validate_session(raw_token: Optional[str], db: Session) -> Dict[str, Any]:
         if row and row.data:
             return row.data if isinstance(row.data, dict) else json.loads(row.data)
     except Exception:
-        pass
+        db.rollback()
 
     # Token payload fallback check
     if raw_token.startswith("sess_"):
@@ -204,7 +204,7 @@ def login_with_credentials(
                 authenticated_user = result.get("user")
                 session_token = result.get("raw_token")
     except Exception:
-        pass
+        db.rollback()
 
     # Direct database match fallback
     if not authenticated_user:
@@ -314,7 +314,7 @@ def initiate_oauth_flow(
         if row and row.state:
             state = row.state
     except Exception:
-        pass
+        db.rollback()
 
     # If external OAuth client ID is configured, redirect to live IdP
     if provider == "google" and os.getenv("GOOGLE_CLIENT_ID"):

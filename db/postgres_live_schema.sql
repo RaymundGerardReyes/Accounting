@@ -142,8 +142,8 @@ BEGIN
   IF p_input IS NULL THEN
     RETURN '';
   END IF;
-  -- Strip null bytes and trim whitespace
-  v_clean := btrim(replace(p_input, chr(0), ''));
+  -- Trim whitespace
+  v_clean := btrim(p_input);
   -- Neutralize spreadsheet/command injection prefixes (=, +, -, @)
   IF left(v_clean, 1) IN ('=', '+', '-', '@') THEN
     v_clean := '[SANITIZED] ' || regexp_replace(v_clean, '^[=+\-@]+', '');
