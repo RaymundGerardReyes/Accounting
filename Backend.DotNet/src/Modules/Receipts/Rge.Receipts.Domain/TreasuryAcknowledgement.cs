@@ -48,3 +48,4 @@ public sealed class TreasuryAcknowledgement : ValueObject
 
     public override string ToString() => AcknowledgementNumber;
 }
+

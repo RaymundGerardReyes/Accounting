@@ -34,3 +34,4 @@ public sealed class AuditDigest : ValueObject
 
     public override string ToString() => Value;
 }
+

@@ -30,10 +30,11 @@ public static class EndpointRouteBuilderExtensions
 
 
 
-        // Pre-computed /version and /health probes (zero reflection per request)
-
+        // Pre-computed /version, /api/version, and /health probes (zero reflection per request)
         app.MapGet("/version", () => Results.Ok(cachedVersionPayload))
+           .WithTags("Probes");
 
+        app.MapGet("/api/version", () => Results.Ok(cachedVersionPayload))
            .WithTags("Probes");
 
 

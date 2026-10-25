@@ -40,3 +40,4 @@ public sealed class GetReceiptByOrderHandler : IQueryHandler<GetReceiptByOrderQu
         return Result.Success(IssueReceiptHandler.MapToDto(receipt));
     }
 }
+

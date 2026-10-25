@@ -47,3 +47,4 @@ public static class BirRmc77_2024Policy
         return Result.Success();
     }
 }
+

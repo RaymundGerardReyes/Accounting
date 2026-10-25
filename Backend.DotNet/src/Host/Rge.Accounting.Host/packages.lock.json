@@ -8,6 +8,43 @@
         "resolved": "6.0.0",
         "contentHash": "+/SsmiySsXJlvQLCGBqaZKNVt3s/Y/HbAdwtop7Km2CnuZbaScoqkWJEBQ5Cy9ebkn6kCYKrHsXgwrFdTgcb3g=="
       },
+      "rge.audit.api": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.Audit.Application": "[1.0.0, )",
+          "Rge.Audit.Contracts": "[1.0.0, )",
+          "Rge.BuildingBlocks.Api": "[1.0.0, )"
+        }
+      },
+      "rge.audit.application": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.Audit.Contracts": "[1.0.0, )",
+          "Rge.Audit.Domain": "[1.0.0, )",
+          "Rge.BuildingBlocks.Application": "[1.0.0, )"
+        }
+      },
+      "rge.audit.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.audit.domain": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.audit.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.Audit.Application": "[1.0.0, )",
+          "Rge.Audit.Domain": "[1.0.0, )",
+          "Rge.BuildingBlocks.Infrastructure": "[1.0.0, )"
+        }
+      },
       "rge.buildingblocks.api": {
         "type": "Project",
         "dependencies": {
@@ -30,6 +67,80 @@
       },
       "rge.buildingblocks.sharedkernel": {
         "type": "Project"
+      },
+      "rge.identity.api": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Api": "[1.0.0, )",
+          "Rge.Identity.Application": "[1.0.0, )",
+          "Rge.Identity.Contracts": "[1.0.0, )"
+        }
+      },
+      "rge.identity.application": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.Identity.Contracts": "[1.0.0, )",
+          "Rge.Identity.Domain": "[1.0.0, )"
+        }
+      },
+      "rge.identity.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.identity.domain": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.identity.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Infrastructure": "[1.0.0, )",
+          "Rge.Identity.Application": "[1.0.0, )",
+          "Rge.Identity.Domain": "[1.0.0, )"
+        }
+      },
+      "rge.receipts.api": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Api": "[1.0.0, )",
+          "Rge.Receipts.Application": "[1.0.0, )",
+          "Rge.Receipts.Contracts": "[1.0.0, )"
+        }
+      },
+      "rge.receipts.application": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.Receipts.Contracts": "[1.0.0, )",
+          "Rge.Receipts.Domain": "[1.0.0, )"
+        }
+      },
+      "rge.receipts.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.receipts.domain": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.receipts.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Infrastructure": "[1.0.0, )",
+          "Rge.Receipts.Application": "[1.0.0, )",
+          "Rge.Receipts.Domain": "[1.0.0, )"
+        }
       }
     }
   }

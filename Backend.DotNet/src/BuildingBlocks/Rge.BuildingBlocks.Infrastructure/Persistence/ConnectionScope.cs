@@ -18,48 +18,32 @@ public sealed class ConnectionScope : IAsyncDisposable
 
 {
 
-    private readonly NpgsqlDataSourceFactory _dataSourceFactory;
+    private readonly NpgsqlDataSourceFactory? _dataSourceFactory;
 
     private DbConnection? _connection;
 
-
-
     public DbTransaction? CurrentTransaction { get; internal set; }
 
-
-
-    public ConnectionScope(NpgsqlDataSourceFactory dataSourceFactory)
-
+    public ConnectionScope(NpgsqlDataSourceFactory? dataSourceFactory = null)
     {
-
-        ArgumentNullException.ThrowIfNull(dataSourceFactory);
-
         _dataSourceFactory = dataSourceFactory;
-
     }
 
-
-
     public async ValueTask<DbConnection> GetOpenConnectionAsync(CancellationToken cancellationToken = default)
-
     {
-
-        if (_connection is null)
-
+        if (_dataSourceFactory is null)
         {
-
-            _connection = await _dataSourceFactory
-
-                .OpenConnectionAsync(cancellationToken)
-
-                .ConfigureAwait(false);
-
+            throw new InvalidOperationException("No database connection factory configured (offline mode).");
         }
 
-
+        if (_connection is null)
+        {
+            _connection = await _dataSourceFactory
+                .OpenConnectionAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         return _connection;
-
     }
 
 

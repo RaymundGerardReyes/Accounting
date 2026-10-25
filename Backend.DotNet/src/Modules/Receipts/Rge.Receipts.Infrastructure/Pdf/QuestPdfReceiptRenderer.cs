@@ -79,3 +79,4 @@ public sealed class QuestPdfReceiptRenderer : IPdfRenderer
     private static void WriteXrefEntry(Stream stream, long offset) =>
         WriteAscii(stream, $"{offset.ToString("D10", CultureInfo.InvariantCulture)} 00000 n \n");
 }
+

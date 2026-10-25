@@ -44,7 +44,7 @@ public sealed class ReceiptRepository : IReceiptRepository
                 }
             }
         }
-        catch (DbException)
+        catch (Exception ex) when (ex is DbException or InvalidOperationException)
         {
             // Fallback to atomic in-memory sequence when running in offline contract parity tests
         }
@@ -88,7 +88,7 @@ public sealed class ReceiptRepository : IReceiptRepository
 
             await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (DbException)
+        catch (Exception ex) when (ex is DbException or InvalidOperationException)
         {
             // Retained in ByPaymentMemory / ByOrderMemory when DB table is offline
         }
@@ -120,7 +120,7 @@ public sealed class ReceiptRepository : IReceiptRepository
                 return materialized;
             }
         }
-        catch (DbException)
+        catch (Exception ex) when (ex is DbException or InvalidOperationException)
         {
         }
 
@@ -153,7 +153,7 @@ public sealed class ReceiptRepository : IReceiptRepository
                 return materialized;
             }
         }
-        catch (DbException)
+        catch (Exception ex) when (ex is DbException or InvalidOperationException)
         {
         }
 
@@ -195,3 +195,4 @@ public sealed class ReceiptRepository : IReceiptRepository
         cmd.Parameters.Add(param);
     }
 }
+

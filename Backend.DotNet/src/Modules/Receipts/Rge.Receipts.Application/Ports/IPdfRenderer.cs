@@ -9,3 +9,4 @@ public interface IPdfRenderer
 {
     byte[] RenderOfficialReceiptPdf(OfficialReceipt receipt);
 }
+

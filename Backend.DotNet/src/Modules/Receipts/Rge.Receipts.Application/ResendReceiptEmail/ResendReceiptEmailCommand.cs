@@ -11,3 +11,4 @@ public sealed record ResendReceiptEmailResponse(
     string OfficialReceiptNumber,
     string RecipientEmail,
     bool Dispatched);
+

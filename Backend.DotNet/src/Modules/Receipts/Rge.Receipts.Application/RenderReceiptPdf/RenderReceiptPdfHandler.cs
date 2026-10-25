@@ -47,3 +47,4 @@ public sealed class RenderReceiptPdfHandler : IQueryHandler<RenderReceiptPdfQuer
         return Result.Success(new RenderedReceiptPdfDto(fileName, "application/pdf", pdfBytes));
     }
 }
+

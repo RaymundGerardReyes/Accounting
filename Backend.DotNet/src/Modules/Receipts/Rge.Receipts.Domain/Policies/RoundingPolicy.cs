@@ -10,3 +10,4 @@ public static class RoundingPolicy
     public static long DivideHalfUp(long numerator, long denominator) =>
         Rounding.DivideHalfUp(numerator, denominator);
 }
+

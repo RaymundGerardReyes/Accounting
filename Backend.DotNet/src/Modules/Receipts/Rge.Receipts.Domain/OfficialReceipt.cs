@@ -101,3 +101,4 @@ public sealed class OfficialReceipt : AggregateRoot<string>
         return Result.Success(receipt);
     }
 }
+

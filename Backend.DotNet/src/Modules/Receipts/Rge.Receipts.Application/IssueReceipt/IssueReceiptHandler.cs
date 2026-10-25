@@ -153,3 +153,4 @@ public sealed class IssueReceiptHandler : ICommandHandler<IssueReceiptCommand, R
             IssuedAtUtc: receipt.IssuedAtUtc);
     }
 }
+

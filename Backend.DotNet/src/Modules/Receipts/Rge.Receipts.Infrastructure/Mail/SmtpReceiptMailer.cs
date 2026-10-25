@@ -88,3 +88,4 @@ public sealed class SmtpReceiptMailer : IReceiptMailer
         }
     }
 }
+

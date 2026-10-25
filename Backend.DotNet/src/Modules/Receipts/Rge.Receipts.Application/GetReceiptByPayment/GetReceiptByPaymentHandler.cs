@@ -40,3 +40,4 @@ public sealed class GetReceiptByPaymentHandler : IQueryHandler<GetReceiptByPayme
         return Result.Success(IssueReceiptHandler.MapToDto(receipt));
     }
 }
+

@@ -19,3 +19,4 @@ public sealed class CanonicalJsonSerializer : ICanonicalJsonSerializer
         return new AuditDigest(digestString);
     }
 }
+

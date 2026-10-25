@@ -12,3 +12,4 @@ public sealed record RenderedReceiptPdfDto(
     string FileName,
     string ContentType,
     byte[] PdfBytes);
+

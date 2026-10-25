@@ -84,3 +84,4 @@ public sealed class ReceiptEndpoints : IEndpointModule
         }).WithTags("Receipts");
     }
 }
+

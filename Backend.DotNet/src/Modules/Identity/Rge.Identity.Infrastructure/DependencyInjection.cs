@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using Microsoft.Extensions.DependencyInjection;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
 
 using Rge.Identity.Application.ActAs;
@@ -154,22 +156,58 @@ public sealed class IdentityModuleServices
 
         var csrfTokenService = new CsrfTokenService(csrfSigningKey);
 
-
-
         return new IdentityModuleServices(
-
             authenticator,
-
             oauthStateStore,
-
             roleStore,
-
             actorCache,
-
             csrfTokenService,
-
             clock);
+    }
+}
 
+[SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "Instantiated via dependency injection")]
+internal sealed class ConnectionScopeIdentityDbFactory : IIdentityDbConnectionFactory
+{
+    private readonly Rge.BuildingBlocks.Infrastructure.Persistence.ConnectionScope _connectionScope;
+
+    public ConnectionScopeIdentityDbFactory(Rge.BuildingBlocks.Infrastructure.Persistence.ConnectionScope connectionScope)
+    {
+        ArgumentNullException.ThrowIfNull(connectionScope);
+        _connectionScope = connectionScope;
     }
 
+    public ValueTask<System.Data.Common.DbConnection> OpenConnectionAsync(CancellationToken cancellationToken = default) =>
+        _connectionScope.GetOpenConnectionAsync(cancellationToken);
+}
+
+public static class IdentityServiceCollectionExtensions
+{
+    public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddIdentityModule(
+        this Microsoft.Extensions.DependencyInjection.IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddScoped<IIdentityDbConnectionFactory, ConnectionScopeIdentityDbFactory>();
+        services.AddScoped(sp =>
+        {
+            var factory = sp.GetRequiredService<IIdentityDbConnectionFactory>();
+            var clock = sp.GetRequiredService<IClock>();
+            byte[] csrfKey = "0123456789abcdef0123456789abcdef"u8.ToArray();
+            return IdentityModuleServices.Create(factory, clock, csrfKey);
+        });
+
+        services.AddScoped(sp => sp.GetRequiredService<IdentityModuleServices>().LoginHandler);
+        services.AddScoped(sp => sp.GetRequiredService<IdentityModuleServices>().LogoutHandler);
+        services.AddScoped(sp => sp.GetRequiredService<IdentityModuleServices>().GetSessionHandler);
+        services.AddScoped(sp => sp.GetRequiredService<IdentityModuleServices>().CreateCsrfTokenHandler);
+        services.AddScoped(sp => sp.GetRequiredService<IdentityModuleServices>().OAuthBeginHandler);
+        services.AddScoped(sp => sp.GetRequiredService<IdentityModuleServices>().OAuthCallbackHandler);
+        services.AddScoped(sp => sp.GetRequiredService<IdentityModuleServices>().ResolveActorHandler);
+        services.AddScoped(sp => sp.GetRequiredService<IdentityModuleServices>().ListFinanceUsersHandler);
+        services.AddScoped(sp => sp.GetRequiredService<IdentityModuleServices>().SwitchUserHandler);
+        services.AddScoped(sp => sp.GetRequiredService<IdentityModuleServices>().ActAsHandler);
+
+        return services;
+    }
 }

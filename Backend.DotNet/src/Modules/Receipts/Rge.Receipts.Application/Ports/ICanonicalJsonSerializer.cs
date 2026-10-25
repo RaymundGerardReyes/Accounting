@@ -10,3 +10,4 @@ public interface ICanonicalJsonSerializer
     string SerializeCanonical<T>(T payload);
     AuditDigest ComputeReceiptDigest<T>(T payload);
 }
+

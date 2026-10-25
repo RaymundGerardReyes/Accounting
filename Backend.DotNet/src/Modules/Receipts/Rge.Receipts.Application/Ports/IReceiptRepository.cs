@@ -12,3 +12,4 @@ public interface IReceiptRepository
     Task<OfficialReceipt?> GetByPaymentAttemptIdAsync(string paymentAttemptId, CancellationToken cancellationToken = default);
     Task<OfficialReceipt?> GetByOrderIdAsync(string orderId, CancellationToken cancellationToken = default);
 }
+

@@ -68,3 +68,4 @@ public sealed class ResendReceiptEmailHandler : ICommandHandler<ResendReceiptEma
             Dispatched: true));
     }
 }
+

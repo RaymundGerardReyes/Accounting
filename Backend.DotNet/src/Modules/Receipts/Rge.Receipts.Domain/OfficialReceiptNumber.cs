@@ -45,3 +45,4 @@ public sealed class OfficialReceiptNumber : ValueObject
 
     public override string ToString() => Value;
 }
+

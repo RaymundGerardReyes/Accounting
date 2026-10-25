@@ -17,3 +17,4 @@ public static class DigestService
         return ConstantTimeComparer.EqualsConstantTime(computed, expectedDigest.Value);
     }
 }
+

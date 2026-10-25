@@ -1,6 +1,11 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Modules\Audit\Rge.Audit.Domain\Rge.Audit.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Audit\Rge.Audit.Infrastructure\Rge.Audit.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\BuildingBlocks\Rge.BuildingBlocks.Infrastructure\Rge.BuildingBlocks.Infrastructure.csproj" />
+  </ItemGroup>
 </Project>

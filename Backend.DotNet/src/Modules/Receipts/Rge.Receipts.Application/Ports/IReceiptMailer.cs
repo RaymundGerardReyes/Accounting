@@ -14,3 +14,4 @@ public interface IReceiptMailer
         byte[] pdfBytes,
         CancellationToken cancellationToken = default);
 }
+

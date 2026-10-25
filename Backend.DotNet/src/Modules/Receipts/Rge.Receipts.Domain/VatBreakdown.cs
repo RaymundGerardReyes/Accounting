@@ -51,3 +51,4 @@ public sealed class VatBreakdown : ValueObject
         yield return GrossAmount;
     }
 }
+
