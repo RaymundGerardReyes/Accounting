@@ -47,3 +47,10 @@ description: Repository rules for Conventional Commits, scoped staging, secret p
    - All migration and rewrite development must occur on an isolated migration branch (`migrating-<target>`, e.g. `migrating-C#`).
    - The production branch (`main`) must remain untouched, clean, and deployable until 100% functional, contract, and test parity is proven on the migration branch.
    - Preserved legacy branches serve as the authoritative baseline for regression testing and side-by-side parity benchmarking.
+
+6. **Dual-Line Release Discipline & Scope Isolation**:
+   - Commits must NEVER mix changes to `Frontend/` with backend directories (`Backend/`, `Backend.DotNet/`, `db/`), except for `chore(release)` or `build(deps)` synchronization commits.
+   - Commits with scope `web` must strictly and exclusively modify files within the `Frontend/` directory.
+   - Release tags are strictly immutable. Autonomous agents and developers must NEVER create, move, or delete Git tags without explicit user approval at designated release gates.
+   - Release tags must adhere to namespaced line identifiers (`dotnet/vX.Y.Z` and `python/vX.Y.Z`).
+
