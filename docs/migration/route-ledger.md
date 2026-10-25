@@ -1,4 +1,4 @@
-﻿# R.G.E Accounting Platform - Route Migration Ledger
+# R.G.E Accounting Platform - Route Migration Ledger
 
 Authoritative tracking ledger for all 113 unique HTTP endpoints across the Python-to-.NET 10 migration.
 
@@ -17,7 +17,7 @@ Authoritative tracking ledger for all 113 unique HTTP endpoints across the Pytho
 | **platform** | `v0.1.0` | 4 | 1 | 1 | 2 | 0 | **0%** |
 | **identity** | `v0.2.0` | 10 | 10 | 0 | 0 | 0 | **0%** |
 | **audit** | `v0.2.0` | 1 | 1 | 0 | 0 | 0 | **0%** |
-| **receipts** | `v0.3.0` | 5 | 5 | 0 | 0 | 0 | **0%** |
+| **receipts** | `v0.3.0` | 5 | 0 | 5 | 0 | 0 | **0%** |
 | **payments** | `v0.3.0` | 16 | 15 | 0 | 1 | 0 | **0%** |
 | **finance** | `v0.4.0` | 58 | 58 | 0 | 0 | 0 | **0%** |
 | **documents** | `v0.5.0` | 3 | 3 | 0 | 0 | 0 | **0%** |
@@ -46,11 +46,11 @@ Authoritative tracking ledger for all 113 unique HTTP endpoints across the Pytho
 | `IDN-009` | identity | **GET** | `/api/v1/finance/auth/me` | `Backend/finance_routes.py:359` | - | **not-started** | - | authenticated | no | `v0.2.0` | Get Current Server-Bound Actor & Roles |
 | `IDN-010` | identity | **GET** | `/api/v1/finance/users` | `Backend/finance_routes.py:364` | - | **not-started** | - | authenticated | no | `v0.2.0` | List Finance Users & Server-Bound Role Assignments |
 | `AUD-001` | audit | **GET** | `/api/v1/finance/audit-events` | `Backend/finance_routes.py:1376` | - | **not-started** | - | authenticated | no | `v0.2.0` | List Append-Only Hash-Chained Financial Audit Events |
-| `REC-001` | receipts | **GET** | `/api/v1/orders/{order_id}/receipt` | `Backend/app.py:750` | - | **not-started** | - | authenticated | no | `v0.3.0` | Get Order Official Receipt Data |
-| `REC-002` | receipts | **GET** | `/api/v1/orders/{order_id}/receipt/pdf` | `Backend/app.py:760` | - | **not-started** | - | authenticated | no | `v0.3.0` | Download Order Official Receipt PDF |
-| `REC-003` | receipts | **GET** | `/api/v1/payments/{payment_id}/receipt` | `Backend/app.py:573` | - | **not-started** | - | authenticated | no | `v0.3.0` | Get Official Receipt & Acknowledgement Data |
-| `REC-004` | receipts | **POST** | `/api/v1/payments/{payment_id}/receipt/email` | `Backend/app.py:651` | - | **not-started** | - | authenticated | yes (fn_append_audit_event) | `v0.3.0` | Resend Official Receipt & Acknowledgement via SMTP |
-| `REC-005` | receipts | **GET** | `/api/v1/payments/{payment_id}/receipt/pdf` | `Backend/app.py:606` | - | **not-started** | - | authenticated | no | `v0.3.0` | Download or Stream Official Receipt PDF |
+| `REC-001` | receipts | **GET** | `/api/v1/orders/{order_id}/receipt` | `Backend/app.py:750` | `Backend.DotNet/src/Modules/Receipts/Rge.Receipts.Api/ReceiptEndpoints.cs:56` | **implemented** | - | authenticated | no | `v0.3.0` | Get Order Official Receipt Data |
+| `REC-002` | receipts | **GET** | `/api/v1/orders/{order_id}/receipt/pdf` | `Backend/app.py:760` | `Backend.DotNet/src/Modules/Receipts/Rge.Receipts.Api/ReceiptEndpoints.cs:67` | **implemented** | - | authenticated | no | `v0.3.0` | Download Order Official Receipt PDF |
+| `REC-003` | receipts | **GET** | `/api/v1/payments/{payment_id}/receipt` | `Backend/app.py:573` | `Backend.DotNet/src/Modules/Receipts/Rge.Receipts.Api/ReceiptEndpoints.cs:23` | **implemented** | - | authenticated | no | `v0.3.0` | Get Official Receipt & Acknowledgement Data |
+| `REC-004` | receipts | **POST** | `/api/v1/payments/{payment_id}/receipt/email` | `Backend/app.py:651` | `Backend.DotNet/src/Modules/Receipts/Rge.Receipts.Api/ReceiptEndpoints.cs:45` | **implemented** | - | authenticated | yes (fn_append_audit_event) | `v0.3.0` | Resend Official Receipt & Acknowledgement via SMTP |
+| `REC-005` | receipts | **GET** | `/api/v1/payments/{payment_id}/receipt/pdf` | `Backend/app.py:606` | `Backend.DotNet/src/Modules/Receipts/Rge.Receipts.Api/ReceiptEndpoints.cs:34` | **implemented** | - | authenticated | no | `v0.3.0` | Download or Stream Official Receipt PDF |
 | `PAY-001` | payments | **GET** | `/api/v1/admin/fulfillment-outbox` | `Backend/app.py:822` | - | **not-started** | - | system_admin | no | `v0.3.0` | List Fulfillment Outbox Records |
 | `PAY-002` | payments | **POST** | `/api/v1/admin/fulfillment-outbox/process` | `Backend/app.py:832` | - | **not-started** | - | system_admin | no | `v0.3.0` | Process Pending Fulfillment Outbox Records |
 | `PAY-003` | payments | **POST** | `/api/v1/admin/payments/{payment_id}/reconcile` | `Backend/app.py:794` | - | **not-started** | - | system_admin | no | `v0.3.0` | Reconcile Payment Attempt |

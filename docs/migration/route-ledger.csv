@@ -1,4 +1,4 @@
-﻿id,module,method,path,python_ref,dotnet_ref,status,parity_test,allowed_differences,sod_or_authz,writes_audit,milestone,notes
+id,module,method,path,python_ref,dotnet_ref,status,parity_test,allowed_differences,sod_or_authz,writes_audit,milestone,notes
 "PLT-001","platform","GET","/api/health","Backend/app.py:186","Backend.DotNet/src/Host/Rge.Accounting.Host/Composition/EndpointRouteBuilderExtensions.cs:47","implemented","-","none","public","no","v0.1.0","API Health Check"
 "PLT-002","platform","GET","/api/version","Backend/app.py:180","-","not-started","-","none","public","no","v0.1.0","API Version Info"
 "PLT-003","platform","GET","/health","Backend/app.py:185","Backend.DotNet/src/Host/Rge.Accounting.Host/Composition/EndpointRouteBuilderExtensions.cs:43","tested","Backend.DotNet/tests/Integration.Tests","none","public","no","v0.1.0","Verified in Host Program.cs"
@@ -14,11 +14,11 @@
 "IDN-009","identity","GET","/api/v1/finance/auth/me","Backend/finance_routes.py:359","-","not-started","-","none","authenticated","no","v0.2.0","Get Current Server-Bound Actor & Roles"
 "IDN-010","identity","GET","/api/v1/finance/users","Backend/finance_routes.py:364","-","not-started","-","none","authenticated","no","v0.2.0","List Finance Users & Server-Bound Role Assignments"
 "AUD-001","audit","GET","/api/v1/finance/audit-events","Backend/finance_routes.py:1376","-","not-started","-","none","authenticated","no","v0.2.0","List Append-Only Hash-Chained Financial Audit Events"
-"REC-001","receipts","GET","/api/v1/orders/{order_id}/receipt","Backend/app.py:750","-","not-started","-","none","authenticated","no","v0.3.0","Get Order Official Receipt Data"
-"REC-002","receipts","GET","/api/v1/orders/{order_id}/receipt/pdf","Backend/app.py:760","-","not-started","-","none","authenticated","no","v0.3.0","Download Order Official Receipt PDF"
-"REC-003","receipts","GET","/api/v1/payments/{payment_id}/receipt","Backend/app.py:573","-","not-started","-","none","authenticated","no","v0.3.0","Get Official Receipt & Acknowledgement Data"
-"REC-004","receipts","POST","/api/v1/payments/{payment_id}/receipt/email","Backend/app.py:651","-","not-started","-","none","authenticated","yes (fn_append_audit_event)","v0.3.0","Resend Official Receipt & Acknowledgement via SMTP"
-"REC-005","receipts","GET","/api/v1/payments/{payment_id}/receipt/pdf","Backend/app.py:606","-","not-started","-","none","authenticated","no","v0.3.0","Download or Stream Official Receipt PDF"
+"REC-001","receipts","GET","/api/v1/orders/{order_id}/receipt","Backend/app.py:750","Backend.DotNet/src/Modules/Receipts/Rge.Receipts.Api/ReceiptEndpoints.cs:56","implemented","-","none","authenticated","no","v0.3.0","Get Order Official Receipt Data"
+"REC-002","receipts","GET","/api/v1/orders/{order_id}/receipt/pdf","Backend/app.py:760","Backend.DotNet/src/Modules/Receipts/Rge.Receipts.Api/ReceiptEndpoints.cs:67","implemented","-","none","authenticated","no","v0.3.0","Download Order Official Receipt PDF"
+"REC-003","receipts","GET","/api/v1/payments/{payment_id}/receipt","Backend/app.py:573","Backend.DotNet/src/Modules/Receipts/Rge.Receipts.Api/ReceiptEndpoints.cs:23","implemented","-","none","authenticated","no","v0.3.0","Get Official Receipt & Acknowledgement Data"
+"REC-004","receipts","POST","/api/v1/payments/{payment_id}/receipt/email","Backend/app.py:651","Backend.DotNet/src/Modules/Receipts/Rge.Receipts.Api/ReceiptEndpoints.cs:45","implemented","-","none","authenticated","yes (fn_append_audit_event)","v0.3.0","Resend Official Receipt & Acknowledgement via SMTP"
+"REC-005","receipts","GET","/api/v1/payments/{payment_id}/receipt/pdf","Backend/app.py:606","Backend.DotNet/src/Modules/Receipts/Rge.Receipts.Api/ReceiptEndpoints.cs:34","implemented","-","none","authenticated","no","v0.3.0","Download or Stream Official Receipt PDF"
 "PAY-001","payments","GET","/api/v1/admin/fulfillment-outbox","Backend/app.py:822","-","not-started","-","none","system_admin","no","v0.3.0","List Fulfillment Outbox Records"
 "PAY-002","payments","POST","/api/v1/admin/fulfillment-outbox/process","Backend/app.py:832","-","not-started","-","none","system_admin","no","v0.3.0","Process Pending Fulfillment Outbox Records"
 "PAY-003","payments","POST","/api/v1/admin/payments/{payment_id}/reconcile","Backend/app.py:794","-","not-started","-","none","system_admin","no","v0.3.0","Reconcile Payment Attempt"
