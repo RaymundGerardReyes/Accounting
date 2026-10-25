@@ -115,7 +115,8 @@ function onFormSubmit(e) {
       quantity: quantity,
       payment_method: "hosted_checkout",
       notes: notes,
-      raw_answers: formData
+      raw_answers: formData,
+      secret: CONFIG.SECRET_KEY
     };
 
     var payloadJson = JSON.stringify(payload);
@@ -601,6 +602,19 @@ function runBookstoreFormBuilder() {
 }
 
 /**
+ * Safely displays an alert in spreadsheet UI, or falls back to Logger.log if executed
+ * directly from the Apps Script code editor, automated trigger, or headless context.
+ * @param {string} message
+ */
+function showAlertSafely(message) {
+  try {
+    SpreadsheetApp.getUi().alert(message);
+  } catch (uiErr) {
+    Logger.log(message);
+  }
+}
+
+/**
  * ==============================================================================
  * CUSTOM ADMIN MENU (R.G.E Bookstore Admin)
  * ==============================================================================
@@ -628,16 +642,19 @@ function onOpen() {
 function runThreeRandomOrders() {
   if (typeof generateRandomBookstoreSubmissions === "function") {
     generateRandomBookstoreSubmissions(3);
+    showAlertSafely("✅ 3 simulated student orders submitted to PayMongo & recorded to sheet!");
   } else {
-    SpreadsheetApp.getUi().alert("Please ensure FormBuilder.gs is added to your Apps Script project.");
+    showAlertSafely("Please ensure FormBuilder.gs is added to your Apps Script project.");
   }
 }
 
 function runSingleRandomOrder() {
   if (typeof generateRandomBookstoreSubmissions === "function") {
     generateRandomBookstoreSubmissions(1);
+    showAlertSafely("✅ 1 simulated student order submitted to PayMongo & recorded to sheet!");
   } else {
     onFormSubmit();
+    showAlertSafely("✅ Diagnostic test run processed!");
   }
 }
 
@@ -648,7 +665,7 @@ function repairTriggersMenuAction() {
     if (typeof ensureFormSubmitTrigger === "function") {
       ensureFormSubmitTrigger(spreadsheet);
     }
-    SpreadsheetApp.getUi().alert("Trigger verified for spreadsheet: " + spreadsheet.getName());
+    showAlertSafely("Trigger verified for spreadsheet: " + spreadsheet.getName());
   }
 }
 
@@ -665,7 +682,7 @@ function setupBookstoreSheet() {
     } catch (_) {}
   }
   if (!spreadsheet) {
-    SpreadsheetApp.getUi().alert("Error: Active spreadsheet could not be found.");
+    showAlertSafely("Error: Active spreadsheet could not be found.");
     return;
   }
   if (typeof formatBookstoreSheetHeaders === "function") {
@@ -674,7 +691,7 @@ function setupBookstoreSheet() {
   if (typeof ensureFormSubmitTrigger === "function") {
     ensureFormSubmitTrigger(spreadsheet);
   }
-  SpreadsheetApp.getUi().alert("✅ R.G.E Bookstore Sheet headers formatted and onFormSubmit trigger registered successfully!");
+  showAlertSafely("✅ R.G.E Bookstore Sheet headers formatted and onFormSubmit trigger registered successfully!");
 }
 
 /**
@@ -683,10 +700,10 @@ function setupBookstoreSheet() {
 function simulateSingleBookstoreSubmission() {
   if (typeof generateRandomBookstoreSubmissions === "function") {
     generateRandomBookstoreSubmissions(1);
-    SpreadsheetApp.getUi().alert("✅ 1 simulated student order submitted to PayMongo & recorded to sheet!");
+    showAlertSafely("✅ 1 simulated student order submitted to PayMongo & recorded to sheet!");
   } else {
     onFormSubmit();
-    SpreadsheetApp.getUi().alert("✅ Diagnostic test run processed!");
+    showAlertSafely("✅ Diagnostic test run processed!");
   }
 }
 
@@ -696,9 +713,9 @@ function simulateSingleBookstoreSubmission() {
 function simulateFiveBookstoreSubmissions() {
   if (typeof generateRandomBookstoreSubmissions === "function") {
     generateRandomBookstoreSubmissions(5);
-    SpreadsheetApp.getUi().alert("✅ 5 simulated student orders submitted to PayMongo & recorded to sheet!");
+    showAlertSafely("✅ 5 simulated student orders submitted to PayMongo & recorded to sheet!");
   } else {
-    SpreadsheetApp.getUi().alert("Please ensure FormBuilder.gs is added to your Apps Script project.");
+    showAlertSafely("Please ensure FormBuilder.gs is added to your Apps Script project.");
   }
 }
 
@@ -709,18 +726,18 @@ function reconcileActiveRowWithBackend() {
   var context = resolveSheetSafely();
   var sheet = context.sheet;
   if (!sheet) {
-    SpreadsheetApp.getUi().alert("No active sheet found.");
+    showAlertSafely("No active sheet found.");
     return;
   }
   var row = sheet.getActiveRange().getRow();
   if (row < 2) {
-    SpreadsheetApp.getUi().alert("Please select an order row (row 2 or below) to reconcile.");
+    showAlertSafely("Please select an order row (row 2 or below) to reconcile.");
     return;
   }
 
   var lastCol = sheet.getLastColumn();
   if (lastCol < 1) {
-    SpreadsheetApp.getUi().alert("Sheet contains no data.");
+    showAlertSafely("Sheet contains no data.");
     return;
   }
 
@@ -736,7 +753,7 @@ function reconcileActiveRowWithBackend() {
   var refId = paymentId || orderNo;
 
   if (!refId) {
-    SpreadsheetApp.getUi().alert("No Payment Attempt ID or Order Number found in selected row " + row + ".");
+    showAlertSafely("No Payment Attempt ID or Order Number found in selected row " + row + ".");
     return;
   }
 
@@ -759,12 +776,12 @@ function reconcileActiveRowWithBackend() {
         updateMap["Webhook Outcome Details"] = "Live reconciled with PayMongo. Receipt: " + receiptNo;
       }
       ensureAndWriteColumns(sheet, row, updateMap);
-      SpreadsheetApp.getUi().alert("✅ Row " + row + " successfully reconciled! Status: " + status + (receiptNo ? " | Receipt: " + receiptNo : ""));
+      showAlertSafely("✅ Row " + row + " successfully reconciled! Status: " + status + (receiptNo ? " | Receipt: " + receiptNo : ""));
     } else {
-      SpreadsheetApp.getUi().alert("Reconciliation response code " + code + ": " + response.getContentText().substring(0, 150));
+      showAlertSafely("Reconciliation response code " + code + ": " + response.getContentText().substring(0, 150));
     }
   } catch (fetchErr) {
-    SpreadsheetApp.getUi().alert("Reconciliation error: " + fetchErr.toString());
+    showAlertSafely("Reconciliation error: " + fetchErr.toString());
   }
 }
 

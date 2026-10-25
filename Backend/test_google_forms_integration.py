@@ -434,6 +434,55 @@ def test_bookstore_order_credit_card_not_confused_with_instructor_credit():
     db.close()
 
 
+def test_google_forms_multi_channel_secret_resilience():
+    """Verifies lowercase HTTP/2 headers, quoted secrets, body payload, and query parameter secret fallbacks."""
+    # 1. Lowercase HTTP/2 header (as normalized by Cloudflare and NGINX)
+    p1 = {
+        "response_id": "gf_resilience_01",
+        "customer_name": "Resilience Student 1",
+        "customer_email": "res1@example.com",
+        "item_reference": "Product A",
+        "quantity": 1,
+    }
+    r1 = client.post("/api/v1/integrations/google-forms/submit", json=p1, headers={"x-google-forms-secret": VALID_SECRET})
+    assert r1.status_code == 201
+
+    # 2. Quoted secret (e.g. from .env strings or shell wrappers)
+    p2 = {
+        "response_id": "gf_resilience_02",
+        "customer_name": "Resilience Student 2",
+        "customer_email": "res2@example.com",
+        "item_reference": "Product A",
+        "quantity": 1,
+    }
+    r2 = client.post("/api/v1/integrations/google-forms/submit", json=p2, headers={"X-Google-Forms-Secret": f'"{VALID_SECRET}"'})
+    assert r2.status_code == 201
+
+    # 3. Body payload secret fallback (when reverse proxy or WAF strips custom headers)
+    p3 = {
+        "response_id": "gf_resilience_03",
+        "customer_name": "Resilience Student 3",
+        "customer_email": "res3@example.com",
+        "item_reference": "Product A",
+        "quantity": 1,
+        "secret": VALID_SECRET,
+    }
+    r3 = client.post("/api/v1/integrations/google-forms/submit", json=p3)
+    assert r3.status_code == 201
+
+    # 4. Query param secret fallback
+    p4 = {
+        "response_id": "gf_resilience_04",
+        "customer_name": "Resilience Student 4",
+        "customer_email": "res4@example.com",
+        "item_reference": "Product A",
+        "quantity": 1,
+    }
+    r4 = client.post(f"/api/v1/integrations/google-forms/submit?secret={VALID_SECRET}", json=p4)
+    assert r4.status_code == 201
+
+
+
 
 
 

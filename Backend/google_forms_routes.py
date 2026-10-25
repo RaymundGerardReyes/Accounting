@@ -308,6 +308,8 @@ class GoogleFormSubmissionRequest(BaseModel):
     student_id: Optional[str] = Field(None, description="Student or CPA review enrollee ID number")
     instructor_credit: Optional[str] = Field(None, description="Enrolled faculty instructor to credit")
     book_title: Optional[str] = Field(None, description="Course book or educational material")
+    secret: Optional[str] = Field(None, description="Shared secret key fallback in payload body")
+    secret_key: Optional[str] = Field(None, description="Shared secret key fallback alias")
 
 
 class GoogleFormSubmissionResponse(BaseModel):
@@ -335,6 +337,7 @@ class GoogleFormSubmissionResponse(BaseModel):
 )
 async def submit_google_form(
     req: GoogleFormSubmissionRequest,
+    request: Request,
     x_google_forms_secret: Optional[str] = Header(None, alias="X-Google-Forms-Secret"),
     x_google_forms_signature: Optional[str] = Header(None, alias="X-Google-Forms-Signature"),
     db: Session = Depends(get_db),
@@ -344,9 +347,19 @@ async def submit_google_form(
     computes authoritative server-side pricing, generates an Order and PayMongo Checkout Session,
     and returns the checkout URL for immediate customer email dispatch and Google Sheet recording.
     """
-    # 1. Authenticate shared secret
-    expected_secret = get_expected_gforms_secret()
-    if not x_google_forms_secret or x_google_forms_secret.strip() != expected_secret:
+    # 1. Authenticate shared secret (multi-channel: Header, case-insensitive headers, query param, or body payload)
+    expected_secret = get_expected_gforms_secret().strip().strip('"').strip("'")
+    raw_provided = (
+        x_google_forms_secret
+        or request.headers.get("x-google-forms-secret")
+        or request.headers.get("X-Google-Forms-Secret")
+        or request.query_params.get("secret")
+        or req.secret
+        or req.secret_key
+    )
+    provided_secret = raw_provided.strip().strip('"').strip("'") if raw_provided else None
+
+    if not provided_secret or not hmac.compare_digest(provided_secret, expected_secret):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Unauthorized: Missing or invalid X-Google-Forms-Secret header.",

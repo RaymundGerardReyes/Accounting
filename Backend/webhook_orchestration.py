@@ -199,6 +199,8 @@ class GoogleFormSubmissionPayload(BaseModel):
     sheet_row: Optional[int] = Field(None, description="Row index in sheet")
     sheet_row_index: Optional[int] = Field(None, description="Alias for sheet_row")
     raw_answers: Optional[Dict[str, Any]] = Field(None, description="Raw form answers")
+    secret: Optional[str] = Field(None, description="Shared secret key fallback in payload body")
+    secret_key: Optional[str] = Field(None, description="Shared secret key fallback alias")
     student_id: Optional[str] = Field(None, description="Student or CPA review enrollee ID number")
     instructor_credit: Optional[str] = Field(None, description="Enrolled faculty instructor to credit")
     book_title: Optional[str] = Field(None, description="Course book or educational material")
@@ -611,6 +613,7 @@ def sync_status_to_google_sheet(
 @router.post("/api/v1/integrations/google-forms/submit", status_code=status.HTTP_201_CREATED)
 async def ingest_google_form_submission(
     payload: GoogleFormSubmissionPayload,
+    request: Request,
     background_tasks: BackgroundTasks,
     x_google_forms_secret: Optional[str] = Header(default=None, alias="X-Google-Forms-Secret"),
     db: Session = Depends(get_db),
@@ -619,8 +622,18 @@ async def ingest_google_form_submission(
     Receives form submissions from Google Apps Script, enforces authoritative centavo pricing,
     creates the Order & PayMongo Checkout Session, and returns the checkout link.
     """
-    expected_secret = os.getenv("GOOGLE_FORMS_SECRET", "rge_gforms_live_sec_89f3a21").strip()
-    if not x_google_forms_secret or not hmac.compare_digest(x_google_forms_secret.strip(), expected_secret):
+    expected_secret = os.getenv("GOOGLE_FORMS_SECRET", "rge_gforms_live_sec_89f3a21").strip().strip('"').strip("'")
+    raw_provided = (
+        x_google_forms_secret
+        or request.headers.get("x-google-forms-secret")
+        or request.headers.get("X-Google-Forms-Secret")
+        or request.query_params.get("secret")
+        or payload.secret
+        or payload.secret_key
+    )
+    provided_secret = raw_provided.strip().strip('"').strip("'") if raw_provided else None
+
+    if not provided_secret or not hmac.compare_digest(provided_secret, expected_secret):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing or invalid X-Google-Forms-Secret header.",
