@@ -7,6 +7,41 @@
         "requested": "[6.0.0, )",
         "resolved": "6.0.0",
         "contentHash": "+/SsmiySsXJlvQLCGBqaZKNVt3s/Y/HbAdwtop7Km2CnuZbaScoqkWJEBQ5Cy9ebkn6kCYKrHsXgwrFdTgcb3g=="
+      },
+      "rge.buildingblocks.api": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.buildingblocks.application": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.buildingblocks.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.buildingblocks.sharedkernel": {
+        "type": "Project"
+      },
+      "rge.finance.domain": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.payments.domain": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
       }
     }
   }
