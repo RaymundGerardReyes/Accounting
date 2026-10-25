@@ -1,0 +1,25 @@
+#!/usr/bin/env sh
+# Cross-platform pre-push hook guarding against unauthorized tag pushes
+
+if command -v pwsh >/dev/null 2>&1; then
+  exec pwsh -NoProfile -ExecutionPolicy Bypass -File .githooks/pre-push.ps1 "$1" "$2"
+elif command -v powershell >/dev/null 2>&1; then
+  exec powershell -NoProfile -ExecutionPolicy Bypass -File .githooks/pre-push.ps1 "$1" "$2"
+else
+  # Fallback POSIX sh implementation
+  while read -r local_ref local_sha remote_ref remote_sha; do
+    case "$remote_ref" in
+      refs/tags/*)
+        if [ "$ALLOW_TAG_PUSH" != "1" ]; then
+          echo "=================================================================" >&2
+          echo " [REJECTED] Tag push blocked by .githooks/pre-push." >&2
+          echo " Push requires ALLOW_TAG_PUSH=1. See docs/release/versioning-policy.md" >&2
+          echo "=================================================================" >&2
+          exit 1
+        fi
+        ;;
+    esac
+  done
+fi
+
+exit 0
