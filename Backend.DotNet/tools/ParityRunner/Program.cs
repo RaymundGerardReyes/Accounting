@@ -226,7 +226,7 @@ webhookTask.Wait();
 var webhookRes = webhookTask.Result;
 Assert("ReceivePayMongoWebhookHandler parses evt_test_999 and returns received", webhookRes.IsSuccess && webhookRes.Value.ProviderEventId == "evt_test_999" && webhookRes.Value.ProcessingStatus == "received");
 
-// 10. Test Tests.Common Infrastructure (FakeClock, WebhookSigner, Builders)
+// 10. Test Tests.Common Infrastructure (FakeClock, WebhookSigner, Builders, Generators)
 Console.WriteLine("\n--- Testing Tests.Common Infrastructure ---");
 var fakeClock = new Rge.Tests.Common.Time.FakeClock(new DateTimeOffset(2026, 10, 25, 0, 0, 0, TimeSpan.Zero));
 fakeClock.Advance(TimeSpan.FromHours(8));
@@ -241,6 +241,72 @@ var builtAttempt = new Rge.Tests.Common.Builders.PaymentAttemptBuilder()
     .WithPaymentMethod("gcash")
     .BuildSucceeded("cs_builder_999");
 Assert("PaymentAttemptBuilder constructs aggregate in Succeeded state", builtAttempt.Status == Rge.Payments.Domain.PaymentAttempts.PaymentAttemptStatus.Succeeded && builtAttempt.OrderId == "ord-builder-1");
+
+var builtOrder = new Rge.Tests.Common.Builders.OrderBuilder()
+    .WithOrderNumber("ORD-TEST-0001")
+    .WithAmount(Rge.BuildingBlocks.SharedKernel.Money.Money.Php(2500_00))
+    .BuildPaid();
+Assert("OrderBuilder constructs aggregate in Paid state with correct amount", builtOrder.Status == "paid" && builtOrder.Amount.AmountMinor == 2500_00);
+
+var idGen = new Rge.Tests.Common.Generators.FakeIdGenerator();
+var id1 = idGen.NextId("adv");
+var id2 = idGen.NextId("adv");
+Assert("FakeIdGenerator generates monotonic padded IDs", id1 == "adv-000001" && id2 == "adv-000002");
+
+var seededRand1 = new Rge.Tests.Common.Generators.DeterministicRandom(12345);
+var seededRand2 = new Rge.Tests.Common.Generators.DeterministicRandom(12345);
+Assert("DeterministicRandom produces identical sequences across runs", seededRand1.Next(1, 1000) == seededRand2.Next(1, 1000) && seededRand1.NextLong(100, 10000) == seededRand2.NextLong(100, 10000));
+
+var ledgerEntries = new List<Rge.Finance.Domain.Ledger.AdvanceLedgerEntry>
+{
+    new Rge.Tests.Common.Builders.AdvanceLedgerEntryBuilder().AsRelease(Rge.BuildingBlocks.SharedKernel.Money.Money.Php(15000_00)).Build(),
+    new Rge.Tests.Common.Builders.AdvanceLedgerEntryBuilder().AsExpenseApplied(Rge.BuildingBlocks.SharedKernel.Money.Money.Php(12000_00)).Build(),
+    new Rge.Tests.Common.Builders.AdvanceLedgerEntryBuilder().AsCashReturn(Rge.BuildingBlocks.SharedKernel.Money.Money.Php(3000_00)).Build()
+};
+var derivedBalance = Rge.Finance.Domain.Ledger.AdvanceBalanceCalculator.CalculateOutstandingBalance(ledgerEntries);
+Assert("AdvanceLedgerEntryBuilder and AdvanceBalanceCalculator derive zero balance on exact return", derivedBalance.AmountMinor == 0);
+
+// 11. Test Four-Eyes Separation of Duties (INV-SOD-001)
+Console.WriteLine("\n--- Testing Four-Eyes Separation of Duties (INV-SOD-001) ---");
+var sodSelfApproval = Rge.Finance.Domain.Disbursements.FourEyesRule.EnsureRequestorIsNotApprover("user_alice", "user_alice");
+Assert("Requestor cannot approve own request", sodSelfApproval.IsFailure && sodSelfApproval.Error.Code == "Finance.SoD.SelfApprovalForbidden");
+
+var sodDistinctApprover = Rge.Finance.Domain.Disbursements.FourEyesRule.EnsureRequestorIsNotApprover("user_alice", "user_bob");
+Assert("Distinct approver succeeds", sodDistinctApprover.IsSuccess);
+
+var sodDisbursementConflict = Rge.Finance.Domain.Disbursements.FourEyesRule.EnsureDistinctDisbursementActors(
+    makerId: "actor_1", verifierId: "actor_1");
+Assert("Maker cannot act as Verifier on disbursement", sodDisbursementConflict.IsFailure && sodDisbursementConflict.Error.Code == "Finance.SoD.MakerCannotVerify");
+
+var sodDisbursementBankConflict = Rge.Finance.Domain.Disbursements.FourEyesRule.EnsureDistinctDisbursementActors(
+    makerId: "actor_1", verifierId: "actor_2", bankApproverId: "actor_1");
+Assert("Bank Approver cannot match Maker", sodDisbursementBankConflict.IsFailure && sodDisbursementBankConflict.Error.Code == "Finance.SoD.BankApproverConflict");
+
+var sodFourEyesSuccess = Rge.Finance.Domain.Disbursements.FourEyesRule.EnsureDistinctDisbursementActors(
+    makerId: "actor_1", verifierId: "actor_2", bankApproverId: "actor_3", evidenceVerifierId: "actor_4");
+Assert("Four distinct actors on disbursement succeeds", sodFourEyesSuccess.IsSuccess);
+
+// 12. Test Additional CashAdvance State Transitions
+Console.WriteLine("\n--- Testing State Transition Tables (All 5 Machines) ---");
+var payTransOk = Rge.Finance.Domain.CashAdvances.StateMachines.StateTransitionTables.TransitionPayment(
+    Rge.Finance.Domain.CashAdvances.StateMachines.PaymentStatus.Prepared,
+    Rge.Finance.Domain.CashAdvances.StateMachines.PaymentStatus.Verified);
+Assert("PaymentStatus Prepared -> Verified succeeds", payTransOk.IsSuccess);
+
+var payTransFail = Rge.Finance.Domain.CashAdvances.StateMachines.StateTransitionTables.TransitionPayment(
+    Rge.Finance.Domain.CashAdvances.StateMachines.PaymentStatus.NotStarted,
+    Rge.Finance.Domain.CashAdvances.StateMachines.PaymentStatus.EvidenceVerified);
+Assert("PaymentStatus NotStarted -> EvidenceVerified fails", payTransFail.IsFailure);
+
+var liqTransOk = Rge.Finance.Domain.CashAdvances.StateMachines.StateTransitionTables.TransitionLiquidation(
+    Rge.Finance.Domain.CashAdvances.StateMachines.LiquidationReviewStatus.Submitted,
+    Rge.Finance.Domain.CashAdvances.StateMachines.LiquidationReviewStatus.FinanceReview);
+Assert("LiquidationReviewStatus Submitted -> FinanceReview succeeds", liqTransOk.IsSuccess);
+
+var settleTransOk = Rge.Finance.Domain.CashAdvances.StateMachines.StateTransitionTables.TransitionSettlement(
+    Rge.Finance.Domain.CashAdvances.StateMachines.SettlementStatus.Open,
+    Rge.Finance.Domain.CashAdvances.StateMachines.SettlementStatus.ShortfallReceivable);
+Assert("SettlementStatus Open -> ShortfallReceivable succeeds", settleTransOk.IsSuccess);
 
 Console.WriteLine("\n==============================================================");
 Console.WriteLine($" RESULTS: {passed} PASSED, {failed} FAILED");
