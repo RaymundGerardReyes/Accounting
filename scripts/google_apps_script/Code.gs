@@ -544,9 +544,19 @@ function createJsonResponse(payload) {
 }
 
 /**
+ * Resolves the frontend application base URL dynamically from CONFIG.BACKEND_URL.
+ */
+function getAppBaseUrl() {
+  if (CONFIG.BACKEND_URL) {
+    return CONFIG.BACKEND_URL.replace(/\/api\/.*$/, "");
+  }
+  return "https://rge-accounting-3aa707d5f496.herokuapp.com";
+}
+
+/**
  * Sends a responsive HTML email to the customer with their direct PayMongo link.
  * Built with headless/IDE resilience: If executed directly from Apps Script editor
- * without parameters, safely initializes diagnostic test payload instead of throwing TypeError.
+ * without parameters, safely initializes diagnostic test payload with a live application checkout link.
  *
  * @param {string} [recipientEmail]
  * @param {string} [recipientName]
@@ -556,11 +566,12 @@ function sendPaymentInstructionsEmail(recipientEmail, recipientName, orderData) 
   // Guard against direct invocation from Apps Script IDE toolbar or missing arguments
   if (!orderData || typeof orderData !== "object") {
     Logger.log("Notice: sendPaymentInstructionsEmail was executed directly without arguments. Initializing diagnostic test payload...");
+    var diagOrderNo = "ORD-SIM-" + Math.floor(1000 + Math.random() * 9000);
     orderData = {
-      order_number: "ORD-SIM-" + Math.floor(1000 + Math.random() * 9000),
+      order_number: diagOrderNo,
       order_title: "Financial Accounting & Reporting Vol. 1",
       amount_php: "450.00",
-      checkout_url: "https://pm.link/rge-accounting/test/checkout"
+      checkout_url: getAppBaseUrl() + "/checkout?order_number=" + diagOrderNo + "&amount=450.00&simulated=true"
     };
     var activeEmail = "";
     try {
@@ -635,11 +646,12 @@ function testSendPaymentInstructionsEmail() {
     activeEmail = Session.getActiveUser().getEmail();
   } catch (_) {}
   var testRecipient = activeEmail || CONFIG.SUPPORT_EMAIL;
+  var diagOrderNo = "ORD-DIAG-" + Math.floor(1000 + Math.random() * 9000);
   var sampleOrder = {
-    order_number: "ORD-DIAG-" + Math.floor(1000 + Math.random() * 9000),
+    order_number: diagOrderNo,
     order_title: "Financial Accounting & Reporting Vol. 1 (Diagnostic)",
     amount_php: "450.00",
-    checkout_url: "https://pm.link/rge-accounting/test/preview"
+    checkout_url: getAppBaseUrl() + "/checkout?order_number=" + diagOrderNo + "&amount=450.00&simulated=true"
   };
   sendPaymentInstructionsEmail(testRecipient, "Diagnostic Test Customer", sampleOrder);
   showAlertSafely("✅ Diagnostic payment instructions email processed for: " + testRecipient);
