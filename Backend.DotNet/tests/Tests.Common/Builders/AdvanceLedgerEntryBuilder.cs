@@ -90,3 +90,4 @@ public sealed class AdvanceLedgerEntryBuilder
             occurredAtUtc: _occurredAtUtc);
     }
 }
+

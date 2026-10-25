@@ -9,6 +9,17 @@ namespace Rge.BuildingBlocks.Api.Serialization;
 /// </summary>
 public static class JsonDefaults
 {
+    private static readonly JsonSerializerOptions DefaultOptionsInstance = CreateOptions();
+
+    public static JsonSerializerOptions Options => DefaultOptionsInstance;
+
+    public static JsonSerializerOptions CreateOptions()
+    {
+        var options = new JsonSerializerOptions();
+        ConfigureOptions(options);
+        return options;
+    }
+
     public static void ConfigureOptions(JsonSerializerOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);

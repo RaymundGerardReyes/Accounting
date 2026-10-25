@@ -45,3 +45,4 @@ public sealed class DeterministicRandom
         return new string(buffer);
     }
 }
+

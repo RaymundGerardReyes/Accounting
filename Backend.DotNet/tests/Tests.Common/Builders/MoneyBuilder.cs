@@ -19,3 +19,4 @@ public static class MoneyBuilder
 
     public static Money LargeSafeAmount() => Money.Php(100_000_000_000_00L); // PHP 100 Billion in centavos
 }
+

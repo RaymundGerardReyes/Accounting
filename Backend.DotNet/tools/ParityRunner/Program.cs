@@ -308,6 +308,113 @@ var settleTransOk = Rge.Finance.Domain.CashAdvances.StateMachines.StateTransitio
     Rge.Finance.Domain.CashAdvances.StateMachines.SettlementStatus.ShortfallReceivable);
 Assert("SettlementStatus Open -> ShortfallReceivable succeeds", settleTransOk.IsSuccess);
 
+// 13. Test Approval Matrix & Router Domain Invariants
+Console.WriteLine("\n--- Testing Approval Matrix & Router (Specification Parity) ---");
+var matrixList = new List<Rge.Finance.Domain.Approvals.ApprovalMatrix>
+{
+    Rge.Finance.Domain.Approvals.ApprovalMatrix.Create(
+        workflow: "cash_advance",
+        stage: "business_approval",
+        role: "supervisor",
+        minAmount: Rge.BuildingBlocks.SharedKernel.Money.Money.Zero(),
+        maxAmount: Rge.BuildingBlocks.SharedKernel.Money.Money.Php(50_000_00),
+        departmentScope: "*"),
+    Rge.Finance.Domain.Approvals.ApprovalMatrix.Create(
+        workflow: "cash_advance",
+        stage: "business_approval",
+        role: "finance_controller",
+        minAmount: Rge.BuildingBlocks.SharedKernel.Money.Money.Zero(),
+        maxAmount: Rge.BuildingBlocks.SharedKernel.Money.Money.Php(500_000_00),
+        departmentScope: "*"),
+    Rge.Finance.Domain.Approvals.ApprovalMatrix.Create(
+        workflow: "disbursement_bank",
+        stage: "bank_approval",
+        role: "bank_approver",
+        minAmount: Rge.BuildingBlocks.SharedKernel.Money.Money.Zero(),
+        maxAmount: Rge.BuildingBlocks.SharedKernel.Money.Money.Php(200_000_00),
+        departmentScope: "*")
+};
+
+string[] sysAdminRoles = ["system_admin"];
+string[] supervisorRoles = ["supervisor"];
+string[] controllerRoles = ["finance_controller"];
+string[] auditorRoles = ["auditor"];
+
+// System Admin without financial role has zero approval authority
+var adminAttempt = Rge.Finance.Domain.Approvals.ApprovalRouter.RouteApproval(
+    matrixEntries: matrixList,
+    actorId: "sys_admin_1",
+    actorRoles: sysAdminRoles,
+    workflow: "cash_advance",
+    stage: "business_approval",
+    amountMinor: 10_000_00);
+Assert("System Admin without financial role is rejected from financial approvals",
+    adminAttempt.IsFailure && adminAttempt.Error.Code == "Finance.SoD.AdminNoApprovalAuthority");
+
+// Supervisor approves within threshold (PHP 30,000 <= PHP 50,000)
+var supervisorOk = Rge.Finance.Domain.Approvals.ApprovalRouter.RouteApproval(
+    matrixEntries: matrixList,
+    actorId: "sup_1",
+    actorRoles: supervisorRoles,
+    workflow: "cash_advance",
+    stage: "business_approval",
+    amountMinor: 30_000_00);
+Assert("Supervisor approves within threshold (PHP 30,000 <= PHP 50,000)", supervisorOk.IsSuccess);
+
+// Supervisor exceeds threshold (PHP 80,000 > PHP 50,000)
+var supervisorExceeded = Rge.Finance.Domain.Approvals.ApprovalRouter.RouteApproval(
+    matrixEntries: matrixList,
+    actorId: "sup_1",
+    actorRoles: supervisorRoles,
+    workflow: "cash_advance",
+    stage: "business_approval",
+    amountMinor: 80_000_00);
+Assert("Supervisor exceeds threshold (PHP 80,000 > PHP 50,000) and is rejected",
+    supervisorExceeded.IsFailure && supervisorExceeded.Error.Code == "Finance.Approval.LimitExceeded");
+
+// Finance Controller approves large amount (PHP 80,000 <= PHP 500,000)
+var controllerOk = Rge.Finance.Domain.Approvals.ApprovalRouter.RouteApproval(
+    matrixEntries: matrixList,
+    actorId: "ctrl_1",
+    actorRoles: controllerRoles,
+    workflow: "cash_advance",
+    stage: "business_approval",
+    amountMinor: 80_000_00);
+Assert("Finance Controller approves within upper threshold (PHP 80,000 <= PHP 500,000)", controllerOk.IsSuccess);
+
+// Unknown role has no authority
+var unknownRole = Rge.Finance.Domain.Approvals.ApprovalRouter.RouteApproval(
+    matrixEntries: matrixList,
+    actorId: "viewer_1",
+    actorRoles: auditorRoles,
+    workflow: "cash_advance",
+    stage: "business_approval",
+    amountMinor: 10_000_00);
+Assert("Auditor role has no authority for cash_advance business_approval",
+    unknownRole.IsFailure && unknownRole.Error.Code == "Finance.Approval.NoAuthority");
+
+// 14. Test ApprovalHistoryEntry Record Creation
+var historyEntry = Rge.Finance.Domain.Approvals.ApprovalHistoryEntry.Create(
+    entityType: "cash_advance",
+    entityId: "adv-001",
+    approverId: "sup_1",
+    approverRole: "supervisor",
+    approvalStage: "business_approval",
+    decision: "approved",
+    previousStatus: "submitted",
+    resultingStatus: "approved",
+    comments: "Approved for client audit engagement.",
+    approvedAmountMinor: 30_000_00);
+Assert("ApprovalHistoryEntry records decision with approved amount and audit fields",
+    historyEntry.Decision == "approved" && historyEntry.ApprovedAmountMinor == 30_000_00 && historyEntry.PreviousStatus == "submitted");
+
+// 15. Test JsonDefaults and Serialization Context
+Console.WriteLine("\n--- Testing API Serialization & Filter Defaults ---");
+var optionsInstance = Rge.BuildingBlocks.Api.Serialization.JsonDefaults.Options;
+Assert("JsonDefaults.Options configures snake_case property naming",
+    optionsInstance.PropertyNamingPolicy == System.Text.Json.JsonNamingPolicy.SnakeCaseLower);
+
+
 Console.WriteLine("\n==============================================================");
 Console.WriteLine($" RESULTS: {passed} PASSED, {failed} FAILED");
 Console.WriteLine("==============================================================");
