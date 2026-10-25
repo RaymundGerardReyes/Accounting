@@ -1,5 +1,5 @@
 ---
-description: Repository rules for Conventional Commits, scoped staging, secret prevention, and SemVer tagging
+description: Repository rules for Conventional Commits, scoped staging, secret prevention, SemVer tagging, and migration release guardrails
 ---
 
 # Git Contribution & Commit Rules
@@ -18,13 +18,15 @@ description: Repository rules for Conventional Commits, scoped staging, secret p
    - **Allowed Scopes**:
      - `repo`: Repository configuration, `.gitignore`, licensing, root setup.
      - `backend`: FastAPI routes, database models, payment providers, orchestration services.
+     - `dotnet`: C# ASP.NET Core (.NET 10) Modular Monolith backend (`Backend.DotNet/`).
      - `frontend`: Next.js pages, React components, Tailwind CSS styles, accessibility, UI hooks.
      - `test`: Test cases, fixtures, verification scripts.
      - `docs`: Technical documentation, workflow guides.
      - `agents`: Custom agent rules, skills, and configuration hooks (`.agents/`).
      - `versioning`: Version bump scripts, release automation (`scripts/`).
+     - `migration`: Migration ledgers, route parity exporters, compatibility verifiers.
      - `content-pack`: Domain metadata and accounting catalogs.
-   - **Example**: `feat(backend): implement FastAPI payment orchestration and PayMongo adapter`.
+   - **Example**: `feat(dotnet): implement ApprovalMatrix and Router with four-eyes SoD enforcement`.
 
 2. **Scoped Staging Discipline**:
    - Never stage unrelated changes together using blanket `git add .` or `git add -A`.
@@ -63,4 +65,11 @@ description: Repository rules for Conventional Commits, scoped staging, secret p
    - In sandboxed or containerized environments on Windows, default multi-node MSBuild worker IPC (`-maxcpucount`) and persistent MSBuild server daemons fail silently during `_GetAllRestoreProjectPathItems` due to named-pipe/socket restrictions.
    - All `dotnet build`, `dotnet restore`, and `dotnet test` commands run inside the sandbox must append `-m:1 --disable-build-servers` to guarantee deterministic, isolated single-node execution.
 
-
+9. **Evidence-Based Milestone Tagging & Release Guardrails (.NET Line)**:
+   - **`0.x.y` Invariant**: The .NET line stays on `0.x.y` until the `1.0.0` gate is met: 100% route parity with Python, audit-chain verifier passing, security suite passing, and canary cutover approved.
+   - **No Work-Session Counters**: Do NOT create a tag after each work session or batch of commits. Untagged builds are versioned automatically by MinVer.
+   - **Milestone Plan Authorization**: Create a tag ONLY at a named milestone listed in the milestone plan (`docs/release/versioning-policy.md`), and ONLY after the user explicitly approves the exact tag name, commit SHA, and ledger evidence.
+   - **Autonomous Tagging Forbidden**: Agents must NEVER run `git tag`, `git push --tags`, `git push --follow-tags`, or push to `refs/tags/*`. The agent proposes the exact commands; the user executes them.
+   - **SemVer 0.x Meaning**: In `0.x`: MINOR = milestone or breaking change, PATCH = fix. Do not use `-preview.N` as a work counter. Use `-preview`/`-rc` only for builds that are actually deployed to a named environment for testing.
+   - **Tag Immutability & Historical Checkpoints**: Never delete or move an existing tag. Existing tags `dotnet/v0.1.0-preview.1` through `.4` are internal checkpoints, not releases.
+   - **Migration Invariant**: A language migration is not a MAJOR change. MAJOR changes only when the public API contract breaks, or at the `1.0.0` production gate.

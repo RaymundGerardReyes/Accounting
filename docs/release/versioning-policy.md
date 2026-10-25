@@ -1,4 +1,4 @@
-# Dual-Line Semantic Versioning Policy
+# Dual-Line Semantic Versioning & Milestone Release Policy
 
 ## 1. Scope & Topology
 
@@ -13,7 +13,7 @@ Both lines share a unified Next.js frontend codebase located at `Frontend/`. To 
 
 ---
 
-## 2. Tag Namespacing Scheme
+## 2. Tag Namespacing & SemVer 2.0.0 Principles
 
 All release tags adhere strictly to Semantic Versioning 2.0.0 (`MAJOR.MINOR.PATCH`) prefixed by runtime line:
 
@@ -22,43 +22,78 @@ All release tags adhere strictly to Semantic Versioning 2.0.0 (`MAJOR.MINOR.PATC
 | **Line A (.NET 10)** | `dotnet/vX.Y.Z` | `dotnet/vX.Y.Z-preview.N`, `dotnet/vX.Y.Z-rc.N` | Full-stack release of .NET backend + Frontend |
 | **Line B (Python)** | `python/vX.Y.Z` | `python/vX.Y.Z-beta.N`, `python/vX.Y.Z-rc.N` | Full-stack release of Python backend + Frontend |
 
-### Single Source of Truth: The Git Tag
-- The **Git tag is the sole authoritative source of version information**.
-- Manual editing of static version strings in code is strictly prohibited.
-- `package.json` in root and `Frontend/package.json` remain pinned to `0.0.0-managed` to prevent synthetic frontend drift across branches. The runtime version is injected at build time from the Git tag.
+### Core SemVer Principles for the Migration:
+1. **A Language Migration is NOT a MAJOR Bump**: SemVer measures compatibility of the public API contract, which remains fixed at `/api/v1`. If the C# .NET 10 line behaves identically to Python at the API edge, the rewrite is completely invisible to consumers. A MAJOR version means breaking public API contract changes.
+2. **Initial Development Phase (`0.x.y`)**: Versions `0.y.z` represent initial development where anything may evolve internally. The .NET line remains on `0.x.y` until the full production cutover gate is passed.
+3. **Milestones vs. Work-Session Counters**:
+   - `0.1.0-preview.N` must never be used as a counter for completed work sessions or batches of commits. A version string must convey compatibility and production readiness, not a developer commit counter.
+   - Untagged commits are automatically versioned by MinVer (e.g. `0.1.0-preview.4.5` relative to the latest tag), ensuring every build is uniquely identified without requiring a new Git tag.
+4. **Pre-Release Identifiers (`-preview` / `-rc`)**: Reserved strictly for builds that are actively deployed to a named verification or staging environment for human or external automated testing. Never use them as internal work counters.
 
 ---
 
-## 3. SemVer Bump Table for Regulated Financial System
+## 3. .NET 10 Migration Milestone Plan
 
-In an accounting system handling BIR-regulated Official Receipts and an immutable cryptographic audit hash chain, version increments follow strict criteria:
+A Git tag marks a **milestone**—something worth naming, testing, and returning to. The .NET 10 migration follows this authoritative milestone roadmap:
 
-| Category | PATCH (`vX.Y.Z+1`) | MINOR (`vX.Y+1.0`) | MAJOR (`vX+1.0.0`) |
-| :--- | :--- | :--- | :--- |
-| **HTTP Routes** | Internal bug fixes, response latency optimizations | Non-breaking backward-compatible route additions | Route removals, path renames, altered request/response schema |
-| **Payload Shapes** | Optional fields added to internal logs | New optional fields added to existing API contracts | Required fields added, field removals, renamed JSON properties |
-| **Error Codes & Types** | Message wording fixes preserving existing error codes | New error codes added to existing `ErrorType` catalogs | Renamed or removed error codes, changed HTTP status mappings |
-| **Integration Events** | Bug fixes to event payload serializers | New integration event types added to outbox | Renamed event types, removed payload fields, altered semantics |
-| **Database Schema** | Non-functional index additions, comment updates | Expand-phase backward-compatible column/table additions | Contract-phase drops, column renames, nullability constraints |
-| **Configuration / Env** | Optional logging or tuning environment variables | New environment variables with safe defaults | Mandatory environment variables without defaults |
-| **Financial / Tax Logic** | Strictly forbidden | Non-breaking reporting categorization additions | **Any change** to VAT calculation (12%), EWT, or rounding rules |
-| **State Machines** | Fixes to internal guard exceptions preserving states | New non-terminal states with valid transition paths | Modified terminal states, removed states, altered SoD checks |
-
-> [!CAUTION]
-> **Financial & Tax Treatment Invariant**: Any change to monetary arithmetic (`Money`), Philippine VAT calculation (1200 bps), Expanded Withholding Tax (EWT), or the 5-state cash advance transition table is considered breaking and **must receive a MAJOR or approved MINOR increment**. It can never be released under a PATCH tag.
+| Milestone Tag | Phase & Scope | Exit Criteria & Verification Requirement |
+| :--- | :--- | :--- |
+| **`dotnet/v0.1.0`** | **Foundation**: BuildingBlocks, SharedKernel, Domain Core, Host, DB Migrations, CI | Core architecture compiles with 0 warnings/errors; `ParityRunner` invariant checks pass (64/64); baseline DB migrations apply cleanly. |
+| **`dotnet/v0.2.0`** | **Identity & Audit Modules** | `Rge.Identity` and `Rge.Audit` routes and domain services active; session management, CSRF, RBAC, and hash-chained audit logging verified. |
+| **`dotnet/v0.3.0`** | **Payments & Receipts Modules** | Core checkout session creation, PayMongo webhook receiver, HMAC verification, transactional outbox, receipt number generation, and `sha256:v2` digests verified. |
+| **`dotnet/v0.4.0`** | **Finance Module** | Cash advances, disbursements, 5 state machines, approval matrix/router, SoD four-eyes enforcement, expense reports, vendor records, and accounts payable active. |
+| **`dotnet/v0.5.0`** | **Integrations, CostAllocation & Documents** | Feature complete. Google Forms ingestion, department cost allocation, and secure document evidence storage verified. |
+| **`dotnet/v0.5.1`, `v0.5.2`** | **Parity Stabilization** | Bug fixes and edge-case resolutions discovered while running contract parity test suites against legacy baselines. |
+| **`dotnet/v1.0.0-rc.1`, `rc.2`** | **Release Candidates** | Feature complete, deployed to staging/canary; canary traffic split verified; load and security penetration suites passing. |
+| **`dotnet/v1.0.0`** | **Production Cutover Gate** | 100% route parity verified; cryptographic audit-chain verifier passing on historical data; Python backend decommissioned. |
 
 ---
 
-## 4. Milestone Definiton: .NET Line `1.0.0`
-The .NET 10 line (`dotnet/v1.0.0`) is achieved when and only when:
-1. **100% Endpoint Parity**: All 112 API endpoints match legacy Python response contracts.
-2. **Audit Chain Verification**: Golden Master verification scripts and `AuditChain.Verifier` prove mathematical equivalence with historical records.
-3. **Automated Parity Gate**: `tests/Contract.Parity.Tests` passes against live or containerized baselines.
+## 4. Status of Historical Preview Tags
+
+The four historical tags (`dotnet/v0.1.0-preview.1` through `dotnet/v0.1.0-preview.4`) were pushed during initial scaffolding:
+- **Status: Internal Checkpoints (Immutable)**.
+- Under Git and SemVer governance, tags are immutable and must **never be deleted, overwritten, or moved**.
+- MinVer correctly treats `dotnet/v0.1.0` as higher than `dotnet/v0.1.0-preview.4`. Therefore, upon completion and verification of the Foundation milestone, `dotnet/v0.1.0` naturally supersedes them.
 
 ---
 
-## 5. Python Line Maintenance Policy
+## 5. Tagging Rules & Release Guardrails (.NET Line)
+
+The following six rules govern all tagging operations across the repository:
+
+1. **`0.x.y` Invariant**: The .NET line stays on `0.x.y` until the `1.0.0` production gate is met (100% route parity with Python, audit-chain verifier passing, security suite passing, canary cutover approved).
+2. **No Per-Session Tagging**: Do NOT create a tag after each work session or batch of commits. Intermediate builds are versioned automatically by MinVer.
+3. **Milestone Authorization**: Create a tag ONLY at a named milestone listed in the milestone plan, and ONLY after explicit user approval of the exact tag name and commit SHA.
+4. **Autonomous Agent Tagging Strictly Forbidden**: AI agents and automated scripts must NEVER run `git tag` or `git push --tags` autonomously. The agent prints an evidence-based tag proposal; the user reviews and executes the commands.
+5. **SemVer In `0.x`**: In `0.x`, bump MINOR for a milestone or breaking change, and PATCH for a bug fix. Use `-preview` or `-rc` only for builds deployed to an external testing environment.
+6. **Language Migration Invariant**: A language rewrite preserving `/api/v1` contracts is NOT a MAJOR bump. MAJOR bumps occur only upon public API contract breaks or at the `1.0.0` production gate.
+
+---
+
+## 6. Evidence-Based Release Gating (The Migration Ledger)
+
+Tags are derived **strictly from evidence recorded in the Migration Ledger**, never from time spent or batches of code written.
+
+### The Migration Ledger Structure:
+- **Route Ledger**: [`docs/migration/route-ledger.md`](file:///e:/Accounting/docs/migration/route-ledger.md) & [`docs/migration/route-ledger.csv`](file:///e:/Accounting/docs/migration/route-ledger.csv)
+- **Feature Ledger**: [`docs/migration/feature-ledger.md`](file:///e:/Accounting/docs/migration/feature-ledger.md)
+- **Gap Report**: [`docs/migration/gap-report.md`](file:///e:/Accounting/docs/migration/gap-report.md)
+
+### Status State Machine:
+```
+not-started  -->  implemented  -->  tested  -->  parity-verified  -->  accepted-difference
+```
+- `implemented`: Handler exists in `Backend.DotNet/` and compiles cleanly.
+- `tested`: Module unit or integration tests pass.
+- `parity-verified`: Dual-run comparison proves equivalent HTTP status, payload schema, error codes, and DB side effects (audit append).
+- `accepted-difference`: Deliberate improvement or difference reviewed and approved by CPA/system owner.
+
+A milestone tag proposal is authorized **only when 100% of the ledger rows belonging to that milestone are in `parity-verified` or `accepted-difference` status**.
+
+---
+
+## 7. Python Line Maintenance Policy
 - The Python legacy line (`legacy-python`) is in **maintenance mode**.
 - Only critical security updates and regression PATCH releases (`python/v0.9.x` or `python/v2.x.x`) are permitted.
 - No new commercial or accounting feature development may occur exclusively on the Python line.
-
