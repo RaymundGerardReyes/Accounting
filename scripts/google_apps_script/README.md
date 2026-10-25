@@ -95,8 +95,10 @@ To simulate realistic external buyers purchasing course books with instructor cr
 4. Click **Save** (floppy disk icon or `Ctrl + S`).
 
 ### Step 3: Test Directly in the Editor
-- With `onFormSubmit` selected in the toolbar, click **Run**.
-- Because of `resolveTargetSheet(e)` and safe diagnostic payload fallback, clicking **Run** executes cleanly without throwing `TypeError: Cannot read properties of null (reading 'getActiveSheet')`.
+- **Testing Form Ingestion**: With `onFormSubmit` selected in the toolbar, click **Run**.
+  - Because of `resolveSheetSafely(e)` and safe diagnostic payload fallback, clicking **Run** executes cleanly without throwing `TypeError: Cannot read properties of null (reading 'getActiveSheet')`.
+- **Testing Email Dispatch**: You can select `sendPaymentInstructionsEmail` or `testSendPaymentInstructionsEmail` and click **Run**.
+  - It automatically initializes a diagnostic order payload, completely avoiding `TypeError: Cannot read properties of undefined (reading 'order_number')`.
 - Check **Execution log** at the bottom to confirm successful processing.
 
 ### Step 4: Configure Live Triggers & Reverse Webhook (doPost)

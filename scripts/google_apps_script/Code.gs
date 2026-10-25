@@ -545,11 +545,43 @@ function createJsonResponse(payload) {
 
 /**
  * Sends a responsive HTML email to the customer with their direct PayMongo link.
+ * Built with headless/IDE resilience: If executed directly from Apps Script editor
+ * without parameters, safely initializes diagnostic test payload instead of throwing TypeError.
+ *
+ * @param {string} [recipientEmail]
+ * @param {string} [recipientName]
+ * @param {Object} [orderData]
  */
 function sendPaymentInstructionsEmail(recipientEmail, recipientName, orderData) {
-  var orderNo = orderData.order_number || "PENDING";
-  var orderTitle = orderData.order_title || orderData.title || "Product Order";
-  var amountDisplay = orderData.amount_php || "0.00";
+  // Guard against direct invocation from Apps Script IDE toolbar or missing arguments
+  if (!orderData || typeof orderData !== "object") {
+    Logger.log("Notice: sendPaymentInstructionsEmail was executed directly without arguments. Initializing diagnostic test payload...");
+    orderData = {
+      order_number: "ORD-SIM-" + Math.floor(1000 + Math.random() * 9000),
+      order_title: "Financial Accounting & Reporting Vol. 1",
+      amount_php: "450.00",
+      checkout_url: "https://pm.link/rge-accounting/test/checkout"
+    };
+    var activeEmail = "";
+    try {
+      activeEmail = Session.getActiveUser().getEmail();
+    } catch (_) {}
+    recipientEmail = recipientEmail || activeEmail || CONFIG.SUPPORT_EMAIL;
+    recipientName = recipientName || "Valued Customer (Diagnostic Mode)";
+  }
+
+  var orderNo = (orderData && orderData.order_number) ? String(orderData.order_number) : "PENDING";
+  var orderTitle = (orderData && (orderData.order_title || orderData.title)) ? String(orderData.order_title || orderData.title) : "Product Order";
+  var amountDisplay = (orderData && orderData.amount_php) ? String(orderData.amount_php) : "0.00";
+  var checkoutUrl = (orderData && orderData.checkout_url) ? String(orderData.checkout_url) : "#";
+  var customer = recipientName ? String(recipientName) : "Valued Client";
+  var targetEmail = recipientEmail ? String(recipientEmail).trim() : "";
+
+  if (!targetEmail || targetEmail.indexOf("@") === -1) {
+    Logger.log("sendPaymentInstructionsEmail skipped: No valid recipient email provided (" + targetEmail + ").");
+    return;
+  }
+
   var subject = "Invoice & Payment Instructions: Order " + orderNo + " - " + CONFIG.COMPANY_NAME;
 
   var htmlBody = "" +
@@ -558,7 +590,7 @@ function sendPaymentInstructionsEmail(recipientEmail, recipientName, orderData) 
     "    <h2 style='margin: 0; color: #0f172a; font-size: 20px; font-weight: 700;'>" + CONFIG.COMPANY_NAME + "</h2>" +
     "    <p style='margin: 4px 0 0 0; color: #64748b; font-size: 13px;'>Automated Payment & Order Orchestration</p>" +
     "  </div>" +
-    "  <p style='font-size: 15px; margin-top: 0;'>Dear <strong>" + recipientName + "</strong>,</p>" +
+    "  <p style='font-size: 15px; margin-top: 0;'>Dear <strong>" + customer + "</strong>,</p>" +
     "  <p style='font-size: 14px; line-height: 1.6; color: #334155;'>" +
     "    Thank you for your order submission! Your order has been registered in our live accounting system with reference number <strong>" + orderNo + "</strong>." +
     "  </p>" +
@@ -570,7 +602,7 @@ function sendPaymentInstructionsEmail(recipientEmail, recipientName, orderData) 
     "    </table>" +
     "  </div>" +
     "  <div style='text-align: center; margin: 28px 0;'>" +
-    "    <a href='" + orderData.checkout_url + "' style='background-color: #dc2626; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 15px; display: inline-block; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>" +
+    "    <a href='" + checkoutUrl + "' style='background-color: #dc2626; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 15px; display: inline-block; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>" +
     "      Proceed to Secure Payment &rarr;" +
     "    </a>" +
     "  </div>" +
@@ -583,10 +615,34 @@ function sendPaymentInstructionsEmail(recipientEmail, recipientName, orderData) 
     "  </div>" +
     "</div>";
 
-  MailApp.sendEmail(recipientEmail, subject, "Please view this email in an HTML-compatible client.", {
-    htmlBody: htmlBody,
-    name: CONFIG.COMPANY_NAME
-  });
+  try {
+    MailApp.sendEmail(targetEmail, subject, "Please view this email in an HTML-compatible client.", {
+      htmlBody: htmlBody,
+      name: CONFIG.COMPANY_NAME
+    });
+    Logger.log("Payment instructions email dispatched successfully to: " + targetEmail + " for order " + orderNo);
+  } catch (mailErr) {
+    Logger.log("Notice: MailApp could not send email to " + targetEmail + ": " + mailErr);
+  }
+}
+
+/**
+ * Explicit test entry point for testing customer payment instructions email from editor dropdown.
+ */
+function testSendPaymentInstructionsEmail() {
+  var activeEmail = "";
+  try {
+    activeEmail = Session.getActiveUser().getEmail();
+  } catch (_) {}
+  var testRecipient = activeEmail || CONFIG.SUPPORT_EMAIL;
+  var sampleOrder = {
+    order_number: "ORD-DIAG-" + Math.floor(1000 + Math.random() * 9000),
+    order_title: "Financial Accounting & Reporting Vol. 1 (Diagnostic)",
+    amount_php: "450.00",
+    checkout_url: "https://pm.link/rge-accounting/test/preview"
+  };
+  sendPaymentInstructionsEmail(testRecipient, "Diagnostic Test Customer", sampleOrder);
+  showAlertSafely("✅ Diagnostic payment instructions email processed for: " + testRecipient);
 }
 
 /**
@@ -633,6 +689,7 @@ function onOpen() {
       .addItem("📋 6. Setup Bookstore Sheet Headers & Triggers", "setupBookstoreSheet")
       .addSeparator()
       .addItem("🔄 7. Reconcile Active Row Status with Backend", "reconcileActiveRowWithBackend")
+      .addItem("📧 8. Test Payment Instructions Email Dispatch", "testSendPaymentInstructionsEmail")
       .addToUi();
   } catch (menuErr) {
     Logger.log("Notice in onOpen (UI not available in standalone/trigger context): " + menuErr);
