@@ -1,6 +1,6 @@
 {
   "name": "my-v0-project",
-  "version": "0.9.31",
+  "version": "0.9.32",
   "private": true,
   "scripts": {
     "build": "node --require ./patch-fs.cjs --max-old-space-size=4096 ./node_modules/next/dist/bin/next build",

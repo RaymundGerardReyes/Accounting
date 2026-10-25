@@ -1,6 +1,6 @@
 {
   "name": "rge-accounting-monorepo",
-  "version": "0.9.31",
+  "version": "0.9.32",
   "private": true,
   "description": "Acme Cost Accounting & PayMongo Orchestrator Polyglot Monorepo",
   "engines": {
