@@ -849,16 +849,18 @@ export function PaymentsHub() {
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
+  const [gformsIngestUrl, setGformsIngestUrl] = useState<string>("/api/v1/integrations/google-forms/submit")
+  const [gformsSecret, setGformsSecret] = useState<string>("")
 
   useEffect(() => {
     setMounted(true)
+    if (typeof window !== "undefined") {
+      setGformsIngestUrl(`${window.location.origin}/api/v1/integrations/google-forms/submit`)
+    }
+    if (process.env.NEXT_PUBLIC_GOOGLE_FORMS_SECRET) {
+      setGformsSecret(process.env.NEXT_PUBLIC_GOOGLE_FORMS_SECRET)
+    }
   }, [])
-
-  const appOrigin = (typeof window !== "undefined" && window.location.origin)
-    ? window.location.origin
-    : (process.env.NEXT_PUBLIC_APP_DOMAIN || process.env.NEXT_PUBLIC_APP_URL || "https://rge-accounting-3aa707d5f496.herokuapp.com")
-  const gformsIngestUrl = `${appOrigin.replace(/\/$/, "")}/api/v1/integrations/google-forms/submit`
-  const gformsSecret = process.env.NEXT_PUBLIC_GOOGLE_FORMS_SECRET || "rge_gforms_live_sec_89f3a21"
 
   const copyToClipboard = (text: string, key: string) => {
     try {
@@ -2123,7 +2125,7 @@ export function PaymentsHub() {
                   </label>
                   <div className="flex items-center gap-2">
                     <code className="p-2 rounded bg-muted/80 font-mono text-[11px] flex-1 border border-border select-all break-all">
-                      {mounted ? gformsIngestUrl : "https://rge-accounting-3aa707d5f496.herokuapp.com/api/v1/integrations/google-forms/submit"}
+                      {gformsIngestUrl}
                     </code>
                     <Button
                       type="button"
