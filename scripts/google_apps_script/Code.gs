@@ -85,9 +85,18 @@ function onFormSubmit(e) {
       Logger.log("Error: No customer email found in row " + rowIndex);
       if (sheet && rowIndex >= 2) {
         ensureAndWriteColumns(sheet, rowIndex, {
+          "Timestamp": rawTimestamp ? new Date(rawTimestamp).toLocaleString() : new Date().toLocaleString(),
+          "Customer Name": customerName,
+          "Contact Number": customerPhone || "",
+          "Book / Material": itemReference,
+          "Quantity": quantity,
+          "Instructor Credit": instructorCredit || "External / Self-Study",
+          "Student ID": studentId || "N/A",
+          "Notes": notes || "",
           "Response ID": responseId,
           "Payment Status": "ERROR (MISSING EMAIL)",
-          "Error Details": "Customer email address was not provided in the form."
+          "Webhook Outcome Details": "Customer email address was not provided in the form.",
+          "Synchronized At": new Date().toLocaleString()
         });
       }
       return;
@@ -147,6 +156,7 @@ function onFormSubmit(e) {
       // Write initial PENDING status & PayMongo Checkout Link to Google Sheet
       if (sheet && rowIndex >= 2) {
         ensureAndWriteColumns(sheet, rowIndex, {
+          "Timestamp": rawTimestamp ? new Date(rawTimestamp).toLocaleString() : new Date().toLocaleString(),
           "Customer Name": customerName,
           "Email Address": customerEmail,
           "Contact Number": customerPhone || "",
@@ -174,9 +184,18 @@ function onFormSubmit(e) {
     } else {
       if (sheet && rowIndex >= 2) {
         ensureAndWriteColumns(sheet, rowIndex, {
+          "Timestamp": rawTimestamp ? new Date(rawTimestamp).toLocaleString() : new Date().toLocaleString(),
+          "Customer Name": customerName,
+          "Email Address": customerEmail,
+          "Contact Number": customerPhone || "",
+          "Book / Material": itemReference,
+          "Quantity": quantity,
+          "Instructor Credit": instructorCredit || "External / Self-Study",
+          "Student ID": studentId || "N/A",
+          "Notes": notes || "",
           "Response ID": responseId,
           "Payment Status": "ERROR (" + responseCode + ")",
-          "Error Details": responseText.substring(0, 150),
+          "Webhook Outcome Details": "Backend Error (" + responseCode + "): " + responseText.substring(0, 150),
           "Synchronized At": new Date().toLocaleString()
         });
       }
@@ -344,6 +363,16 @@ function resolveSheetSafely(e) {
       sheet = spreadsheet.getSheetByName(CONFIG.FALLBACK_SHEET_NAME.trim());
     }
     if (!sheet) {
+      var allSheets = spreadsheet.getSheets();
+      for (var s = 0; s < allSheets.length; s++) {
+        var sName = allSheets[s].getName().toLowerCase();
+        if (sName.indexOf("form responses") !== -1 || sName.indexOf("response") !== -1) {
+          sheet = allSheets[s];
+          break;
+        }
+      }
+    }
+    if (!sheet) {
       sheet = spreadsheet.getActiveSheet() || spreadsheet.getSheets()[0];
     }
     if (sheet && !rowIndex) {
@@ -463,7 +492,55 @@ function sanitizeForSpreadsheet(val) {
 }
 
 /**
+ * Standard column aliases map for robust header recognition across Form question titles,
+ * short headers, and legacy spreadsheet schemas.
+ */
+var COLUMN_ALIASES = {
+  "timestamp": ["timestamp", "time", "date", "submission time"],
+  "customer name": ["customer name", "full name", "name", "your name", "student name", "client name"],
+  "email address": ["email address", "email", "customer email", "your email"],
+  "contact number": ["contact number", "mobile phone number", "mobile number", "mobile", "phone", "cellphone"],
+  "book / material": ["book / material", "book / course material selection", "course material", "material", "book", "product", "item"],
+  "quantity": ["quantity", "qty", "number of items", "copies"],
+  "instructor credit": ["instructor credit", "enrolled instructor to credit", "enrolled instructor", "instructor", "professor", "faculty"],
+  "student id": ["student id", "student / enrollee id number", "student / enrollee id", "enrollee id", "id number", "student number"],
+  "notes": ["notes", "delivery address / campus pickup notes", "delivery address", "campus pickup", "remarks", "instructions", "comments"],
+  "response id": ["response id", "form response id"],
+  "order number": ["order number", "order no", "order ref"],
+  "paymongo checkout link": ["paymongo checkout link", "checkout link", "checkout url", "payment link", "paymongo link"],
+  "amount": ["amount", "amount due", "total amount", "price"],
+  "payment status": ["payment status", "status"],
+  "payment attempt id": ["payment attempt id", "attempt id", "payment id"],
+  "official receipt no": ["official receipt no", "official receipt number", "receipt no", "receipt number", "or no"],
+  "webhook outcome details": ["webhook outcome details", "outcome details", "details", "webhook details"],
+  "synchronized at": ["synchronized at", "synced at", "last synchronized", "last updated", "updated at"]
+};
+
+/**
+ * Resolves column index using exact match, known alias dictionary, or substring containment.
+ */
+function resolveColumnIndex(headerMap, colName) {
+  var key = colName.trim().toLowerCase();
+  if (headerMap[key]) return headerMap[key];
+
+  var aliases = COLUMN_ALIASES[key] || [];
+  for (var a = 0; a < aliases.length; a++) {
+    var candidate = aliases[a].toLowerCase();
+    if (headerMap[candidate]) return headerMap[candidate];
+  }
+
+  for (var existingHeader in headerMap) {
+    if (existingHeader.indexOf(key) !== -1 || key.indexOf(existingHeader) !== -1) {
+      return headerMap[existingHeader];
+    }
+  }
+
+  return null;
+}
+
+/**
  * Ensures target columns exist in the header row, then writes sanitized values to the specific row.
+ * Uses intelligent alias matching to prevent creating redundant or duplicate columns.
  */
 function ensureAndWriteColumns(sheet, rowIndex, columnMap) {
   var lastCol = Math.max(sheet.getLastColumn(), 1);
@@ -479,13 +556,12 @@ function ensureAndWriteColumns(sheet, rowIndex, columnMap) {
 
   for (var colName in columnMap) {
     if (Object.prototype.hasOwnProperty.call(columnMap, colName)) {
-      var lookupKey = colName.trim().toLowerCase();
-      var colIndex = headerMap[lookupKey];
+      var colIndex = resolveColumnIndex(headerMap, colName);
       if (!colIndex) {
         colIndex = sheet.getLastColumn() + 1;
         sheet.getRange(1, colIndex).setValue(colName);
         sheet.getRange(1, colIndex).setFontWeight("bold");
-        headerMap[lookupKey] = colIndex;
+        headerMap[colName.trim().toLowerCase()] = colIndex;
       }
       var safeValue = sanitizeForSpreadsheet(columnMap[colName]);
       sheet.getRange(rowIndex, colIndex).setValue(safeValue);

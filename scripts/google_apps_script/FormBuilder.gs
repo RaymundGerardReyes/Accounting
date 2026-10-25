@@ -306,6 +306,7 @@ function formatBookstoreSheetHeaders(target) {
     "PayMongo Checkout Link",
     "Amount",
     "Payment Status",
+    "Payment Attempt ID",
     "Official Receipt No",
     "Webhook Outcome Details",
     "Synchronized At"
@@ -401,9 +402,13 @@ function generateRandomBookstoreSubmissions(count) {
       namedValues: {
         "timestamp": [new Date().toISOString()],
         "full name": [randomName],
+        "customer name": [randomName],
+        "name": [randomName],
         "email address": [randomEmail],
+        "email": [randomEmail],
         "contact number": [randomPhone],
         "mobile phone number": [randomPhone],
+        "mobile": [randomPhone],
         "book / course material selection": [randomBook],
         "book / material": [randomBook],
         "quantity": [String(randomQty)],
@@ -422,6 +427,8 @@ function generateRandomBookstoreSubmissions(count) {
       if (typeof onFormSubmit === "function") {
         onFormSubmit(fakeEvent);
       }
+      SpreadsheetApp.flush();
+      Utilities.sleep(500);
       results.push({
         status: "success",
         name: randomName,
