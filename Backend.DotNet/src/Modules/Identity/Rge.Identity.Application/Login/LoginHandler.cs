@@ -1,132 +1,69 @@
 using System.Security.Cryptography;
 
 using Rge.BuildingBlocks.Application.Abstractions;
-
 using Rge.BuildingBlocks.SharedKernel.Primitives;
-
 using Rge.BuildingBlocks.SharedKernel.Results;
-
 using Rge.Identity.Application.Ports;
-
 using Rge.Identity.Domain;
-
-
 
 namespace Rge.Identity.Application.Login;
 
-
-
 public sealed record LoginCommand(
-
     string Identifier,
-
     string Password,
-
     string? IpAddress = null,
-
     string? UserAgent = null) : ICommand<LoginResponse>;
-
-
-
 public sealed record LoginResponse(
 
     string UserId,
-
     string FullName,
-
     string Email,
-
     string DepartmentId,
-
     IReadOnlySet<string> Roles,
-
     string RawSessionToken,
-
     string CsrfToken,
-
     DateTimeOffset ExpiresAtUtc);
-
-
 
 public sealed class LoginHandler : ICommandHandler<LoginCommand, LoginResponse>
 
 {
-
     private readonly IAuthenticator _authenticator;
-
     private readonly IRoleStore _roleStore;
-
     private readonly IActorCache _actorCache;
-
     private readonly ICsrfTokenService _csrfTokenService;
-
     private readonly IClock _clock;
-
-
-
     public LoginHandler(
-
         IAuthenticator authenticator,
-
         IRoleStore roleStore,
-
         IActorCache actorCache,
-
         ICsrfTokenService csrfTokenService,
-
         IClock clock)
 
     {
-
         _authenticator = authenticator;
-
         _roleStore = roleStore;
-
         _actorCache = actorCache;
-
         _csrfTokenService = csrfTokenService;
-
         _clock = clock;
-
     }
 
-
-
     public async Task<Result<LoginResponse>> HandleAsync(
-
         LoginCommand command,
-
         CancellationToken cancellationToken = default)
-
     {
         ArgumentNullException.ThrowIfNull(command);
-
         if (string.IsNullOrWhiteSpace(command.Identifier) || string.IsNullOrWhiteSpace(command.Password))
-
         {
-
             return Result.Failure<LoginResponse>(
-
                 Error.Validation("Identity.Login.MissingCredentials", "Username/email and password are required."));
-
         }
 
-
-
         AuthenticationDbResult authResult = await _authenticator
-
             .VerifyCredentialsAsync(command.Identifier.Trim(), command.Password, cancellationToken)
-
             .ConfigureAwait(false);
-
-
-
         if (!authResult.IsAuthenticated || string.IsNullOrWhiteSpace(authResult.UserId))
-
         {
-
             if (string.Equals(authResult.FailureReason, "ACCOUNT_LOCKED", StringComparison.OrdinalIgnoreCase))
-
             {
 
                 return Result.Failure<LoginResponse>(

@@ -11,6 +11,8 @@ using Rge.BuildingBlocks.SharedKernel.Time;
 using Rge.Identity.Api;
 using Rge.Identity.Api.Authentication;
 using Rge.Identity.Infrastructure;
+using Rge.Payments.Api;
+using Rge.Payments.Infrastructure;
 using Rge.Receipts.Api;
 using Rge.Receipts.Infrastructure;
 
@@ -56,6 +58,7 @@ public static class ServiceCollectionExtensions
         // Register Module Subsystems
         services.AddIdentityModule();
         services.AddReceiptsModule();
+        services.AddPaymentsModule(configuration);
         services.AddAuditModule();
 
         // Register Minimal API Module Endpoints
@@ -65,6 +68,7 @@ public static class ServiceCollectionExtensions
             registry.Register(new AuthEndpoints());
             registry.Register(new FinanceIdentityEndpoints());
             registry.Register(new ReceiptEndpoints());
+            registry.Register(new PaymentsEndpoints());
             registry.Register(new AuditEndpoints());
             return registry;
         });

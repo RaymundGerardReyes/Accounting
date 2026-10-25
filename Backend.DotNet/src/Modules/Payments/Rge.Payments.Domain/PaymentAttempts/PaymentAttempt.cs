@@ -76,6 +76,32 @@ public sealed class PaymentAttempt : Entity<string>
             updatedAt: nowUtc);
     }
 
+    public static PaymentAttempt Rehydrate(
+        string id,
+        string orderId,
+        string provider,
+        string paymentMethod,
+        string? providerPaymentId,
+        Money amount,
+        PaymentAttemptStatus status,
+        string idempotencyKey,
+        string? checkoutUrl,
+        string? failureCode,
+        string? failureMessage,
+        DateTimeOffset? expiresAt,
+        DateTimeOffset? paidAt,
+        DateTimeOffset createdAt,
+        DateTimeOffset updatedAt)
+    {
+        var attempt = new PaymentAttempt(
+            id, orderId, provider, paymentMethod, providerPaymentId, amount,
+            status, idempotencyKey, checkoutUrl, expiresAt, createdAt, updatedAt);
+        attempt.FailureCode = failureCode;
+        attempt.FailureMessage = failureMessage;
+        attempt.PaidAt = paidAt;
+        return attempt;
+    }
+
     public Result AttachCheckoutSession(
         string providerPaymentId,
         string checkoutUrl,

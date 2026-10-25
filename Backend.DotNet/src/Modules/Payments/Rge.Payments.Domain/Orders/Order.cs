@@ -72,6 +72,22 @@ public sealed class Order : AggregateRoot<string>
             updatedAt: nowUtc);
     }
 
+    public static Order Rehydrate(
+        string id,
+        string userId,
+        string orderNumber,
+        string title,
+        string category,
+        string referenceCode,
+        Money amount,
+        string status,
+        string metadataJson,
+        DateTimeOffset createdAt,
+        DateTimeOffset updatedAt)
+    {
+        return new Order(id, userId, orderNumber, title, category, referenceCode, amount, status, metadataJson, createdAt, updatedAt);
+    }
+
     public Result MarkPaid(DateTimeOffset paidAtUtc)
     {
         if (Status == "paid")

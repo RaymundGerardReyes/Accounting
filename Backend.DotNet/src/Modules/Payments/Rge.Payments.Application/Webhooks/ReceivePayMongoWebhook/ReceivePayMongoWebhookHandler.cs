@@ -4,16 +4,6 @@ using Rge.BuildingBlocks.SharedKernel.Results;
 
 namespace Rge.Payments.Application.Webhooks.ReceivePayMongoWebhook;
 
-public sealed record ReceivePayMongoWebhookCommand(
-    string? SignatureHeader,
-    string RawJsonBody) : ICommand<WebhookAckResponse>;
-
-public sealed record WebhookAckResponse(
-    string WebhookEventId,
-    string ProviderEventId,
-    string EventType,
-    string ProcessingStatus);
-
 /// <summary>
 /// Fast-path handler for POST /api/v1/webhooks/paymongo.
 /// Validates payload structure, extracts provider_event_id (evt_...), and persists for async outbox processing.

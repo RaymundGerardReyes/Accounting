@@ -1,48 +1,40 @@
+using System.Text.Json;
 using Rge.BuildingBlocks.Application.Abstractions;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
 using Rge.BuildingBlocks.SharedKernel.Results;
+using Rge.Payments.Application.Mapping;
 using Rge.Payments.Application.Ports;
 using Rge.Payments.Domain.Errors;
+using Rge.Payments.Domain.Orders;
 using Rge.Payments.Domain.PaymentAttempts;
 
 namespace Rge.Payments.Application.PaymentAttempts.InitiateAttempt;
 
-public sealed record InitiateAttemptCommand(
-    string OrderId,
-    string PaymentMethod,
-    string IdempotencyKey,
-    string? CustomerName = null,
-    string? CustomerEmail = null,
-    string? CustomerPhone = null) : ICommand<InitiateAttemptResponse>;
-
-public sealed record InitiateAttemptResponse(
-    string PaymentAttemptId,
-    string OrderId,
-    string OrderNumber,
-    string Provider,
-    string PaymentMethod,
-    string ProviderPaymentId,
-    long AmountMinor,
-    string Currency,
-    string Status,
-    string CheckoutUrl,
-    DateTimeOffset? ExpiresAtUtc);
-
-/// <summary>
-/// Initiates a PayMongo checkout session for an Order using server-authoritative pricing.
-/// </summary>
-public sealed class InitiateAttemptHandler : ICommandHandler<InitiateAttemptCommand, InitiateAttemptResponse>
+public sealed class InitiateAttemptHandler : ICommandHandler<InitiateAttemptCommand, PaymentAttemptDto>
 {
+    private readonly IOrderRepository _orderRepository;
+    private readonly IPaymentAttemptRepository _attemptRepository;
     private readonly IPaymentGateway _paymentGateway;
     private readonly IClock _clock;
 
-    public InitiateAttemptHandler(IPaymentGateway paymentGateway, IClock clock)
+    public InitiateAttemptHandler(
+        IOrderRepository orderRepository,
+        IPaymentAttemptRepository attemptRepository,
+        IPaymentGateway paymentGateway,
+        IClock clock)
     {
+        ArgumentNullException.ThrowIfNull(orderRepository);
+        ArgumentNullException.ThrowIfNull(attemptRepository);
+        ArgumentNullException.ThrowIfNull(paymentGateway);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        _orderRepository = orderRepository;
+        _attemptRepository = attemptRepository;
         _paymentGateway = paymentGateway;
         _clock = clock;
     }
 
-    public async Task<Result<InitiateAttemptResponse>> HandleAsync(
+    public async Task<Result<PaymentAttemptDto>> HandleAsync(
         InitiateAttemptCommand command,
         CancellationToken cancellationToken = default)
     {
@@ -50,69 +42,158 @@ public sealed class InitiateAttemptHandler : ICommandHandler<InitiateAttemptComm
 
         if (string.IsNullOrWhiteSpace(command.OrderId))
         {
-            return Result.Failure<InitiateAttemptResponse>(
-                Error.Validation("Payments.MissingOrderId", "Order ID is required."));
+            return Result.Failure<PaymentAttemptDto>(Error.Validation("InitiateAttempt.OrderIdRequired", "Order ID is required."));
         }
 
-        string idempotencyKey = string.IsNullOrWhiteSpace(command.IdempotencyKey)
-            ? Guid.NewGuid().ToString("N")
+        Order? order = await _orderRepository.GetByIdAsync(command.OrderId.Trim(), cancellationToken).ConfigureAwait(false)
+            ?? await _orderRepository.GetByOrderNumberAsync(command.OrderId.Trim(), cancellationToken).ConfigureAwait(false);
+
+        if (order is null)
+        {
+            return Result.Failure<PaymentAttemptDto>(OrderErrors.NotFound(command.OrderId));
+        }
+
+        if (order.Status == OrderStatus.Paid)
+        {
+            return Result.Failure<PaymentAttemptDto>(OrderErrors.AlreadyPaid(order.OrderNumber));
+        }
+
+        if (order.Status == OrderStatus.Cancelled)
+        {
+            return Result.Failure<PaymentAttemptDto>(OrderErrors.AlreadyCancelled(order.OrderNumber));
+        }
+
+        string rawIdempotencyKey = string.IsNullOrWhiteSpace(command.IdempotencyKey)
+            ? Guid.NewGuid().ToString("D")
             : command.IdempotencyKey.Trim();
 
-        // Note: In upcoming persistence slices, IOrderRepository and IPaymentAttemptRepository will be called here.
-        // Authoritative domain + gateway orchestration flow:
+        PaymentAttempt? existing = await _attemptRepository
+            .GetByIdempotencyKeyAsync(rawIdempotencyKey, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (existing is not null)
+        {
+            if (existing.OrderId != order.Id)
+            {
+                return Result.Failure<PaymentAttemptDto>(
+                    Error.Conflict("Payments.IdempotencyConflict", $"Idempotency key '{rawIdempotencyKey}' was used for another order."));
+            }
+
+            return Result.Success(existing.ToDto());
+        }
+
+        DateTimeOffset nowUtc = _clock.UtcNow;
+        string normalizedMethod = Domain.PaymentAttempts.PaymentMethod.Normalize(command.PaymentMethod);
+
+        // Update customer details in Order metadata if provided
+        if (!string.IsNullOrWhiteSpace(command.CustomerName) ||
+            !string.IsNullOrWhiteSpace(command.CustomerEmail) ||
+            !string.IsNullOrWhiteSpace(command.CustomerPhone))
+        {
+            try
+            {
+                var meta = string.IsNullOrWhiteSpace(order.MetadataJson)
+                    ? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                    : JsonSerializer.Deserialize<Dictionary<string, object?>>(order.MetadataJson)
+                      ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+
+                if (!string.IsNullOrWhiteSpace(command.CustomerName))
+                {
+                    meta["customer_name"] = command.CustomerName.Trim();
+                }
+                if (!string.IsNullOrWhiteSpace(command.CustomerEmail))
+                {
+                    meta["customer_email"] = command.CustomerEmail.Trim();
+                }
+                if (!string.IsNullOrWhiteSpace(command.CustomerPhone))
+                {
+                    meta["customer_phone"] = command.CustomerPhone.Trim();
+                }
+
+                order = Order.Create(
+                    orderNumber: order.OrderNumber,
+                    title: order.Title,
+                    category: order.Category,
+                    referenceCode: order.ReferenceCode,
+                    authoritativeAmount: order.Amount,
+                    metadataJson: JsonSerializer.Serialize(meta),
+                    nowUtc: nowUtc,
+                    userId: order.UserId);
+
+                await _orderRepository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
+            }
+            catch (JsonException)
+            {
+            }
+        }
+
         var attempt = PaymentAttempt.CreatePending(
-            orderId: command.OrderId,
-            paymentMethod: string.IsNullOrWhiteSpace(command.PaymentMethod) ? "hosted_checkout" : command.PaymentMethod,
-            amount: Rge.BuildingBlocks.SharedKernel.Money.Money.Php(100_00), // Default contract placeholder
-            idempotencyKey: idempotencyKey,
-            nowUtc: _clock.UtcNow);
+            orderId: order.Id,
+            paymentMethod: normalizedMethod,
+            amount: order.Amount,
+            idempotencyKey: rawIdempotencyKey,
+            nowUtc: nowUtc,
+            provider: "paymongo");
 
-        var gatewayRequest = new CreateCheckoutSessionRequest(
-            OrderId: command.OrderId,
-            OrderNumber: $"ORD-{command.OrderId[..Math.Min(8, command.OrderId.Length)].ToUpperInvariant()}",
-            Description: "R.G.E Accounting Platform Checkout",
-            Amount: attempt.Amount,
-            RequestedPaymentMethod: attempt.PaymentMethod,
-            IdempotencyKey: attempt.IdempotencyKey,
-            CustomerName: command.CustomerName,
-            CustomerEmail: command.CustomerEmail,
-            CustomerPhone: command.CustomerPhone,
-            LineItems: []);
+        await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
 
-        Result<CheckoutSessionResult> sessionResult = await _paymentGateway.CreateCheckoutSessionAsync(
-            gatewayRequest,
-            cancellationToken);
-
-        if (sessionResult.IsFailure)
+        string? custName = command.CustomerName;
+        string? custEmail = command.CustomerEmail;
+        string? custPhone = command.CustomerPhone;
+        if (string.IsNullOrWhiteSpace(custName) || string.IsNullOrWhiteSpace(custEmail))
         {
-            attempt.MarkFailed("GATEWAY_REJECTED", sessionResult.Error.Message, _clock.UtcNow);
-            return Result.Failure<InitiateAttemptResponse>(sessionResult.Error);
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(order.MetadataJson);
+                if (string.IsNullOrWhiteSpace(custName) && doc.RootElement.TryGetProperty("customer_name", out JsonElement cn))
+                {
+                    custName = cn.GetString();
+                }
+                if (string.IsNullOrWhiteSpace(custEmail) && doc.RootElement.TryGetProperty("customer_email", out JsonElement ce))
+                {
+                    custEmail = ce.GetString();
+                }
+                if (string.IsNullOrWhiteSpace(custPhone) && doc.RootElement.TryGetProperty("customer_phone", out JsonElement cp))
+                {
+                    custPhone = cp.GetString();
+                }
+            }
+            catch (JsonException)
+            {
+            }
         }
 
-        CheckoutSessionResult session = sessionResult.Value;
-        Result attachResult = attempt.AttachCheckoutSession(
-            providerPaymentId: session.ProviderPaymentId,
-            checkoutUrl: session.CheckoutUrl,
-            expiresAtUtc: session.ExpiresAtUtc,
-            nowUtc: _clock.UtcNow);
+        var checkoutReq = new CreateCheckoutSessionRequest(
+            OrderId: order.Id,
+            OrderNumber: order.OrderNumber,
+            Description: order.Title,
+            Amount: order.Amount,
+            RequestedPaymentMethod: normalizedMethod,
+            IdempotencyKey: rawIdempotencyKey,
+            CustomerName: custName,
+            CustomerEmail: custEmail,
+            CustomerPhone: custPhone,
+            LineItems: [new CheckoutLineItemDto(order.Title, 1, order.Amount.AmountMinor, order.Amount.CurrencyCode)]);
 
-        if (attachResult.IsFailure)
+        Result<CheckoutSessionResult> gatewayResult = await _paymentGateway
+            .CreateCheckoutSessionAsync(checkoutReq, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (gatewayResult.IsFailure)
         {
-            return Result.Failure<InitiateAttemptResponse>(attachResult.Error);
+            attempt.MarkFailed("GATEWAY_ERROR", gatewayResult.Error.Message, nowUtc);
+            await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
+            return Result.Failure<PaymentAttemptDto>(gatewayResult.Error);
         }
 
-        return Result.Success(new InitiateAttemptResponse(
-            PaymentAttemptId: attempt.Id,
-            OrderId: attempt.OrderId,
-            OrderNumber: gatewayRequest.OrderNumber,
-            Provider: attempt.Provider,
-            PaymentMethod: attempt.PaymentMethod,
-            ProviderPaymentId: session.ProviderPaymentId,
-            AmountMinor: attempt.Amount.AmountMinor,
-            Currency: attempt.Amount.CurrencyCode,
-            Status: "requires_action",
-            CheckoutUrl: session.CheckoutUrl,
-            ExpiresAtUtc: session.ExpiresAtUtc));
+        attempt.AttachCheckoutSession(
+            providerPaymentId: gatewayResult.Value.ProviderPaymentId,
+            checkoutUrl: gatewayResult.Value.CheckoutUrl,
+            expiresAtUtc: gatewayResult.Value.ExpiresAtUtc,
+            nowUtc: nowUtc);
+
+        await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
+
+        return Result.Success(attempt.ToDto());
     }
 }
-
