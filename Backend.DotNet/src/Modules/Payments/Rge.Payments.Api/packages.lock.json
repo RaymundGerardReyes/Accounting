@@ -21,6 +21,13 @@
           "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
         }
       },
+      "rge.buildingblocks.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
       "rge.buildingblocks.sharedkernel": {
         "type": "Project"
       },
@@ -43,6 +50,14 @@
         "type": "Project",
         "dependencies": {
           "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.payments.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Infrastructure": "[1.0.0, )",
+          "Rge.Payments.Application": "[1.0.0, )",
+          "Rge.Payments.Domain": "[1.0.0, )"
         }
       }
     }

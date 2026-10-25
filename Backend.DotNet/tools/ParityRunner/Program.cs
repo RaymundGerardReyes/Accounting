@@ -186,6 +186,46 @@ Assert("MagicByteValidator blocks path traversal", !traversalRes.IsSuccess && tr
 string escapedFormula = Rge.Finance.Infrastructure.Reporting.CsvInjectionSafeWriter.EscapeCell("=cmd|'/C calc'!A0");
 Assert("CsvInjectionSafeWriter neutralizes = formula prefix", escapedFormula.StartsWith("'=", StringComparison.Ordinal));
 
+// 9. Test PayMongo Payment Attempt & Webhook Extraction
+Console.WriteLine("\n--- Testing PayMongo PaymentAttempt & Webhook Extraction ---");
+var attempt = Rge.Payments.Domain.PaymentAttempts.PaymentAttempt.CreatePending(
+    "order-test-1", "qrph", Rge.BuildingBlocks.SharedKernel.Money.Money.Php(150_00), "idem-key-1", DateTimeOffset.UtcNow);
+Assert("PaymentAttempt initiates in Pending status", attempt.Status == Rge.Payments.Domain.PaymentAttempts.PaymentAttemptStatus.Pending);
+
+var attachRes = attempt.AttachCheckoutSession("cs_test_123", "https://checkout.paymongo.com/cs_test_123", DateTimeOffset.UtcNow.AddHours(1), DateTimeOffset.UtcNow);
+Assert("PaymentAttempt attaches checkout session and moves to RequiresAction", attachRes.IsSuccess && attempt.Status == Rge.Payments.Domain.PaymentAttempts.PaymentAttemptStatus.RequiresAction);
+
+var succeedRes = attempt.MarkSucceeded(DateTimeOffset.UtcNow, "qrph");
+Assert("PaymentAttempt moves from RequiresAction to Succeeded", succeedRes.IsSuccess && attempt.Status == Rge.Payments.Domain.PaymentAttempts.PaymentAttemptStatus.Succeeded);
+
+string sampleWebhookPayload = """
+{
+  "data": {
+    "id": "evt_test_999",
+    "type": "event",
+    "attributes": {
+      "type": "checkout_session.payment.paid",
+      "livemode": false,
+      "created_at": 1729845000,
+      "data": {
+        "id": "cs_test_123",
+        "type": "checkout_session",
+        "attributes": {
+          "status": "paid"
+        }
+      }
+    }
+  }
+}
+""";
+
+var webhookHandler = new Rge.Payments.Application.Webhooks.ReceivePayMongoWebhook.ReceivePayMongoWebhookHandler();
+var webhookCmd = new Rge.Payments.Application.Webhooks.ReceivePayMongoWebhook.ReceivePayMongoWebhookCommand(null, sampleWebhookPayload);
+var webhookTask = webhookHandler.HandleAsync(webhookCmd);
+webhookTask.Wait();
+var webhookRes = webhookTask.Result;
+Assert("ReceivePayMongoWebhookHandler parses evt_test_999 and returns received", webhookRes.IsSuccess && webhookRes.Value.ProviderEventId == "evt_test_999" && webhookRes.Value.ProcessingStatus == "received");
+
 Console.WriteLine("\n==============================================================");
 Console.WriteLine($" RESULTS: {passed} PASSED, {failed} FAILED");
 Console.WriteLine("==============================================================");
