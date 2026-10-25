@@ -75,6 +75,21 @@ public sealed class ApprovalMatrix : Entity<string>
             createdAt: createdAt ?? DateTimeOffset.UtcNow);
     }
 
+    public static IReadOnlyList<ApprovalMatrix> CreateDefaultConfiguration()
+    {
+        return
+        [
+            Create("cash_advance", "business_approval", "supervisor", Money.Php(1), Money.Php(50_000_00), "*", id: "matrix_ca_sup"),
+            Create("cash_advance", "business_approval", "finance_controller", Money.Php(1), Money.Php(500_000_00), "*", id: "matrix_ca_fc"),
+            Create("disbursement_bank", "bank_approval", "bank_approver", Money.Php(1), Money.Php(200_000_00), "*", id: "matrix_db_ba"),
+            Create("purchase_request", "business_approval", "supervisor", Money.Php(1), Money.Php(100_000_00), "*", id: "matrix_pr_sup"),
+            Create("purchase_request", "business_approval", "finance_controller", Money.Php(1), Money.Php(1_000_000_00), "*", id: "matrix_pr_fc"),
+            Create("payable_payment", "bank_approval", "bank_approver", Money.Php(1), Money.Php(1_000_000_00), "*", id: "matrix_pp_ba"),
+            Create("exception_request", "controller_approval", "finance_controller", Money.Zero(), Money.Php(100_000_00), "*", id: "matrix_ex_fc"),
+            Create("policy_approval", "controller_approval", "finance_controller", Money.Zero(), Money.Php(999_999_999_99), "*", id: "matrix_po_fc")
+        ];
+    }
+
     public bool AppliesTo(string workflow, string stage, IEnumerable<string> roles, string departmentId, long amountMinor)
     {
         if (!IsActive)

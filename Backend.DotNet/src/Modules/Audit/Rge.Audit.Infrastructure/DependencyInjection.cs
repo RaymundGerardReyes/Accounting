@@ -18,6 +18,7 @@ public static class DependencyInjection
 
         services.AddScoped<PgAuditAppender>();
         services.AddScoped<IAuditTrail>(sp => sp.GetRequiredService<PgAuditAppender>());
+        services.AddScoped<Rge.BuildingBlocks.Application.Behaviors.IAuditBehaviorWriter>(sp => sp.GetRequiredService<PgAuditAppender>());
 
         services.AddScoped<AuditQueryReader>();
         services.AddScoped<IAuditReader>(sp => sp.GetRequiredService<AuditQueryReader>());

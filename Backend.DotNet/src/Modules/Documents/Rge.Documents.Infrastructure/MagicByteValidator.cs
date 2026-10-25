@@ -1,14 +1,23 @@
 using Rge.BuildingBlocks.SharedKernel.Results;
+using Rge.Documents.Application.UploadDocument;
+using Rge.Documents.Domain;
 
 namespace Rge.Documents.Infrastructure;
 
-/// <summary>
-/// Enforces strict magic-byte signature verification (%PDF-, PNG, JPEG),
-/// the 10 MB file size cap, and path-traversal-safe storage filenames.
-/// </summary>
+public sealed class MagicByteInspectorAdapter : IMagicByteInspector
+{
+    public Result<(string DetectedMimeType, string SafeStoredFilename)> Inspect(
+        string originalFilename,
+        ReadOnlySpan<byte> fileBytes) =>
+        MagicByteValidator.ValidateAndCreateSafeName(originalFilename, fileBytes.Length, fileBytes);
+
+    public string ComputeSha256(ReadOnlySpan<byte> fileBytes) =>
+        Sha256Hasher.ComputeHex(fileBytes);
+}
+
 public static class MagicByteValidator
 {
-    public const long MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
+    public const long MaxFileSizeBytes = FileSizePolicy.MaxAllowedBytes;
 
     private static readonly byte[] PdfMagic = [0x25, 0x50, 0x44, 0x46, 0x2D]; // %PDF-
     private static readonly byte[] PngMagic = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
@@ -19,24 +28,16 @@ public static class MagicByteValidator
         long sizeBytes,
         ReadOnlySpan<byte> headerBytes)
     {
-        if (string.IsNullOrWhiteSpace(originalFilename))
+        Result pathCheck = PathTraversalGuard.EnsureSafeFilename(originalFilename);
+        if (pathCheck.IsFailure)
         {
-            return Result.Failure<(string, string)>(
-                Error.Validation("Documents.EmptyFilename", "Original filename is required."));
+            return Result.Failure<(string, string)>(pathCheck.Error);
         }
 
-        if (originalFilename.Contains("..", StringComparison.Ordinal) ||
-            originalFilename.Contains('/', StringComparison.Ordinal) ||
-            originalFilename.Contains('\\', StringComparison.Ordinal))
+        Result sizeCheck = FileSizePolicy.ValidateSize(sizeBytes);
+        if (sizeCheck.IsFailure)
         {
-            return Result.Failure<(string, string)>(
-                Error.Validation("Documents.PathTraversalDetected", "Filename contains illegal path characters."));
-        }
-
-        if (sizeBytes <= 0 || sizeBytes > MaxFileSizeBytes)
-        {
-            return Result.Failure<(string, string)>(
-                Error.Validation("Documents.InvalidFileSize", $"File size must be between 1 byte and {MaxFileSizeBytes} bytes (10 MB)."));
+            return Result.Failure<(string, string)>(sizeCheck.Error);
         }
 
         if (headerBytes.StartsWith(PdfMagic))

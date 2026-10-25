@@ -85,16 +85,39 @@ public sealed class OutboxWorker
 
 
     /// <summary>
-
     /// Signals the worker immediately after a webhook or command writes to the outbox,
-
     /// eliminating polling delay on the hot path.
-
     /// </summary>
-
     public void SignalImmediateWakeup() =>
-
         _wakeupChannel.Writer.TryWrite(true);
+
+    /// <summary>
+    /// Waits for an immediate wake-up signal or until <paramref name="fallbackDelay"/> elapses.
+    /// </summary>
+    public async ValueTask<bool> WaitForWakeupSignalAsync(
+        TimeSpan fallbackDelay,
+        CancellationToken cancellationToken = default)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(fallbackDelay);
+
+        try
+        {
+            if (await _wakeupChannel.Reader.WaitToReadAsync(timeoutCts.Token).ConfigureAwait(false))
+            {
+                while (_wakeupChannel.Reader.TryRead(out _))
+                {
+                }
+                return true;
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Fallback polling interval elapsed normally
+        }
+
+        return false;
+    }
 
 
 

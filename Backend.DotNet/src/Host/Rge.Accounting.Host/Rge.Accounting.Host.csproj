@@ -10,5 +10,9 @@
     <ProjectReference Include="..\..\Modules\Payments\Rge.Payments.Infrastructure\Rge.Payments.Infrastructure.csproj" />
     <ProjectReference Include="..\..\Modules\Audit\Rge.Audit.Api\Rge.Audit.Api.csproj" />
     <ProjectReference Include="..\..\Modules\Audit\Rge.Audit.Infrastructure\Rge.Audit.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Modules\CostAllocation\Rge.CostAllocation.Api\Rge.CostAllocation.Api.csproj" />
+    <ProjectReference Include="..\..\Modules\CostAllocation\Rge.CostAllocation.Infrastructure\Rge.CostAllocation.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Modules\Documents\Rge.Documents.Api\Rge.Documents.Api.csproj" />
+    <ProjectReference Include="..\..\Modules\Documents\Rge.Documents.Infrastructure\Rge.Documents.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

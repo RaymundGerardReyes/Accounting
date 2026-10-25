@@ -3,6 +3,7 @@ using System.Data;
 using System.Data.Common;
 using Rge.Audit.Contracts;
 using Rge.Audit.Domain;
+using Rge.BuildingBlocks.Application.Behaviors;
 using Rge.BuildingBlocks.Infrastructure.Persistence;
 
 namespace Rge.Audit.Infrastructure;
@@ -11,7 +12,7 @@ namespace Rge.Audit.Infrastructure;
 /// Appends financial audit events transactionally via PostgreSQL stored procedure fn_append_audit_event.
 /// Falls back to an atomic in-memory chain for offline tests.
 /// </summary>
-public sealed class PgAuditAppender : IAuditTrail
+public sealed class PgAuditAppender : IAuditTrail, IAuditBehaviorWriter
 {
     private static readonly object SyncLock = new();
     internal static readonly ConcurrentDictionary<long, AuditEvent> InMemoryEvents = new();
@@ -23,6 +24,31 @@ public sealed class PgAuditAppender : IAuditTrail
     {
         ArgumentNullException.ThrowIfNull(connectionScope);
         _connectionScope = connectionScope;
+    }
+
+    public Task AppendAsync(
+        string actorId,
+        string actorRole,
+        string action,
+        string entityType,
+        string entityId,
+        string? reason,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        var entry = new AuditTrailEntry(
+            ActorId: string.IsNullOrWhiteSpace(actorId) ? "system" : actorId,
+            ActorRole: string.IsNullOrWhiteSpace(actorRole) ? "system" : actorRole,
+            Action: action,
+            EntityType: entityType,
+            EntityId: entityId,
+            PreviousState: null,
+            NewState: null,
+            Reason: reason,
+            CorrelationId: correlationId,
+            EvidenceRef: null);
+
+        return RecordAsync(entry, cancellationToken);
     }
 
     public async Task<AuditRecordResult> RecordAsync(

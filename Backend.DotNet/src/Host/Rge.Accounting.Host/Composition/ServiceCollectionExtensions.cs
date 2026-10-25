@@ -8,6 +8,10 @@ using Rge.BuildingBlocks.Infrastructure.Caching;
 using Rge.BuildingBlocks.Infrastructure.Persistence;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
 using Rge.BuildingBlocks.SharedKernel.Time;
+using Rge.CostAllocation.Api;
+using Rge.CostAllocation.Infrastructure;
+using Rge.Documents.Api;
+using Rge.Documents.Infrastructure;
 using Rge.Identity.Api;
 using Rge.Identity.Api.Authentication;
 using Rge.Identity.Infrastructure;
@@ -17,11 +21,6 @@ using Rge.Receipts.Api;
 using Rge.Receipts.Infrastructure;
 
 namespace Rge.Accounting.Host.Composition;
-
-internal sealed class SystemClock : IClock
-{
-    public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
-}
 
 /// <summary>
 /// Registers cross-cutting BuildingBlocks, JSON source-generation, security pipelines,
@@ -48,7 +47,7 @@ public static class ServiceCollectionExtensions
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentActor, ServerCurrentActor>();
 
-        services.AddSingleton<IClock>(_ => new SystemClock());
+        services.AddSingleton<IClock>(SystemClock.Instance);
         services.AddSingleton<IBusinessDayService>(_ => new PhilippineBusinessCalendar());
         services.AddSingleton<CacheInvalidator>();
 
@@ -60,6 +59,8 @@ public static class ServiceCollectionExtensions
         services.AddReceiptsModule();
         services.AddPaymentsModule(configuration);
         services.AddAuditModule();
+        services.AddCostAllocationModule();
+        services.AddDocumentsModule();
 
         // Register Minimal API Module Endpoints
         services.AddSingleton(_ =>
@@ -70,6 +71,8 @@ public static class ServiceCollectionExtensions
             registry.Register(new ReceiptEndpoints());
             registry.Register(new PaymentsEndpoints());
             registry.Register(new AuditEndpoints());
+            registry.Register(new CostAllocationEndpoints());
+            registry.Register(new DocumentEndpoints());
             return registry;
         });
 

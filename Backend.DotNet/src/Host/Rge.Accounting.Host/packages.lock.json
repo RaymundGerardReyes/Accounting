@@ -68,6 +68,81 @@
       "rge.buildingblocks.sharedkernel": {
         "type": "Project"
       },
+      "rge.costallocation.api": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Api": "[1.0.0, )",
+          "Rge.CostAllocation.Application": "[1.0.0, )",
+          "Rge.CostAllocation.Contracts": "[1.0.0, )",
+          "Rge.CostAllocation.Infrastructure": "[1.0.0, )"
+        }
+      },
+      "rge.costallocation.application": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.CostAllocation.Contracts": "[1.0.0, )",
+          "Rge.CostAllocation.Domain": "[1.0.0, )"
+        }
+      },
+      "rge.costallocation.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.costallocation.domain": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.costallocation.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Infrastructure": "[1.0.0, )",
+          "Rge.CostAllocation.Application": "[1.0.0, )",
+          "Rge.CostAllocation.Domain": "[1.0.0, )"
+        }
+      },
+      "rge.documents.api": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Api": "[1.0.0, )",
+          "Rge.Documents.Application": "[1.0.0, )",
+          "Rge.Documents.Contracts": "[1.0.0, )"
+        }
+      },
+      "rge.documents.application": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.Documents.Contracts": "[1.0.0, )",
+          "Rge.Documents.Domain": "[1.0.0, )"
+        }
+      },
+      "rge.documents.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.documents.domain": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.documents.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Infrastructure": "[1.0.0, )",
+          "Rge.Documents.Application": "[1.0.0, )",
+          "Rge.Documents.Domain": "[1.0.0, )"
+        }
+      },
       "rge.identity.api": {
         "type": "Project",
         "dependencies": {
