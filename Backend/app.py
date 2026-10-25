@@ -1,6 +1,8 @@
 import os
 import json
 import uuid
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
@@ -110,13 +112,81 @@ def write_json_file(filename: str, data: Any):
         json.dump(data, f, indent=4)
 
 # ==========================================
-# 0. Health Checks
+# 0. Health & Version Checks
 # ==========================================
+
+def get_version_info() -> Dict[str, Any]:
+    version = os.environ.get("APP_VERSION")
+    git_sha = os.environ.get("GIT_SHA")
+    build_time = os.environ.get("BUILD_TIME")
+
+    if not version or not git_sha:
+        try:
+            repo_root = Path(__file__).resolve().parent.parent
+            res = subprocess.run(
+                ["git", "describe", "--tags", "--match=python/v*", "--always"],
+                cwd=str(repo_root),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False
+            )
+            tag_output = res.stdout.strip()
+            if tag_output.startswith("python/v"):
+                version = tag_output[len("python/v"):]
+            elif tag_output.startswith("v"):
+                version = tag_output[1:]
+            elif tag_output:
+                version = tag_output
+        except Exception:
+            pass
+
+    if not version:
+        version_file = Path(__file__).resolve().parent.parent / "VERSION"
+        if version_file.exists():
+            version = version_file.read_text(encoding="utf-8").strip()
+        else:
+            version = "0.9.34"
+
+    if not git_sha:
+        try:
+            repo_root = Path(__file__).resolve().parent.parent
+            sha_res = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=str(repo_root),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False
+            )
+            git_sha = sha_res.stdout.strip() or "local-dev"
+        except Exception:
+            git_sha = "local-dev"
+
+    if not build_time:
+        build_time = datetime.now(timezone.utc).isoformat()
+
+    return {
+        "line": "python",
+        "version": version,
+        "gitSha": git_sha,
+        "buildTime": build_time,
+        "apiContract": "v1",
+        "schemaVersion": "V0001",
+    }
+
+
+@app.get("/version", summary="Version Info")
+@app.get("/api/version", summary="API Version Info")
+def get_version():
+    return get_version_info()
+
 
 @app.get("/health", summary="Health Check")
 @app.get("/api/health", summary="API Health Check")
 def health_check():
-    return {"status": "ok", "service": "Acme Cost Accounting & PayMongo Orchestrator", "version": "2.0.0"}
+    info = get_version_info()
+    return {"status": "ok", "service": "Acme Cost Accounting & PayMongo Orchestrator", "version": info["version"]}
 
 
 # ==========================================
