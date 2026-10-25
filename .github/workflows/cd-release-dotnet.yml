@@ -1,0 +1,108 @@
+name: "CD: Release .NET Line (Line A)"
+
+on:
+  push:
+    tags:
+      - "dotnet/v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to manually release (e.g. dotnet/v0.1.0-preview.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+
+jobs:
+  build-and-release-dotnet:
+    name: Build, Test, and Publish .NET Line Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract Release Version from Tag
+        id: vars
+        shell: pwsh
+        run: |
+          $rawTag = "${{ github.event.inputs.tag }}"
+          if ([string]::IsNullOrWhiteSpace($rawTag)) {
+              $rawTag = "${{ github.ref_name }}"
+          }
+          if (-not $rawTag.StartsWith("dotnet/v")) {
+              Write-Error "Invalid tag for .NET line: $rawTag"
+              exit 1
+          }
+          $version = $rawTag.Substring("dotnet/v".Length)
+          $shortSha = (git rev-parse --short HEAD).Trim()
+          $buildTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+
+          Write-Host "Releasing .NET Line: Version=$version, Tag=$rawTag, GitSha=$shortSha"
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+          echo "TAG=$rawTag" >> $env:GITHUB_OUTPUT
+          echo "GIT_SHA=$shortSha" >> $env:GITHUB_OUTPUT
+          echo "BUILD_TIME=$buildTime" >> $env:GITHUB_OUTPUT
+
+      - name: Setup .NET SDK 10.0.301
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.301"
+
+      - name: Setup Node.js 20 & Pinned Next.js Dependencies
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Inject Frontend Build Environment
+        shell: pwsh
+        run: |
+          ./tools/versioning/compute-build-env.ps1 -Format DotEnv -WriteToFrontend
+
+      - name: Restore .NET Modular Monolith
+        run: |
+          dotnet restore Backend.DotNet/Rge.Accounting.slnx
+
+      - name: Build & Run .NET Automated Test Suite
+        run: |
+          dotnet test Backend.DotNet/Rge.Accounting.slnx --no-restore --configuration Release --verbosity normal
+
+      - name: Build Next.js 15 Frontend
+        working-directory: Frontend
+        env:
+          NEXT_PUBLIC_APP_LINE: "dotnet"
+          NEXT_PUBLIC_APP_VERSION: ${{ steps.vars.outputs.VERSION }}
+          NEXT_PUBLIC_GIT_SHA: ${{ steps.vars.outputs.GIT_SHA }}
+          NEXT_PUBLIC_API_CONTRACT: "v1"
+          NEXT_PUBLIC_BUILD_TIME: ${{ steps.vars.outputs.BUILD_TIME }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.TAG }}
+          name: "R.G.E Accounting Platform (${{ steps.vars.outputs.TAG }})"
+          body: |
+            ## R.G.E Accounting Platform (.NET 10 Modular Monolith) - ${{ steps.vars.outputs.TAG }}
+
+            - **Release Line**: Line A (.NET 10 + Next.js 15)
+            - **Application SemVer**: `${{ steps.vars.outputs.VERSION }}`
+            - **Commit SHA**: `${{ steps.vars.outputs.GIT_SHA }}`
+            - **API Contract**: `v1`
+            - **Database Schema Level**: `V0004` (Forward-only DbUp migrations)
+            - **Build Timestamp**: `${{ steps.vars.outputs.BUILD_TIME }}`
+
+            ### Architectural Guarantees
+            - Zero-Float Money & High-Precision Financial Rounding (RoundHalfToEven)
+            - PayMongo HMAC-SHA256 Webhook Intake with Strict Transactional Outbox
+            - Philippine Regulatory Compliance (BIR RMC 77-2024 & Non-Working Holidays)
+            - Immutable Audit Event Hash-Chaining (`fn_append_audit_event`)
+          draft: false
+          prerelease: ${{ contains(steps.vars.outputs.VERSION, 'preview') || contains(steps.vars.outputs.VERSION, 'rc') }}
+

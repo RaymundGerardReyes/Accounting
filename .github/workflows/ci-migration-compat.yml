@@ -1,0 +1,38 @@
+name: "CI: Dual-Line Migration Compatibility Gate"
+
+on:
+  pull_request:
+    branches:
+      - migrating-C#
+      - legacy-python
+      - main
+    paths:
+      - "db/**"
+      - "Backend.DotNet/db/**"
+      - "Backend/models.py"
+      - "Backend/finance_models.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-migration-compatibility:
+    name: Audit Additive-Only Schema Invariants
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Migration Compatibility Gate (.NET Migrations)
+        shell: pwsh
+        run: |
+          ./tools/versioning/check-migration-compat.ps1 -TargetPath "Backend.DotNet/db"
+
+      - name: Run Migration Compatibility Gate (Root/Legacy DB)
+        shell: pwsh
+        run: |
+          if (Test-Path "db") {
+              ./tools/versioning/check-migration-compat.ps1 -TargetPath "db"
+          }
+

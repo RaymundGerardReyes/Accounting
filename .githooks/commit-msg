@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+# Cross-platform commit-msg hook running commitlint
+if command -v npx >/dev/null 2>&1; then
+  npx --no-install commitlint --edit "$1"
+fi
+

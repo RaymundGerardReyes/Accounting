@@ -1,0 +1,46 @@
+name: "CI: Commitlint & Scope Guardrails"
+
+on:
+  pull_request:
+    branches:
+      - migrating-C#
+      - legacy-python
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  commit-validation:
+    name: Validate Conventional Commits & Scope Isolation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Commitlint & Config Conventional
+        run: |
+          npm install --no-save @commitlint/cli @commitlint/config-conventional
+
+      - name: Fetch PR Base Branch
+        run: |
+          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
+
+      - name: Run Commitlint on PR Commits
+        run: |
+          npx commitlint --from "origin/${{ github.base_ref }}" --to "HEAD" --verbose
+
+      - name: Validate Strict Commit Scope Isolation (Single-Scope Invariant)
+        shell: pwsh
+        run: |
+          ./tools/versioning/check-commit-scope.ps1 -CommitRange "origin/${{ github.base_ref }}..HEAD"
+

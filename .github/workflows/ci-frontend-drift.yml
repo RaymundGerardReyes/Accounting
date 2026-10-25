@@ -1,0 +1,43 @@
+name: "CI: Frontend Drift Audit"
+
+on:
+  pull_request:
+    branches:
+      - migrating-C#
+      - legacy-python
+      - main
+    paths:
+      - "Frontend/**"
+      - ".frontend-drift-allowlist"
+      - "tools/versioning/check-frontend-drift.ps1"
+  schedule:
+    # Run every Monday at 00:00 UTC
+    - cron: "0 0 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-drift:
+    name: Audit Line Parity (migrating-C# vs legacy-python)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository with full Git history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch both long-lived branches
+        run: |
+          git fetch origin migrating-C#:migrating-C# || true
+          git fetch origin legacy-python:legacy-python || true
+
+      - name: Execute Drift Verification Script
+        shell: pwsh
+        run: |
+          ./tools/versioning/check-frontend-drift.ps1 `
+            -SourceBranch "legacy-python" `
+            -TargetBranch "migrating-C#" `
+            -AllowlistPath ".frontend-drift-allowlist"
+

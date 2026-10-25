@@ -28,7 +28,7 @@ SCOPE_PATTERNS = {
         r"^Procfile$",
         r"^nginx/.*",
     ],
-    "backend": [r"^Backend/(?!test_).*", r"^db/.*"],
+    "backend": [r"^Backend/(?!test_).*", r"^Backend\.DotNet/.*", r"^db/.*", r"^scaffold\.(sh|ps1)$"],
     "frontend": [r"^Frontend/.*"],
     "test": [r"^Backend/test_.*", r"^tests/.*"],
     "docs": [r"^docs/.*", r"^INSTRUCTIONS\.txt$"],

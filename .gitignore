@@ -72,3 +72,12 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# .NET
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+packages/

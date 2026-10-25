@@ -1,0 +1,91 @@
+name: "CI: Version Sanity & Line Invariants"
+
+on:
+  pull_request:
+    branches:
+      - migrating-C#
+      - legacy-python
+      - main
+  push:
+    branches:
+      - migrating-C#
+      - legacy-python
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version-sanity:
+    name: Verify Single Source of Version & Line Invariants
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check package.json Version Managed Placeholders
+        shell: pwsh
+        run: |
+          $rootPkg = Get-Content "package.json" -Raw | ConvertFrom-Json
+          if ($rootPkg.version -ne "0.0.0-managed") {
+              Write-Error "Root package.json version must remain '0.0.0-managed', found '$($rootPkg.version)'."
+              exit 1
+          }
+          Write-Host "[PASS] Root package.json is '0.0.0-managed'." -ForegroundColor Green
+
+          $frontendPkg = Get-Content "Frontend/package.json" -Raw | ConvertFrom-Json
+          if ($frontendPkg.version -ne "0.0.0-managed") {
+              Write-Error "Frontend/package.json version must remain '0.0.0-managed', found '$($frontendPkg.version)'."
+              exit 1
+          }
+          Write-Host "[PASS] Frontend/package.json is '0.0.0-managed'." -ForegroundColor Green
+
+      - name: Check .release-line Matches Active Branch
+        shell: pwsh
+        run: |
+          $ref = "${{ github.base_ref }}"
+          if ([string]::IsNullOrWhiteSpace($ref)) {
+              $ref = "${{ github.ref_name }}"
+          }
+          
+          if (Test-Path ".release-line") {
+              $line = (Get-Content ".release-line" -Raw).Trim()
+              Write-Host "Target branch context: '$ref', .release-line: '$line'"
+
+              if ($ref -eq "migrating-C#" -and $line -ne "dotnet") {
+                  Write-Error "Branch 'migrating-C#' must specify 'dotnet' in .release-line, found '$line'."
+                  exit 1
+              }
+              if ($ref -eq "legacy-python" -and $line -ne "python") {
+                  Write-Error "Branch 'legacy-python' must specify 'python' in .release-line, found '$line'."
+                  exit 1
+              }
+              Write-Host "[PASS] .release-line matches target branch invariant." -ForegroundColor Green
+          } else {
+              Write-Error ".release-line marker file is missing from repository root."
+              exit 1
+          }
+
+      - name: Audit Git Tag Namespace Compliance
+        shell: pwsh
+        run: |
+          $invalidTags = @()
+          $allTags = git tag -l
+          foreach ($t in $allTags) {
+              if (-not [string]::IsNullOrWhiteSpace($t)) {
+                  # Allow legacy tags (v0.1.0 - v0.9.34) and new dual-line namespaces
+                  if ($t -notmatch '^(dotnet/v|python/v|v0\.)') {
+                      $invalidTags += $t
+                  }
+              }
+          }
+          if ($invalidTags.Count -gt 0) {
+              Write-Host "[FAIL] Found tags violating namespace policy (must be 'dotnet/v*' or 'python/v*'):" -ForegroundColor Red
+              $invalidTags | ForEach-Object { Write-Host "  ! $_" -ForegroundColor Red }
+              exit 1
+          }
+          Write-Host "[PASS] All tags conform to dual-line namespace policy." -ForegroundColor Green
+

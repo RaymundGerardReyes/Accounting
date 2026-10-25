@@ -1,0 +1,16 @@
+# .frontend-drift-allowlist
+# ==============================================================================
+# Allowed divergences between legacy-python:Frontend/ and migrating-C#:Frontend/
+#
+# Rules:
+# 1. Format: <glob-pattern>  # <mandatory explanation and ticket/ADR reference>
+# 2. Blank lines and lines starting with '#' are ignored.
+# 3. Only add entries when an intentional divergence is approved via ADR.
+# 4. Remove entries as soon as full parity is restored.
+#
+# Currently, frontend parity between both lines is 100% (zero drift).
+# ==============================================================================
+
+# Example format:
+# Frontend/app/experimental-feature/**  # [ADR-0012] DotNet preview testing only
+
