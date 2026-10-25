@@ -4,7 +4,7 @@ namespace Rge.Finance.Domain.Ledger;
 
 /// <summary>
 /// Dynamically derives the outstanding balance of a CashAdvance from its append-only ledger entries.
-/// Stored balances never exist in the database.
+/// Formula: Sum(release) - Sum(expense_applied) - Sum(cash_return) + Sum(reimbursement_payable) - Sum(reimbursement_settled) + Sum(adjustments).
 /// </summary>
 public static class AdvanceBalanceCalculator
 {
@@ -23,8 +23,8 @@ public static class AdvanceBalanceCalculator
                 LedgerEntryType.DisbursementRelease => checked(balanceMinor + entry.AmountMinor),
                 LedgerEntryType.ExpenseApplied => checked(balanceMinor - entry.AmountMinor),
                 LedgerEntryType.CashReturn => checked(balanceMinor - entry.AmountMinor),
-                LedgerEntryType.ReimbursementPayable => checked(balanceMinor - entry.AmountMinor),
-                LedgerEntryType.ReimbursementSettled => checked(balanceMinor + entry.AmountMinor),
+                LedgerEntryType.ReimbursementPayable => checked(balanceMinor + entry.AmountMinor),
+                LedgerEntryType.ReimbursementSettled => checked(balanceMinor - entry.AmountMinor),
                 LedgerEntryType.Adjustment or LedgerEntryType.Reversal => checked(balanceMinor + entry.SignedAmountMinor),
                 _ => balanceMinor
             };
@@ -33,4 +33,3 @@ public static class AdvanceBalanceCalculator
         return new Money(balanceMinor, currencyCode);
     }
 }
-

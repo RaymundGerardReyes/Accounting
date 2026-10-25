@@ -15,4 +15,5 @@ dotnet_diagnostic.CA1716.severity = none # Identifiers should not match keywords
 dotnet_diagnostic.CA1724.severity = none # Type names should not match namespaces (e.g. Money)
 dotnet_diagnostic.CA1030.severity = none # Use events where appropriate (e.g. RaiseDomainEvent)
 dotnet_diagnostic.CA1008.severity = none # Enums should have zero value (allows 1-based database enums)
+dotnet_diagnostic.CA1040.severity = none # Avoid empty interfaces (standard CQRS/Mediator marker interfaces)
 

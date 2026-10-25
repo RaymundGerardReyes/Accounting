@@ -130,5 +130,19 @@ public static class StateTransitionTables
             : Result.Failure<SettlementStatus>(
                 Error.Validation("Finance.InvalidSettlementTransition", $"Cannot transition settlement_status from '{from}' to '{to}'."));
     }
-}
 
+    public static Result<PostingStatus> TransitionPosting(PostingStatus from, PostingStatus to)
+    {
+        bool valid = (from, to) switch
+        {
+            (PostingStatus.NotApplicable, PostingStatus.Posted) => true,
+            (PostingStatus.Posted, PostingStatus.Posted) => true,
+            _ => false
+        };
+
+        return valid
+            ? Result.Success(to)
+            : Result.Failure<PostingStatus>(
+                Error.Validation("Finance.InvalidPostingTransition", $"Cannot transition posting_status from '{from}' to '{to}'."));
+    }
+}

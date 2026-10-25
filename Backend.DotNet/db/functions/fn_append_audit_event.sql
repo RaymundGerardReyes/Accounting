@@ -20,6 +20,7 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql
 AS $$
+#variable_conflict use_column
 DECLARE
     v_next_seq    BIGINT;
     v_prev_hash   VARCHAR(64);
@@ -77,4 +78,3 @@ BEGIN
     RETURN QUERY SELECT v_next_seq, v_prev_hash, v_record_hash, v_occurred_at;
 END;
 $$;
-
