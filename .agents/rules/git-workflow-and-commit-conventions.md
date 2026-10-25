@@ -41,3 +41,9 @@ description: Repository rules for Conventional Commits, scoped staging, secret p
    - Release tags must follow Semantic Versioning 2.0.0 (`vMAJOR.MINOR.PATCH`).
    - Tags must always be annotated (`git tag -a vX.Y.Z -m "..."`).
    - Before tagging, ensure the working tree is clean and all automated test suites pass.
+
+5. **Major Migration & Legacy Preservation Branching Invariant**:
+   - Before executing any major framework, runtime, or architectural language rewrite (such as migrating Python FastAPI to C# ASP.NET Core), create a dedicated preservation branch (`legacy-<runtime>`, e.g. `legacy-python`) pinned to the last verified release commit/tag.
+   - All migration and rewrite development must occur on an isolated migration branch (`migrating-<target>`, e.g. `migrating-C#`).
+   - The production branch (`main`) must remain untouched, clean, and deployable until 100% functional, contract, and test parity is proven on the migration branch.
+   - Preserved legacy branches serve as the authoritative baseline for regression testing and side-by-side parity benchmarking.
