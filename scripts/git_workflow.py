@@ -6,10 +6,13 @@ and Semantic Versioning 2.0.0 Release Tagging in E:\Accounting.
 """
 
 import argparse
+import json
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
 
 # Functional scope mapping rules
 SCOPE_PATTERNS = {
@@ -19,6 +22,7 @@ SCOPE_PATTERNS = {
         r"^README\.md$",
         r"^LICENSE(\.md)?$",
         r"^package\.json$",
+        r"^VERSION$",
         r"^requirements\.txt$",
         r"^runtime\.txt$",
         r"^Procfile$",
@@ -35,12 +39,17 @@ SCOPE_PATTERNS = {
 ALLOWED_TYPES = ["feat", "fix", "chore", "docs", "test", "refactor", "style", "perf"]
 ALLOWED_SCOPES = list(SCOPE_PATTERNS.keys()) + ["content-pack"]
 
+SEMVER_REGEX = re.compile(
+    r"^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
+)
+
 
 def run_git_cmd(args, capture_output=True, check=True):
-    """Run a git command and return stdout string."""
+    """Run a git command in ROOT_DIR and return stdout string."""
     try:
         result = subprocess.run(
             ["git"] + args,
+            cwd=str(ROOT_DIR),
             capture_output=capture_output,
             text=True,
             check=check
@@ -77,6 +86,108 @@ def classify_file(filepath):
             if re.search(pat, filepath):
                 return scope
     return "other"
+
+
+def parse_semver(tag_str):
+    """Parse tag_str into (major, minor, patch, prerelease, build) or None."""
+    m = SEMVER_REGEX.match(tag_str.strip())
+    if not m:
+        return None
+    major, minor, patch = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    prerelease = m.group(4) or ""
+    build = m.group(5) or ""
+    return (major, minor, patch, prerelease, build)
+
+
+def get_all_semver_tags():
+    """Retrieve and semantically sort all git tags."""
+    try:
+        tags = run_git_cmd(["tag", "-l"]).splitlines()
+    except Exception:
+        return []
+    semver_tags = []
+    for t in tags:
+        parsed = parse_semver(t)
+        if parsed:
+            semver_tags.append((parsed, t))
+    # Sort strictly by (major, minor, patch)
+    semver_tags.sort(key=lambda x: (x[0][0], x[0][1], x[0][2]))
+    return [t[1] for t in semver_tags]
+
+
+def get_latest_semver():
+    """Return the highest SemVer tag in the repository."""
+    sorted_tags = get_all_semver_tags()
+    if not sorted_tags:
+        return "v0.1.0"
+    return sorted_tags[-1]
+
+
+def calculate_next_version(current_tag, bump_type="patch"):
+    """
+    Calculate the next semantic version string given current_tag and bump_type.
+    bump_type must be 'patch', 'minor', or 'major'.
+    """
+    parsed = parse_semver(current_tag)
+    if not parsed:
+        parsed = (0, 1, 0, "", "")
+    major, minor, patch = parsed[0], parsed[1], parsed[2]
+    if bump_type == "patch":
+        patch += 1
+    elif bump_type == "minor":
+        minor += 1
+        patch = 0
+    elif bump_type == "major":
+        major += 1
+        minor = 0
+        patch = 0
+    else:
+        raise ValueError(f"Unknown bump type '{bump_type}'. Allowed: patch, minor, major")
+    return f"v{major}.{minor}.{patch}"
+
+
+def sync_version_files(version_str):
+    """
+    Synchronize version number (without leading 'v') across:
+    1. Root package.json
+    2. Frontend/package.json
+    3. VERSION file
+    """
+    clean_version = version_str.lstrip("v")
+    modified_files = []
+
+    # 1. Root package.json
+    root_pkg = ROOT_DIR / "package.json"
+    if root_pkg.exists():
+        with open(root_pkg, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("version") != clean_version:
+            data["version"] = clean_version
+            with open(root_pkg, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+                f.write("\n")
+            modified_files.append("package.json")
+
+    # 2. Frontend/package.json
+    front_pkg = ROOT_DIR / "Frontend" / "package.json"
+    if front_pkg.exists():
+        with open(front_pkg, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("version") != clean_version:
+            data["version"] = clean_version
+            with open(front_pkg, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+                f.write("\n")
+            modified_files.append("Frontend/package.json")
+
+    # 3. VERSION file
+    version_file = ROOT_DIR / "VERSION"
+    existing_v = version_file.read_text(encoding="utf-8").strip() if version_file.exists() else ""
+    if existing_v != clean_version:
+        version_file.write_text(f"{clean_version}\n", encoding="utf-8")
+        modified_files.append("VERSION")
+
+    return modified_files
 
 
 def cmd_status(args):
@@ -167,7 +278,6 @@ def cmd_check_secrets(args):
 
 def cmd_commit(args):
     """Validate Conventional Commit format, check secrets, and commit staged changes."""
-    # Run secret check first
     cmd_check_secrets(args)
 
     staged_output = run_git_cmd(["diff", "--cached", "--name-only"])
@@ -197,11 +307,67 @@ def cmd_commit(args):
     print("\nCommit successfully created!")
 
 
+def cmd_version(args):
+    """Display current release version and projected increments."""
+    latest = get_latest_semver()
+    next_patch = calculate_next_version(latest, "patch")
+    next_minor = calculate_next_version(latest, "minor")
+    next_major = calculate_next_version(latest, "major")
+
+    print("\n=== R.G.E Accounting SemVer Information ===")
+    print(f"Latest Git Release Tag: {latest}")
+    print(f"Next Patch Release:     {next_patch}  (Bug fixes, resilience patches, non-breaking fixes)")
+    print(f"Next Minor Release:     {next_minor}  (New features, backward-compatible enhancements)")
+    print(f"Next Major Release:     {next_major}  (Breaking architectural or schema upgrades)")
+
+    root_pkg = ROOT_DIR / "package.json"
+    front_pkg = ROOT_DIR / "Frontend" / "package.json"
+    ver_file = ROOT_DIR / "VERSION"
+
+    print("\nSynchronized Package Versions:")
+    if root_pkg.exists():
+        with open(root_pkg, "r", encoding="utf-8") as f:
+            print(f"  package.json:          {json.load(f).get('version')}")
+    if front_pkg.exists():
+        with open(front_pkg, "r", encoding="utf-8") as f:
+            print(f"  Frontend/package.json: {json.load(f).get('version')}")
+    if ver_file.exists():
+        print(f"  VERSION:               {ver_file.read_text(encoding='utf-8').strip()}")
+    print("")
+
+
+def cmd_bump(args):
+    """Bump the semantic version in package.json, Frontend/package.json, and VERSION."""
+    latest = get_latest_semver()
+    if args.version:
+        new_version = args.version.strip()
+        if not new_version.startswith("v"):
+            new_version = "v" + new_version
+        if not parse_semver(new_version):
+            sys.stderr.write(f"Error: '{new_version}' is not a valid Semantic Version (e.g. v0.9.31).\n")
+            sys.exit(1)
+    else:
+        new_version = calculate_next_version(latest, args.type)
+
+    print(f"\nBumping version from {latest} -> {new_version}...")
+    modified = sync_version_files(new_version)
+    if modified:
+        print("Updated version files:")
+        for m in modified:
+            print(f"  + {m}")
+    else:
+        print("All version files already match target version.")
+
+    if args.stage:
+        for m in modified:
+            run_git_cmd(["add", m])
+        print("Staged updated version files.")
+
+
 def cmd_tag(args):
     """Create an annotated Semantic Versioning 2.0.0 release tag."""
     tag_name = args.version.strip()
-    semver_pattern = r"^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
-    if not re.match(semver_pattern, tag_name):
+    if not parse_semver(tag_name):
         sys.stderr.write(f"Error: '{tag_name}' does not conform to Semantic Versioning 2.0.0 (expected e.g. v0.1.0, v1.0.0).\n")
         sys.exit(1)
 
@@ -217,6 +383,65 @@ def cmd_tag(args):
     message = args.message or f"Release {tag_name}"
     run_git_cmd(["tag", "-a", tag_name, "-m", message])
     print(f"Successfully created release tag: {tag_name} ('{message}')")
+
+
+def cmd_release(args):
+    """
+    Automate the full release cycle:
+    1. Calculate next version (or use explicit version)
+    2. Synchronize version files (package.json, Frontend/package.json, VERSION)
+    3. Stage version files
+    4. Commit using Conventional Commits chore(repo): release <version>: <message>
+    5. Create annotated release tag
+    6. Optionally push branch and tags to remote
+    """
+    latest = get_latest_semver()
+    if args.version:
+        new_version = args.version.strip()
+        if not new_version.startswith("v"):
+            new_version = "v" + new_version
+        if not parse_semver(new_version):
+            sys.stderr.write(f"Error: '{new_version}' is not a valid Semantic Version.\n")
+            sys.exit(1)
+    else:
+        new_version = calculate_next_version(latest, args.type)
+
+    release_desc = args.message or f"Release {new_version}"
+    print(f"\n=== Executing Automated Release: {latest} -> {new_version} ===")
+
+    # 1. Sync files
+    modified = sync_version_files(new_version)
+    if modified:
+        print("Synchronized version files:")
+        for m in modified:
+            print(f"  + {m}")
+            run_git_cmd(["add", m])
+        print("Staged version files under scope 'repo'.")
+
+    # 2. Check if there are staged changes to commit
+    staged = run_git_cmd(["diff", "--cached", "--name-only"]).splitlines()
+    if staged:
+        commit_msg = f"release {new_version}: {release_desc}"
+        print(f"\nCommitting: chore(repo): {commit_msg}")
+        run_git_cmd(["commit", "-m", f"chore(repo): {commit_msg}"], capture_output=False)
+    else:
+        print("No staged changes to commit; proceeding to tag creation.")
+
+    # 3. Create tag
+    existing_tags = run_git_cmd(["tag", "-l"]).splitlines()
+    if new_version in existing_tags:
+        print(f"Tag '{new_version}' already exists.")
+    else:
+        run_git_cmd(["tag", "-a", new_version, "-m", f"Release {new_version}: {release_desc}"])
+        print(f"Successfully created release tag: {new_version}")
+
+    # 4. Optional Push
+    if args.push:
+        print(f"\nPushing main branch and tags to origin...")
+        run_git_cmd(["push", "origin", "main", "--tags"], capture_output=False)
+        print("Successfully published release to origin!")
+
+    print(f"\nRelease {new_version} successfully completed!\n")
 
 
 def main():
@@ -243,11 +468,30 @@ def main():
     p_commit.add_argument("-m", "--message", required=True, help="Commit description")
     p_commit.set_defaults(func=cmd_commit)
 
+    # version
+    p_ver = subparsers.add_parser("version", help="Display current version and projected semantic increments")
+    p_ver.set_defaults(func=cmd_version)
+
+    # bump
+    p_bump = subparsers.add_parser("bump", help="Bump version across package files without tagging")
+    p_bump.add_argument("--type", choices=["patch", "minor", "major"], default="patch", help="Semantic bump type")
+    p_bump.add_argument("-v", "--version", help="Explicit version string override")
+    p_bump.add_argument("--stage", action="store_true", help="Automatically stage modified version files")
+    p_bump.set_defaults(func=cmd_bump)
+
     # tag
-    p_tag = subparsers.add_parser("tag", help="Create an annotated SemVer 2.0.0 release tag")
+    p_tag = subparsers.add_parser("tag", help="Create an annotated SemVer 2.0.0 release tag manually")
     p_tag.add_argument("version", help="Version string (e.g. v0.1.0)")
     p_tag.add_argument("-m", "--message", help="Annotation message for the release tag")
     p_tag.set_defaults(func=cmd_tag)
+
+    # release
+    p_rel = subparsers.add_parser("release", help="Automated release pipeline (calculate, sync files, commit, tag, push)")
+    p_rel.add_argument("--type", choices=["patch", "minor", "major"], default="patch", help="Semantic bump type (default: patch)")
+    p_rel.add_argument("-v", "--version", help="Explicit version string override (e.g. v1.0.0)")
+    p_rel.add_argument("-m", "--message", help="Annotation message for the release")
+    p_rel.add_argument("--push", action="store_true", help="Push commit and tags to origin after release")
+    p_rel.set_defaults(func=cmd_release)
 
     args = parser.parse_args()
     args.func(args)
