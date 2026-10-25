@@ -1,0 +1,5 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\BuildingBlocks\Rge.BuildingBlocks.SharedKernel\Rge.BuildingBlocks.SharedKernel.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,3 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Pure SharedKernel: Zero NuGet or external project dependencies allowed -->
+</Project>

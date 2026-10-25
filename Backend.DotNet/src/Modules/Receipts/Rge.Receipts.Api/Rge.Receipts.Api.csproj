@@ -1,0 +1,7 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\BuildingBlocks\Rge.BuildingBlocks.Api\Rge.BuildingBlocks.Api.csproj" />
+    <ProjectReference Include="..\Rge.Receipts.Application\Rge.Receipts.Application.csproj" />
+    <ProjectReference Include="..\Rge.Receipts.Contracts\Rge.Receipts.Contracts.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,50 @@
+{
+  "version": 2,
+  "dependencies": {
+    "net10.0": {
+      "MinVer": {
+        "type": "Direct",
+        "requested": "[6.0.0, )",
+        "resolved": "6.0.0",
+        "contentHash": "+/SsmiySsXJlvQLCGBqaZKNVt3s/Y/HbAdwtop7Km2CnuZbaScoqkWJEBQ5Cy9ebkn6kCYKrHsXgwrFdTgcb3g=="
+      },
+      "rge.buildingblocks.application": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.buildingblocks.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.buildingblocks.sharedkernel": {
+        "type": "Project"
+      },
+      "rge.payments.application": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.Payments.Contracts": "[1.0.0, )",
+          "Rge.Payments.Domain": "[1.0.0, )"
+        }
+      },
+      "rge.payments.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.payments.domain": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\Rge.BuildingBlocks.SharedKernel\Rge.BuildingBlocks.SharedKernel.csproj" />
+    <ProjectReference Include="..\Rge.BuildingBlocks.Application\Rge.BuildingBlocks.Application.csproj" />
+  </ItemGroup>
+</Project>

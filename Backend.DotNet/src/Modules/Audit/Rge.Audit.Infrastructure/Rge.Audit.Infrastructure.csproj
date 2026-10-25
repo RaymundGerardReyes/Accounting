@@ -1,0 +1,7 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\BuildingBlocks\Rge.BuildingBlocks.Infrastructure\Rge.BuildingBlocks.Infrastructure.csproj" />
+    <ProjectReference Include="..\Rge.Audit.Application\Rge.Audit.Application.csproj" />
+    <ProjectReference Include="..\Rge.Audit.Domain\Rge.Audit.Domain.csproj" />
+  </ItemGroup>
+</Project>

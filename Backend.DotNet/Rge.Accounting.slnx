@@ -1,0 +1,105 @@
+﻿<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/Host/">
+    <Project Path="src/Host/Rge.Accounting.Host/Rge.Accounting.Host.csproj" />
+  </Folder>
+  <Folder Name="/src/BuildingBlocks/">
+    <Project Path="src/BuildingBlocks/Rge.BuildingBlocks.SharedKernel/Rge.BuildingBlocks.SharedKernel.csproj" />
+    <Project Path="src/BuildingBlocks/Rge.BuildingBlocks.Application/Rge.BuildingBlocks.Application.csproj" />
+    <Project Path="src/BuildingBlocks/Rge.BuildingBlocks.Infrastructure/Rge.BuildingBlocks.Infrastructure.csproj" />
+    <Project Path="src/BuildingBlocks/Rge.BuildingBlocks.Api/Rge.BuildingBlocks.Api.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/" />
+  <Folder Name="/src/Modules/Payments/">
+    <Project Path="src/Modules/Payments/Rge.Payments.Contracts/Rge.Payments.Contracts.csproj" />
+    <Project Path="src/Modules/Payments/Rge.Payments.Domain/Rge.Payments.Domain.csproj" />
+    <Project Path="src/Modules/Payments/Rge.Payments.Application/Rge.Payments.Application.csproj" />
+    <Project Path="src/Modules/Payments/Rge.Payments.Infrastructure/Rge.Payments.Infrastructure.csproj" />
+    <Project Path="src/Modules/Payments/Rge.Payments.Api/Rge.Payments.Api.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Receipts/">
+    <Project Path="src/Modules/Receipts/Rge.Receipts.Contracts/Rge.Receipts.Contracts.csproj" />
+    <Project Path="src/Modules/Receipts/Rge.Receipts.Domain/Rge.Receipts.Domain.csproj" />
+    <Project Path="src/Modules/Receipts/Rge.Receipts.Application/Rge.Receipts.Application.csproj" />
+    <Project Path="src/Modules/Receipts/Rge.Receipts.Infrastructure/Rge.Receipts.Infrastructure.csproj" />
+    <Project Path="src/Modules/Receipts/Rge.Receipts.Api/Rge.Receipts.Api.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Finance/">
+    <Project Path="src/Modules/Finance/Rge.Finance.Contracts/Rge.Finance.Contracts.csproj" />
+    <Project Path="src/Modules/Finance/Rge.Finance.Domain/Rge.Finance.Domain.csproj" />
+    <Project Path="src/Modules/Finance/Rge.Finance.Application/Rge.Finance.Application.csproj" />
+    <Project Path="src/Modules/Finance/Rge.Finance.Infrastructure/Rge.Finance.Infrastructure.csproj" />
+    <Project Path="src/Modules/Finance/Rge.Finance.Api/Rge.Finance.Api.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Identity/">
+    <Project Path="src/Modules/Identity/Rge.Identity.Contracts/Rge.Identity.Contracts.csproj" />
+    <Project Path="src/Modules/Identity/Rge.Identity.Domain/Rge.Identity.Domain.csproj" />
+    <Project Path="src/Modules/Identity/Rge.Identity.Application/Rge.Identity.Application.csproj" />
+    <Project Path="src/Modules/Identity/Rge.Identity.Infrastructure/Rge.Identity.Infrastructure.csproj" />
+    <Project Path="src/Modules/Identity/Rge.Identity.Api/Rge.Identity.Api.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Audit/">
+    <Project Path="src/Modules/Audit/Rge.Audit.Contracts/Rge.Audit.Contracts.csproj" />
+    <Project Path="src/Modules/Audit/Rge.Audit.Domain/Rge.Audit.Domain.csproj" />
+    <Project Path="src/Modules/Audit/Rge.Audit.Application/Rge.Audit.Application.csproj" />
+    <Project Path="src/Modules/Audit/Rge.Audit.Infrastructure/Rge.Audit.Infrastructure.csproj" />
+    <Project Path="src/Modules/Audit/Rge.Audit.Api/Rge.Audit.Api.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/CostAllocation/">
+    <Project Path="src/Modules/CostAllocation/Rge.CostAllocation.Contracts/Rge.CostAllocation.Contracts.csproj" />
+    <Project Path="src/Modules/CostAllocation/Rge.CostAllocation.Domain/Rge.CostAllocation.Domain.csproj" />
+    <Project Path="src/Modules/CostAllocation/Rge.CostAllocation.Application/Rge.CostAllocation.Application.csproj" />
+    <Project Path="src/Modules/CostAllocation/Rge.CostAllocation.Infrastructure/Rge.CostAllocation.Infrastructure.csproj" />
+    <Project Path="src/Modules/CostAllocation/Rge.CostAllocation.Api/Rge.CostAllocation.Api.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Documents/">
+    <Project Path="src/Modules/Documents/Rge.Documents.Contracts/Rge.Documents.Contracts.csproj" />
+    <Project Path="src/Modules/Documents/Rge.Documents.Domain/Rge.Documents.Domain.csproj" />
+    <Project Path="src/Modules/Documents/Rge.Documents.Application/Rge.Documents.Application.csproj" />
+    <Project Path="src/Modules/Documents/Rge.Documents.Infrastructure/Rge.Documents.Infrastructure.csproj" />
+    <Project Path="src/Modules/Documents/Rge.Documents.Api/Rge.Documents.Api.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Integrations/">
+    <Project Path="src/Modules/Integrations/Rge.Integrations.Contracts/Rge.Integrations.Contracts.csproj" />
+    <Project Path="src/Modules/Integrations/Rge.Integrations.Domain/Rge.Integrations.Domain.csproj" />
+    <Project Path="src/Modules/Integrations/Rge.Integrations.Application/Rge.Integrations.Application.csproj" />
+    <Project Path="src/Modules/Integrations/Rge.Integrations.Infrastructure/Rge.Integrations.Infrastructure.csproj" />
+    <Project Path="src/Modules/Integrations/Rge.Integrations.Api/Rge.Integrations.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Architecture.Tests/Rge.Architecture.Tests.csproj" />
+    <Project Path="tests/Contract.Parity.Tests/Rge.Contract.Parity.Tests.csproj" />
+    <Project Path="tests/Security.Tests/Rge.Security.Tests.csproj" />
+    <Project Path="tests/Performance.Tests/Rge.Performance.Tests.csproj" />
+    <Project Path="tests/Integration.Tests/Rge.Integration.Tests.csproj" />
+    <Project Path="tests/Tests.Common/Rge.Tests.Common.csproj" />
+  </Folder>
+  <Folder Name="/tests/Modules/">
+    <Project Path="tests/Modules/Payments.Domain.Tests/Rge.Payments.Domain.Tests.csproj" />
+    <Project Path="tests/Modules/Payments.Application.Tests/Rge.Payments.Application.Tests.csproj" />
+    <Project Path="tests/Modules/Payments.Integration.Tests/Rge.Payments.Integration.Tests.csproj" />
+    <Project Path="tests/Modules/Receipts.Domain.Tests/Rge.Receipts.Domain.Tests.csproj" />
+    <Project Path="tests/Modules/Receipts.Application.Tests/Rge.Receipts.Application.Tests.csproj" />
+    <Project Path="tests/Modules/Receipts.Integration.Tests/Rge.Receipts.Integration.Tests.csproj" />
+    <Project Path="tests/Modules/Finance.Domain.Tests/Rge.Finance.Domain.Tests.csproj" />
+    <Project Path="tests/Modules/Finance.Application.Tests/Rge.Finance.Application.Tests.csproj" />
+    <Project Path="tests/Modules/Finance.Integration.Tests/Rge.Finance.Integration.Tests.csproj" />
+    <Project Path="tests/Modules/Identity.Domain.Tests/Rge.Identity.Domain.Tests.csproj" />
+    <Project Path="tests/Modules/Identity.Application.Tests/Rge.Identity.Application.Tests.csproj" />
+    <Project Path="tests/Modules/Identity.Integration.Tests/Rge.Identity.Integration.Tests.csproj" />
+    <Project Path="tests/Modules/Audit.Domain.Tests/Rge.Audit.Domain.Tests.csproj" />
+    <Project Path="tests/Modules/Audit.Integration.Tests/Rge.Audit.Integration.Tests.csproj" />
+    <Project Path="tests/Modules/CostAllocation.Domain.Tests/Rge.CostAllocation.Domain.Tests.csproj" />
+    <Project Path="tests/Modules/CostAllocation.Application.Tests/Rge.CostAllocation.Application.Tests.csproj" />
+    <Project Path="tests/Modules/Documents.Domain.Tests/Rge.Documents.Domain.Tests.csproj" />
+    <Project Path="tests/Modules/Documents.Integration.Tests/Rge.Documents.Integration.Tests.csproj" />
+    <Project Path="tests/Modules/Integrations.Application.Tests/Rge.Integrations.Application.Tests.csproj" />
+    <Project Path="tests/Modules/Integrations.Integration.Tests/Rge.Integrations.Integration.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/GoldenMaster.Exporter/Rge.GoldenMaster.Exporter.csproj" />
+    <Project Path="tools/ParityRunner/Rge.ParityRunner.csproj" />
+    <Project Path="tools/DataMigration.Verifier/Rge.DataMigration.Verifier.csproj" />
+    <Project Path="tools/AuditChain.Verifier/Rge.AuditChain.Verifier.csproj" />
+  </Folder>
+</Solution>
