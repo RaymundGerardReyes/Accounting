@@ -50,3 +50,4 @@ if ($hasTagPush) {
 }
 
 exit 0
+

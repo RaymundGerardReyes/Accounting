@@ -67,3 +67,4 @@ This ledger tracks **non-route behaviors, domain invariants, background services
 | **FEAT-SEC-004** | RFC 9457 Problem Details Exception Factory | `Backend/app.py` | `src/BuildingBlocks.Api/.../ProblemDetailsFactory.cs` | **parity-verified** | `tools/ParityRunner/Program.cs` | `v0.1.0` | Maps validation (400), SoD (403), policy (422) with correlation ID. |
 | **FEAT-SEC-005** | Idempotency Key Header Validation | `Backend/app.py` | `src/BuildingBlocks.Api/.../IdempotencyFilter.cs` | **parity-verified** | `tools/ParityRunner/Program.cs` | `v0.1.0` | Enforces safe ASCII and $\le 128$ characters on mutating endpoints. |
 | **FEAT-SEC-006** | System-Wide snake_case JSON Serialization | FastAPI default | `src/BuildingBlocks.Api/.../JsonDefaults.cs` | **parity-verified** | `tools/ParityRunner/Program.cs` | `v0.1.0` | Consistent `snake_case` naming policy across all responses. |
+

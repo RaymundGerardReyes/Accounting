@@ -86,3 +86,4 @@ The following behaviors cannot be verified via automated local dual-run and requ
 1. **Live PayMongo Payment Provider**: Real credit card / GCash checkout webhooks cannot hit live third-party gateways; simulated with `WebhookSigner` and recorded webhook fixtures.
 2. **External Google Forms HTTP Callbacks**: Simulated using synthetic Google Form webhook ingestion payloads.
 3. **Live SMTP Handshakes**: Dispatched to an in-memory test sink (`FakeEmailSender`) rather than live Gmail SMTP.
+
