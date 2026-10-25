@@ -54,3 +54,13 @@ description: Repository rules for Conventional Commits, scoped staging, secret p
    - Release tags are strictly immutable. Autonomous agents and developers must NEVER create, move, or delete Git tags without explicit user approval at designated release gates.
    - Release tags must adhere to namespaced line identifiers (`dotnet/vX.Y.Z` and `python/vX.Y.Z`).
 
+7. **Windows Sandbox Execution Boundaries for Git Operations**:
+   - In sandboxed execution environments on Windows, operations modifying the `.git` directory (`git add`, `git commit`, `git tag`, `git checkout`) fail on `.git/index.lock` creation with `Permission denied`.
+   - Read-only inspections (`git status`, `git log`, `git diff`, `git rev-parse`) must always run inside the standard sandbox first.
+   - Modifying Git commands (`add`, `commit`, `tag`, `checkout`, `stash`) must run with `BypassSandbox: true` to avoid permission errors.
+
+8. **MSBuild Single-Node Execution in Restricted/Sandboxed Environments**:
+   - In sandboxed or containerized environments on Windows, default multi-node MSBuild worker IPC (`-maxcpucount`) and persistent MSBuild server daemons fail silently during `_GetAllRestoreProjectPathItems` due to named-pipe/socket restrictions.
+   - All `dotnet build`, `dotnet restore`, and `dotnet test` commands run inside the sandbox must append `-m:1 --disable-build-servers` to guarantee deterministic, isolated single-node execution.
+
+
