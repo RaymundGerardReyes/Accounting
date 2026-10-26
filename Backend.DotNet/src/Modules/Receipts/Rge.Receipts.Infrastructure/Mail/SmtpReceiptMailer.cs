@@ -14,10 +14,11 @@ public sealed class SmtpReceiptOptions
     public string SenderEmail { get; set; } = string.Empty;
     public string AppPassword { get; set; } = string.Empty;
     public bool EnableSsl { get; set; } = true;
+    public int TimeoutMilliseconds { get; set; } = 10_000;
 }
 
 /// <summary>
-/// Dispatches BIR Official Receipts with attached vector PDF via Google Workspace SMTP (STARTTLS 587).
+/// Dispatches XSS-safe BIR Official Receipts with attached vector PDF via Google Workspace SMTP (STARTTLS 587).
 /// </summary>
 public sealed class SmtpReceiptMailer : IReceiptMailer
 {
@@ -42,11 +43,18 @@ public sealed class SmtpReceiptMailer : IReceiptMailer
             return Result.Failure(Error.Validation("Receipts.EmptyRecipient", "Recipient email cannot be empty."));
         }
 
-        // If SMTP credentials are not configured (e.g., offline parity tests), succeed deterministically
         if (string.IsNullOrWhiteSpace(_options.SenderEmail) || string.IsNullOrWhiteSpace(_options.AppPassword))
         {
             return Result.Success();
         }
+
+        string safeIssuer = WebUtility.HtmlEncode(BirRmc77_2024Policy.IssuerRegisteredName);
+        string safeOrNumber = WebUtility.HtmlEncode(receipt.ReceiptNumber.Value);
+        string safeAckNumber = WebUtility.HtmlEncode(receipt.Acknowledgement.AcknowledgementNumber);
+        string safeOrderNumber = WebUtility.HtmlEncode(receipt.OrderNumber);
+        string safeCustomerName = WebUtility.HtmlEncode(receipt.CustomerName);
+        string safeAmount = WebUtility.HtmlEncode(receipt.VatBreakdown.GrossAmount.ToString());
+        string safeDigest = WebUtility.HtmlEncode(receipt.Digest.Value);
 
         try
         {
@@ -57,35 +65,39 @@ public sealed class SmtpReceiptMailer : IReceiptMailer
                 IsBodyHtml = true,
                 Body = $"""
                     <div style="font-family: Arial, sans-serif; color: #1e293b;">
-                      <h2>{BirRmc77_2024Policy.IssuerRegisteredName}</h2>
-                      <p>Thank you for your payment. Attached is your BIR Official Receipt <strong>{receipt.ReceiptNumber.Value}</strong> and Treasury Acknowledgement <strong>{receipt.Acknowledgement.AcknowledgementNumber}</strong>.</p>
+                      <h2>{safeIssuer}</h2>
+                      <p>Dear {safeCustomerName},</p>
+                      <p>Thank you for your payment. Attached is your BIR Official Receipt <strong>{safeOrNumber}</strong> and Treasury Acknowledgement <strong>{safeAckNumber}</strong>.</p>
                       <ul>
-                        <li><strong>Order Number:</strong> {receipt.OrderNumber}</li>
-                        <li><strong>Total Paid:</strong> {receipt.VatBreakdown.GrossAmount}</li>
-                        <li><strong>Digest:</strong> <code>{receipt.Digest.Value}</code></li>
+                        <li><strong>Order Number:</strong> {safeOrderNumber}</li>
+                        <li><strong>Total Paid:</strong> {safeAmount}</li>
+                        <li><strong>Digest:</strong> <code>{safeDigest}</code></li>
                       </ul>
                     </div>
                     """
             };
 
-            message.To.Add(new MailAddress(recipientEmail));
+            message.To.Add(new MailAddress(recipientEmail.Trim()));
 
-            using var pdfStream = new MemoryStream(pdfBytes);
+            using var pdfStream = new MemoryStream(pdfBytes, writable: false);
             message.Attachments.Add(new Attachment(pdfStream, $"{receipt.ReceiptNumber.Value}.pdf", "application/pdf"));
 
             using var client = new SmtpClient(_options.Host, _options.Port)
             {
                 EnableSsl = _options.EnableSsl,
+                Timeout = _options.TimeoutMilliseconds,
                 Credentials = new NetworkCredential(_options.SenderEmail, _options.AppPassword)
             };
 
-            await client.SendMailAsync(message, cancellationToken).ConfigureAwait(false);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            linkedCts.CancelAfter(_options.TimeoutMilliseconds);
+
+            await client.SendMailAsync(message, linkedCts.Token).ConfigureAwait(false);
             return Result.Success();
         }
-        catch (SmtpException ex)
+        catch (Exception ex) when (ex is SmtpException or OperationCanceledException or FormatException)
         {
             return Result.Failure(new Error("Receipts.SmtpSendFailed", $"SMTP dispatch failed: {ex.Message}"));
         }
     }
 }
-

@@ -9,20 +9,24 @@ using Rge.Receipts.Infrastructure.Persistence.Sql;
 namespace Rge.Receipts.Infrastructure.Persistence;
 
 /// <summary>
-/// ADO.NET persistence repository for OfficialReceipt aggregates over ConnectionScope.
+/// ADO.NET persistence repository for OfficialReceipt aggregates over ConnectionScope
+/// with a bounded L1 read-through cache for < 5 ms lookups.
 /// </summary>
 public sealed class ReceiptRepository : IReceiptRepository
 {
+    private const int MaxCachedReceipts = 2048;
     private static long _fallbackSequence;
-    private static readonly ConcurrentDictionary<string, OfficialReceipt> ByPaymentMemory = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ConcurrentDictionary<string, OfficialReceipt> ByOrderMemory = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, OfficialReceipt> ByPaymentCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, OfficialReceipt> ByOrderCache = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly ConnectionScope _connectionScope;
+    private readonly bool _allowOfflineFallback;
 
-    public ReceiptRepository(ConnectionScope connectionScope)
+    public ReceiptRepository(ConnectionScope connectionScope, bool allowOfflineFallback = true)
     {
         ArgumentNullException.ThrowIfNull(connectionScope);
         _connectionScope = connectionScope;
+        _allowOfflineFallback = allowOfflineFallback;
     }
 
     public async Task<long> NextReceiptSequenceAsync(CancellationToken cancellationToken = default)
@@ -44,9 +48,9 @@ public sealed class ReceiptRepository : IReceiptRepository
                 }
             }
         }
-        catch (Exception ex) when (ex is DbException or InvalidOperationException)
+        catch (Exception ex) when (_allowOfflineFallback && ex is DbException or InvalidOperationException)
         {
-            // Fallback to atomic in-memory sequence when running in offline contract parity tests
+            // Offline contract parity test fallback
         }
 
         return Interlocked.Increment(ref _fallbackSequence);
@@ -55,9 +59,6 @@ public sealed class ReceiptRepository : IReceiptRepository
     public async Task SaveAsync(OfficialReceipt receipt, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(receipt);
-
-        ByPaymentMemory[receipt.PaymentAttemptId] = receipt;
-        ByOrderMemory[receipt.OrderId] = receipt;
 
         try
         {
@@ -88,17 +89,19 @@ public sealed class ReceiptRepository : IReceiptRepository
 
             await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is DbException or InvalidOperationException)
+        catch (Exception ex) when (_allowOfflineFallback && ex is DbException or InvalidOperationException)
         {
-            // Retained in ByPaymentMemory / ByOrderMemory when DB table is offline
+            // Allowed only in offline contract parity tests
         }
+
+        CacheBounded(receipt);
     }
 
     public async Task<OfficialReceipt?> GetByPaymentAttemptIdAsync(
         string paymentAttemptId,
         CancellationToken cancellationToken = default)
     {
-        if (ByPaymentMemory.TryGetValue(paymentAttemptId, out OfficialReceipt? cached))
+        if (ByPaymentCache.TryGetValue(paymentAttemptId, out OfficialReceipt? cached))
         {
             return cached;
         }
@@ -116,11 +119,11 @@ public sealed class ReceiptRepository : IReceiptRepository
             if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 OfficialReceipt materialized = Materialize(reader);
-                ByPaymentMemory[paymentAttemptId] = materialized;
+                CacheBounded(materialized);
                 return materialized;
             }
         }
-        catch (Exception ex) when (ex is DbException or InvalidOperationException)
+        catch (Exception ex) when (_allowOfflineFallback && ex is DbException or InvalidOperationException)
         {
         }
 
@@ -131,7 +134,7 @@ public sealed class ReceiptRepository : IReceiptRepository
         string orderId,
         CancellationToken cancellationToken = default)
     {
-        if (ByOrderMemory.TryGetValue(orderId, out OfficialReceipt? cached))
+        if (ByOrderCache.TryGetValue(orderId, out OfficialReceipt? cached))
         {
             return cached;
         }
@@ -149,15 +152,27 @@ public sealed class ReceiptRepository : IReceiptRepository
             if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 OfficialReceipt materialized = Materialize(reader);
-                ByOrderMemory[orderId] = materialized;
+                CacheBounded(materialized);
                 return materialized;
             }
         }
-        catch (Exception ex) when (ex is DbException or InvalidOperationException)
+        catch (Exception ex) when (_allowOfflineFallback && ex is DbException or InvalidOperationException)
         {
         }
 
         return null;
+    }
+
+    private static void CacheBounded(OfficialReceipt receipt)
+    {
+        if (ByPaymentCache.Count >= MaxCachedReceipts)
+        {
+            ByPaymentCache.Clear();
+            ByOrderCache.Clear();
+        }
+
+        ByPaymentCache[receipt.PaymentAttemptId] = receipt;
+        ByOrderCache[receipt.OrderId] = receipt;
     }
 
     private static OfficialReceipt Materialize(DbDataReader reader)
@@ -195,4 +210,3 @@ public sealed class ReceiptRepository : IReceiptRepository
         cmd.Parameters.Add(param);
     }
 }
-

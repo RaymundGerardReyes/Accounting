@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Rge.BuildingBlocks.Api.Endpoints;
 using Rge.BuildingBlocks.Api.Http;
@@ -13,7 +14,12 @@ using Rge.Receipts.Application.ResendReceiptEmail;
 namespace Rge.Receipts.Api;
 
 /// <summary>
-/// Mounts BIR Official Receipt and Treasury Acknowledgement endpoints (#15-#19).
+/// Mounts BIR Official Receipt and Treasury Acknowledgement endpoints (#15-#19):
+/// - GET  /api/v1/payments/{payment_id}/receipt
+/// - GET  /api/v1/payments/{payment_id}/receipt/pdf
+/// - POST /api/v1/payments/{payment_id}/receipt/email
+/// - GET  /api/v1/orders/{order_id}/receipt
+/// - GET  /api/v1/orders/{order_id}/receipt/pdf
 /// </summary>
 public sealed class ReceiptEndpoints : IEndpointModule
 {
@@ -22,7 +28,7 @@ public sealed class ReceiptEndpoints : IEndpointModule
     {
         ArgumentNullException.ThrowIfNull(app);
 
-        // Endpoint #15: GET /api/v1/payments/{payment_id}/receipt
+        // #15: GET /api/v1/payments/{payment_id}/receipt
         app.MapGet("/api/v1/payments/{payment_id}/receipt", async (
             string payment_id,
             HttpContext httpContext,
@@ -33,9 +39,10 @@ public sealed class ReceiptEndpoints : IEndpointModule
             return result.ToHttpResult(httpContext);
         }).WithTags("Receipts");
 
-        // Endpoint #16: GET /api/v1/payments/{payment_id}/receipt/pdf
+        // #16: GET /api/v1/payments/{payment_id}/receipt/pdf
         app.MapGet("/api/v1/payments/{payment_id}/receipt/pdf", async (
             string payment_id,
+            [FromQuery(Name = "inline")] bool? inline,
             HttpContext httpContext,
             RenderReceiptPdfHandler handler,
             CancellationToken ct) =>
@@ -43,10 +50,10 @@ public sealed class ReceiptEndpoints : IEndpointModule
             var result = await handler.HandleAsync(new RenderReceiptPdfQuery(PaymentId: payment_id), ct).ConfigureAwait(false);
             return result.ToHttpResult(
                 httpContext,
-                pdf => Results.File(pdf.PdfBytes, pdf.ContentType, pdf.FileName));
+                pdf => BuildPdfFileResult(pdf, inline == true, httpContext));
         }).WithTags("Receipts");
 
-        // Endpoint #17: POST /api/v1/payments/{payment_id}/receipt/email
+        // #17: POST /api/v1/payments/{payment_id}/receipt/email
         app.MapPost("/api/v1/payments/{payment_id}/receipt/email", async (
             string payment_id,
             ResendReceiptEmailRequest? request,
@@ -59,7 +66,7 @@ public sealed class ReceiptEndpoints : IEndpointModule
             return result.ToHttpResult(httpContext);
         }).WithTags("Receipts");
 
-        // Endpoint #18: GET /api/v1/orders/{order_id}/receipt
+        // #18: GET /api/v1/orders/{order_id}/receipt
         app.MapGet("/api/v1/orders/{order_id}/receipt", async (
             string order_id,
             HttpContext httpContext,
@@ -70,9 +77,10 @@ public sealed class ReceiptEndpoints : IEndpointModule
             return result.ToHttpResult(httpContext);
         }).WithTags("Receipts");
 
-        // Endpoint #19: GET /api/v1/orders/{order_id}/receipt/pdf
+        // #19: GET /api/v1/orders/{order_id}/receipt/pdf
         app.MapGet("/api/v1/orders/{order_id}/receipt/pdf", async (
             string order_id,
+            [FromQuery(Name = "inline")] bool? inline,
             HttpContext httpContext,
             RenderReceiptPdfHandler handler,
             CancellationToken ct) =>
@@ -80,8 +88,24 @@ public sealed class ReceiptEndpoints : IEndpointModule
             var result = await handler.HandleAsync(new RenderReceiptPdfQuery(OrderId: order_id), ct).ConfigureAwait(false);
             return result.ToHttpResult(
                 httpContext,
-                pdf => Results.File(pdf.PdfBytes, pdf.ContentType, pdf.FileName));
+                pdf => BuildPdfFileResult(pdf, inline == true, httpContext));
         }).WithTags("Receipts");
     }
-}
 
+    private static IResult BuildPdfFileResult(
+        RenderedReceiptPdfDto pdfResponse,
+        bool renderInline,
+        HttpContext httpContext)
+    {
+        if (renderInline)
+        {
+            httpContext.Response.Headers.ContentDisposition = $"inline; filename=\"{pdfResponse.FileName}\"";
+            return Results.Bytes(pdfResponse.PdfBytes, contentType: pdfResponse.ContentType);
+        }
+
+        return Results.File(
+            fileContents: pdfResponse.PdfBytes,
+            contentType: pdfResponse.ContentType,
+            fileDownloadName: pdfResponse.FileName);
+    }
+}
