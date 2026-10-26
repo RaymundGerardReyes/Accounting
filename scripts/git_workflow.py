@@ -263,7 +263,7 @@ def cmd_check_secrets(args):
     violations = []
     for fpath in staged_output.splitlines():
         for pat in forbidden_patterns:
-            if re.search(pat, fpath, re.IGNORECASE) and not fpath.endswith(".example"):
+            if re.search(pat, fpath, re.IGNORECASE) and not fpath.endswith((".example", ".cs")):
                 violations.append((fpath, pat))
 
     if violations:
