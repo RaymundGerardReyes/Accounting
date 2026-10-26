@@ -4,6 +4,7 @@ using Rge.BuildingBlocks.SharedKernel.Primitives;
 using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Finance.Application.Ports;
 using Rge.Finance.Domain.CashAdvances;
+using Rge.Finance.Domain.CashAdvances.StateMachines;
 using Rge.Finance.Domain.Disbursements;
 using Rge.Finance.Domain.Errors;
 
@@ -129,7 +130,7 @@ public sealed class PrepareHandler : ICommandHandler<PrepareDisbursementCommand,
             BankApproverId: d.BankApproverId,
             ExecutedById: d.ExecutedById,
             EvidenceVerifierId: d.EvidenceVerifierId,
-            BankReference: d.BankRef?.ReferenceValue,
+            BankReference: d.BankReference?.Value,
             CreatedAtUtc: d.CreatedAtUtc);
     }
 }

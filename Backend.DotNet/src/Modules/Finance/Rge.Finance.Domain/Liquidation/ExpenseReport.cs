@@ -150,6 +150,42 @@ public sealed class ExpenseReport : AggregateRoot<string>
         _lines.Add(line);
     }
 
+    public Result UpdateDraft(
+        string? businessPurposeSummary,
+        string? remarks,
+        string? consolidatedReceiptDocId,
+        string? mfarDocId,
+        DateTimeOffset nowUtc)
+    {
+        if (ReviewStatus is not (ExpenseReportStatus.Draft or ExpenseReportStatus.ReturnedForCorrection))
+        {
+            return Result.Failure(FinanceErrors.InvalidTransition("ExpenseReport", ReviewStatus.ToString(), "DraftUpdate"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(businessPurposeSummary))
+        {
+            BusinessPurposeSummary = businessPurposeSummary.Trim();
+        }
+
+        if (remarks is not null)
+        {
+            Remarks = remarks;
+        }
+
+        if (consolidatedReceiptDocId is not null)
+        {
+            ConsolidatedReceiptDocId = consolidatedReceiptDocId;
+        }
+
+        if (mfarDocId is not null)
+        {
+            MfarDocId = mfarDocId;
+        }
+
+        UpdatedAtUtc = nowUtc;
+        return Result.Success();
+    }
+
     public Result Submit(DateTimeOffset nowUtc)
     {
         if (ReviewStatus is not (ExpenseReportStatus.Draft or ExpenseReportStatus.ReturnedForCorrection))

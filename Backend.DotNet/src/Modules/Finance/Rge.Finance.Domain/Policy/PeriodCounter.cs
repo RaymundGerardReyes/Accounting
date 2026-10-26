@@ -36,6 +36,19 @@ public sealed class PeriodCounter : Entity<string>
         UpdatedAtUtc = nowUtc;
     }
 
+    public static PeriodCounter Create(string employeeId, string periodKey, string ruleCode, string currencyCode, DateTimeOffset nowUtc)
+    {
+        return new PeriodCounter(
+            id: Guid.NewGuid().ToString("D"),
+            employeeId: employeeId,
+            periodKey: periodKey,
+            ruleCode: ruleCode,
+            submissionCount: 0,
+            aggregateAmount: Money.Zero(currencyCode),
+            activeReportId: null,
+            nowUtc: nowUtc);
+    }
+
     public void Increment(Money amount, string reportId, DateTimeOffset nowUtc)
     {
         SubmissionCount++;

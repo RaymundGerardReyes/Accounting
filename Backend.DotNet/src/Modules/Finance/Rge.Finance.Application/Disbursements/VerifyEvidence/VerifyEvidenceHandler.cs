@@ -5,6 +5,7 @@ using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Finance.Application.Disbursements.Prepare;
 using Rge.Finance.Application.Ports;
 using Rge.Finance.Domain.CashAdvances;
+using Rge.Finance.Domain.CashAdvances.StateMachines;
 using Rge.Finance.Domain.Disbursements;
 using Rge.Finance.Domain.Errors;
 using Rge.Finance.Domain.Ledger;

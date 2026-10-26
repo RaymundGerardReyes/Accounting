@@ -14,5 +14,7 @@
     <ProjectReference Include="..\..\Modules\CostAllocation\Rge.CostAllocation.Infrastructure\Rge.CostAllocation.Infrastructure.csproj" />
     <ProjectReference Include="..\..\Modules\Documents\Rge.Documents.Api\Rge.Documents.Api.csproj" />
     <ProjectReference Include="..\..\Modules\Documents\Rge.Documents.Infrastructure\Rge.Documents.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Modules\Finance\Rge.Finance.Api\Rge.Finance.Api.csproj" />
+    <ProjectReference Include="..\..\Modules\Finance\Rge.Finance.Infrastructure\Rge.Finance.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

@@ -7,6 +7,13 @@ public static class FinanceErrors
     public static Error NotFound(string entityName, string id) =>
         Error.NotFound("Finance.NotFound", $"{entityName} with id '{id}' was not found.");
 
+    public static Error AdvanceNotFound(string id) => NotFound("CashAdvance", id);
+    public static Error DisbursementNotFound(string id) => NotFound("Disbursement", id);
+    public static Error ReportNotFound(string id) => NotFound("ExpenseReport", id);
+    public static Error PurchaseRequestNotFound(string id) => NotFound("PurchaseRequest", id);
+    public static Error PayableNotFound(string id) => NotFound("AccountPayable", id);
+    public static Error PaymentRecordNotFound(string id) => NotFound("PaymentRecord", id);
+
     public static Error Unauthorized(string message = "User is not authenticated.") =>
         Error.Unauthorized("Finance.Unauthorized", message);
 

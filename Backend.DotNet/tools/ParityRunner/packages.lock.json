@@ -86,6 +86,7 @@
         "dependencies": {
           "Rge.BuildingBlocks.Infrastructure": "[1.0.0, )",
           "Rge.Finance.Application": "[1.0.0, )",
+          "Rge.Finance.Contracts": "[1.0.0, )",
           "Rge.Finance.Domain": "[1.0.0, )"
         }
       },

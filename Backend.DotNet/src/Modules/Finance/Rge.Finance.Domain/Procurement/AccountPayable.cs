@@ -156,4 +156,10 @@ public sealed class AccountPayable : AggregateRoot<string>
 
         return Result.Success(payable);
     }
+
+    public void MarkPaid(DateTimeOffset nowUtc)
+    {
+        Status = PayableStatus.Paid;
+        UpdatedAtUtc = nowUtc;
+    }
 }

@@ -12,6 +12,8 @@ using Rge.CostAllocation.Api;
 using Rge.CostAllocation.Infrastructure;
 using Rge.Documents.Api;
 using Rge.Documents.Infrastructure;
+using Rge.Finance.Api;
+using Rge.Finance.Infrastructure;
 using Rge.Identity.Api;
 using Rge.Identity.Api.Authentication;
 using Rge.Identity.Infrastructure;
@@ -61,6 +63,7 @@ public static class ServiceCollectionExtensions
         services.AddAuditModule();
         services.AddCostAllocationModule();
         services.AddDocumentsModule();
+        services.AddFinanceModule(configuration);
 
         // Register Minimal API Module Endpoints
         services.AddSingleton(_ =>
@@ -73,6 +76,7 @@ public static class ServiceCollectionExtensions
             registry.Register(new AuditEndpoints());
             registry.Register(new CostAllocationEndpoints());
             registry.Register(new DocumentEndpoints());
+            registry.Register(new FinanceEndpoints());
             return registry;
         });
 

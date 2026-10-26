@@ -1,7 +1,9 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\..\..\BuildingBlocks\Rge.BuildingBlocks.Infrastructure\Rge.BuildingBlocks.Infrastructure.csproj" />
     <ProjectReference Include="..\Rge.Finance.Application\Rge.Finance.Application.csproj" />
+    <ProjectReference Include="..\Rge.Finance.Contracts\Rge.Finance.Contracts.csproj" />
     <ProjectReference Include="..\Rge.Finance.Domain\Rge.Finance.Domain.csproj" />
   </ItemGroup>
 </Project>

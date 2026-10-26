@@ -4,6 +4,7 @@ using Rge.BuildingBlocks.SharedKernel.Primitives;
 using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Finance.Application.Ports;
 using Rge.Finance.Domain.CashAdvances;
+using Rge.Finance.Domain.CashAdvances.StateMachines;
 using Rge.Finance.Domain.Errors;
 using Rge.Finance.Domain.Ledger;
 
@@ -110,7 +111,7 @@ public sealed class CashReturnHandler : ICommandHandler<RecordCashReturnCommand,
         long newBalance = currentBalance.AmountMinor - command.ReturnedAmountMinor;
         if (newBalance == 0)
         {
-            advance.TransitionSettlementStatus(SettlementStatus.FullySettled, nowUtc);
+            advance.TransitionSettlementStatus(SettlementStatus.Reconciled, nowUtc);
             await _repository.SaveAsync(advance, cancellationToken).ConfigureAwait(false);
         }
 

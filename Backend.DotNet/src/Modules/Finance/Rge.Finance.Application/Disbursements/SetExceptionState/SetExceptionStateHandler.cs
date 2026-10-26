@@ -43,7 +43,7 @@ public sealed class SetExceptionStateHandler : ICommandHandler<SetDisbursementEx
         DisbursementStage targetStage = command.TargetState.Trim().ToLowerInvariant() switch
         {
             "failed" => DisbursementStage.Failed,
-            "payment_unknown" => DisbursementStage.PaymentUnknown,
+            "payment_unknown" => DisbursementStage.Unknown,
             "cancelled" => DisbursementStage.Cancelled,
             _ => DisbursementStage.Failed
         };

@@ -5,6 +5,7 @@ using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Finance.Application.CashAdvances.Create;
 using Rge.Finance.Application.Ports;
 using Rge.Finance.Domain.CashAdvances;
+using Rge.Finance.Domain.CashAdvances.StateMachines;
 using Rge.Finance.Domain.Disbursements;
 using Rge.Finance.Domain.Errors;
 using Rge.Finance.Domain.Ledger;
@@ -107,19 +108,20 @@ public sealed class CloseHandler : ICommandHandler<CloseCashAdvanceCommand, Cash
         long totalReturn = entries.Where(e => e.EntryType == LedgerEntryType.CashReturn).Sum(e => e.AmountMinor);
         long totalReimbursement = entries.Where(e => e.EntryType == LedgerEntryType.ReimbursementSettled).Sum(e => e.AmountMinor);
 
+        var zeroMoney = Money.Zero(advance.RequestedAmount.CurrencyCode);
         var snapshot = ClosingSnapshot.Create(
             advanceId: advance.Id,
-            employeeId: advance.EmployeeId,
-            departmentId: advance.DepartmentId,
-            advanceNumber: advance.AdvanceNumber.Value,
-            disbursedAmount: new Money(totalDisbursed, advance.RequestedAmount.CurrencyCode),
-            liquidatedExpenseAmount: new Money(totalExpense, advance.RequestedAmount.CurrencyCode),
-            returnedCashAmount: new Money(totalReturn, advance.RequestedAmount.CurrencyCode),
-            reimbursedEmployeeAmount: new Money(totalReimbursement, advance.RequestedAmount.CurrencyCode),
-            finalOutstandingBalance: balance,
-            closureReason: command.ClosureReason,
-            closedByActorId: command.ActorId,
+            releasedAmount: new Money(totalDisbursed, advance.RequestedAmount.CurrencyCode),
+            claimedExpense: new Money(totalExpense, advance.RequestedAmount.CurrencyCode),
+            approvedExpense: new Money(totalExpense, advance.RequestedAmount.CurrencyCode),
+            rejectedExpense: zeroMoney,
+            cashReturned: new Money(totalReturn, advance.RequestedAmount.CurrencyCode),
+            reimbursement: new Money(totalReimbursement, advance.RequestedAmount.CurrencyCode),
+            finalOutstanding: balance,
             authorizedExceptionId: command.AuthorizedExceptionId,
+            controllerId: command.ActorId,
+            closureReason: command.ClosureReason,
+            snapshotJson: "{}",
             closedAtUtc: nowUtc);
 
         await _ledgerStore.SaveSnapshotAsync(snapshot, cancellationToken).ConfigureAwait(false);

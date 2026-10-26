@@ -42,7 +42,7 @@ public sealed class ExecuteHandler : ICommandHandler<ExecuteDisbursementCommand,
             return Result.Failure<DisbursementDto>(FinanceErrors.DisbursementNotFound(command.DisbursementId));
         }
 
-        var bankRef = new BankReference(command.BankReference, command.RemittanceDocumentId);
+        var bankRef = new BankReference(command.BankReference);
         Money? executedMoney = command.ExecutedAmountMinor.HasValue
             ? new Money(command.ExecutedAmountMinor.Value, disbursement.PaymentAmount.CurrencyCode)
             : null;
