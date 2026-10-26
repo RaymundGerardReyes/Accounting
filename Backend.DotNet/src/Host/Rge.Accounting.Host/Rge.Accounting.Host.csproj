@@ -16,5 +16,7 @@
     <ProjectReference Include="..\..\Modules\Documents\Rge.Documents.Infrastructure\Rge.Documents.Infrastructure.csproj" />
     <ProjectReference Include="..\..\Modules\Finance\Rge.Finance.Api\Rge.Finance.Api.csproj" />
     <ProjectReference Include="..\..\Modules\Finance\Rge.Finance.Infrastructure\Rge.Finance.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Modules\Integrations\Rge.Integrations.Api\Rge.Integrations.Api.csproj" />
+    <ProjectReference Include="..\..\Modules\Integrations\Rge.Integrations.Infrastructure\Rge.Integrations.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

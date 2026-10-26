@@ -17,6 +17,8 @@ using Rge.Finance.Infrastructure;
 using Rge.Identity.Api;
 using Rge.Identity.Api.Authentication;
 using Rge.Identity.Infrastructure;
+using Rge.Integrations.Api;
+using Rge.Integrations.Infrastructure;
 using Rge.Payments.Api;
 using Rge.Payments.Infrastructure;
 using Rge.Receipts.Api;
@@ -64,6 +66,7 @@ public static class ServiceCollectionExtensions
         services.AddCostAllocationModule();
         services.AddDocumentsModule();
         services.AddFinanceModule(configuration);
+        services.AddIntegrationsModule();
 
         // Register Minimal API Module Endpoints
         services.AddSingleton(_ =>
@@ -77,6 +80,8 @@ public static class ServiceCollectionExtensions
             registry.Register(new CostAllocationEndpoints());
             registry.Register(new DocumentEndpoints());
             registry.Register(new FinanceEndpoints());
+            registry.Register(new IntegrationEndpoints());
+            registry.Register(new GoogleFormsEndpoints());
             return registry;
         });
 

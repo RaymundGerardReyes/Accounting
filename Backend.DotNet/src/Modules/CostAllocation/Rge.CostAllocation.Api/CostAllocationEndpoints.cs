@@ -57,7 +57,7 @@ public sealed class CostAllocationEndpoints : IEndpointModule
         app.MapGet("/api/variance", (LegacyDashboardReader reader) =>
             Results.Json(reader.BuildVarianceAnalysis(), JsonDefaults.Options)).WithTags("CostAllocation.Legacy");
 
-        // Endpoints #6-#9: Configuration endpoints
+        // Endpoints #6-#9: Configuration endpoints (CST-001 through CST-004)
         app.MapGet("/api/configuration", (ICostAllocationStore store) =>
             Results.Json(store.GetConfiguration(), JsonDefaults.Options)).WithTags("CostAllocation.Configuration");
 
@@ -65,6 +65,26 @@ public sealed class CostAllocationEndpoints : IEndpointModule
         {
             store.SaveConfiguration(config);
             return Results.Json(store.GetConfiguration(), JsonDefaults.Options);
+        }).WithTags("CostAllocation.Configuration");
+
+        app.MapPost("/api/configuration/departments", (Dictionary<string, object> body, ICostAllocationStore store) =>
+        {
+            if (!body.TryGetValue("departments", out object? depts) || depts is null)
+            {
+                return Results.BadRequest(new { error = "Missing departments array." });
+            }
+            store.SaveConfiguration(new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase) { ["departments"] = depts });
+            return Results.Json(new { success = true, departments = depts }, JsonDefaults.Options);
+        }).WithTags("CostAllocation.Configuration");
+
+        app.MapPost("/api/configuration/users", (Dictionary<string, object> body, ICostAllocationStore store) =>
+        {
+            if (!body.TryGetValue("users", out object? users) || users is null)
+            {
+                return Results.BadRequest(new { error = "Missing users array." });
+            }
+            store.SaveConfiguration(new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase) { ["users"] = users });
+            return Results.Json(new { success = true, users }, JsonDefaults.Options);
         }).WithTags("CostAllocation.Configuration");
     }
 }

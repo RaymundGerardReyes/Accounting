@@ -218,6 +218,43 @@
           "Rge.Identity.Domain": "[1.0.0, )"
         }
       },
+      "rge.integrations.api": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Api": "[1.0.0, )",
+          "Rge.Integrations.Application": "[1.0.0, )",
+          "Rge.Integrations.Contracts": "[1.0.0, )"
+        }
+      },
+      "rge.integrations.application": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.Integrations.Contracts": "[1.0.0, )",
+          "Rge.Integrations.Domain": "[1.0.0, )"
+        }
+      },
+      "rge.integrations.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.integrations.domain": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "rge.integrations.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Infrastructure": "[1.0.0, )",
+          "Rge.Integrations.Application": "[1.0.0, )",
+          "Rge.Integrations.Domain": "[1.0.0, )"
+        }
+      },
       "rge.payments.api": {
         "type": "Project",
         "dependencies": {
