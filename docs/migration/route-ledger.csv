@@ -93,22 +93,22 @@ FIN-055,finance,GET,/api/v1/finance/vendors,Backend/finance_routes.py:962,Backen
 FIN-056,finance,POST,/api/v1/finance/vendors,Backend/finance_routes.py:972,Backend.DotNet/src/Modules/Finance/Rge.Finance.Api/Vendors/VendorEndpoints.cs:97,implemented,-,none,authenticated,yes (fn_append_audit_event),v0.4.0,Create Vendor Master Record (Pending Verification)
 FIN-057,finance,POST,/api/v1/finance/vendors/{vendor_id}/bank-changes,Backend/finance_routes.py:1005,Backend.DotNet/src/Modules/Finance/Rge.Finance.Api/Vendors/VendorEndpoints.cs:123,implemented,-,none,authenticated,yes (fn_append_audit_event),v0.4.0,Request Vendor Bank Account Change
 FIN-058,finance,POST,/api/v1/finance/vendors/{vendor_id}/verify,Backend/finance_routes.py:995,Backend.DotNet/src/Modules/Finance/Rge.Finance.Api/Vendors/VendorEndpoints.cs:145,implemented,-,none,authenticated,yes (fn_append_audit_event),v0.4.0,Verify Vendor Master Record (Creator != Verifier)
-DOC-001,documents,GET,/api/v1/finance/documents,Backend/finance_routes.py:573,-,not-started,-,none,authenticated,no,v0.5.0,List Authorized Document References
-DOC-002,documents,POST,/api/v1/finance/documents,Backend/finance_routes.py:548,-,not-started,-,none,authenticated,yes (fn_append_audit_event),v0.5.0,Upload Secure Document Evidence
-DOC-003,documents,GET,/api/v1/finance/documents/{doc_id}/download,Backend/finance_routes.py:587,-,not-started,-,none,authenticated,no,v0.5.0,Authorized Document Evidence Download
-INT-001,integrations,POST,/api/v1/integrations/configure,Backend/integration_routes.py:164,-,not-started,-,none,public,no,v0.5.0,Save Integration Credentials to Environment
-INT-002,integrations,POST,/api/v1/integrations/email/test,Backend/integration_routes.py:96,-,not-started,-,none,public,no,v0.5.0,Test Google Email SMTP Handshake & Dispatch
-INT-003,integrations,GET,/api/v1/integrations/google-forms/status,Backend/google_forms_routes.py:519,-,not-started,-,none,authenticated,no,v0.5.0,Check Google Forms Integration Status
-INT-004,integrations,POST,/api/v1/integrations/google-forms/submit,Backend/google_forms_routes.py:332,-,not-started,-,none,authenticated,no,v0.5.0,Ingest Google Form Response and Pair with PayMongo Checkout
-INT-005,integrations,POST,/api/v1/integrations/paymongo/test,Backend/integration_routes.py:68,-,not-started,-,none,public,no,v0.5.0,Test PayMongo API Key & Webhook Secret
-INT-006,integrations,GET,/api/v1/integrations/status,Backend/integration_routes.py:55,-,not-started,-,none,authenticated,no,v0.5.0,Get Live Integration Diagnostic Statuses
-CST-001,costalloc,GET,/api/configuration,Backend/app.py:228,-,not-started,-,none,public,no,v0.5.0,Legacy Configuration Data
-CST-002,costalloc,PUT,/api/configuration,Backend/app.py:235,-,not-started,-,none,public,no,v0.5.0,Update General Configuration
-CST-003,costalloc,POST,/api/configuration/departments,Backend/app.py:247,-,not-started,-,none,public,no,v0.5.0,Save Departments
-CST-004,costalloc,POST,/api/configuration/users,Backend/app.py:261,-,not-started,-,none,public,no,v0.5.0,Save Users
-CST-005,costalloc,GET,/api/cost-allocation,Backend/cost_allocation_routes.py:20,-,not-started,-,none,authenticated,no,v0.5.0,
-CST-006,costalloc,POST,/api/cost-allocation/department,Backend/cost_allocation_routes.py:126,-,not-started,-,none,authenticated,no,v0.5.0,
-CST-007,costalloc,GET,/api/dashboard,Backend/app.py:196,-,not-started,-,none,public,no,v0.5.0,Legacy Dashboard Data
-CST-008,costalloc,GET,/api/department/{department_name},Backend/app.py:203,-,not-started,-,none,public,no,v0.5.0,Legacy Department Detail
-CST-009,costalloc,GET,/api/products,Backend/app.py:214,-,not-started,-,none,public,no,v0.5.0,Legacy Product Line Analysis
-CST-010,costalloc,GET,/api/variance,Backend/app.py:221,-,not-started,-,none,public,no,v0.5.0,Legacy Variance Analysis
+DOC-001,documents,GET,/api/v1/finance/documents,Backend/finance_routes.py:573,Backend.DotNet/src/Modules/Documents/Rge.Documents.Api/DocumentEndpoints.cs:51,implemented,-,none,authenticated,no,v0.5.0,List Authorized Document References
+DOC-002,documents,POST,/api/v1/finance/documents,Backend/finance_routes.py:548,Backend.DotNet/src/Modules/Documents/Rge.Documents.Api/DocumentEndpoints.cs:21,implemented,-,none,authenticated,yes (fn_append_audit_event),v0.5.0,Upload Secure Document Evidence
+DOC-003,documents,GET,/api/v1/finance/documents/{doc_id}/download,Backend/finance_routes.py:587,Backend.DotNet/src/Modules/Documents/Rge.Documents.Api/DocumentEndpoints.cs:61,implemented,-,none,authenticated,no,v0.5.0,Authorized Document Evidence Download
+INT-001,integrations,POST,/api/v1/integrations/configure,Backend/integration_routes.py:164,Backend.DotNet/src/Modules/Integrations/Rge.Integrations.Api/IntegrationEndpoints.cs:24,implemented,-,none,public,no,v0.5.0,Save Integration Credentials to Environment
+INT-002,integrations,POST,/api/v1/integrations/email/test,Backend/integration_routes.py:96,Backend.DotNet/src/Modules/Integrations/Rge.Integrations.Api/IntegrationEndpoints.cs:36,implemented,-,none,public,no,v0.5.0,Test Google Email SMTP Handshake & Dispatch
+INT-003,integrations,GET,/api/v1/integrations/google-forms/status,Backend/google_forms_routes.py:519,Backend.DotNet/src/Modules/Integrations/Rge.Integrations.Api/GoogleFormsEndpoints.cs:22,implemented,-,none,authenticated,no,v0.5.0,Check Google Forms Integration Status
+INT-004,integrations,POST,/api/v1/integrations/google-forms/submit,Backend/google_forms_routes.py:332,Backend.DotNet/src/Modules/Integrations/Rge.Integrations.Api/GoogleFormsEndpoints.cs:33,implemented,-,none,authenticated,no,v0.5.0,Ingest Google Form Response and Pair with PayMongo Checkout
+INT-005,integrations,POST,/api/v1/integrations/paymongo/test,Backend/integration_routes.py:68,Backend.DotNet/src/Modules/Integrations/Rge.Integrations.Api/IntegrationEndpoints.cs:48,implemented,-,none,public,no,v0.5.0,Test PayMongo API Key & Webhook Secret
+INT-006,integrations,GET,/api/v1/integrations/status,Backend/integration_routes.py:55,Backend.DotNet/src/Modules/Integrations/Rge.Integrations.Api/IntegrationEndpoints.cs:60,implemented,-,none,authenticated,no,v0.5.0,Get Live Integration Diagnostic Statuses
+CST-001,costalloc,GET,/api/configuration,Backend/app.py:228,Backend.DotNet/src/Modules/CostAllocation/Rge.CostAllocation.Api/CostAllocationEndpoints.cs:61,implemented,-,none,public,no,v0.5.0,Legacy Configuration Data
+CST-002,costalloc,PUT,/api/configuration,Backend/app.py:235,Backend.DotNet/src/Modules/CostAllocation/Rge.CostAllocation.Api/CostAllocationEndpoints.cs:64,implemented,-,none,public,no,v0.5.0,Update General Configuration
+CST-003,costalloc,POST,/api/configuration/departments,Backend/app.py:247,Backend.DotNet/src/Modules/CostAllocation/Rge.CostAllocation.Api/CostAllocationEndpoints.cs:70,implemented,-,none,public,no,v0.5.0,Save Departments
+CST-004,costalloc,POST,/api/configuration/users,Backend/app.py:261,Backend.DotNet/src/Modules/CostAllocation/Rge.CostAllocation.Api/CostAllocationEndpoints.cs:80,implemented,-,none,public,no,v0.5.0,Save Users
+CST-005,costalloc,GET,/api/cost-allocation,Backend/cost_allocation_routes.py:20,Backend.DotNet/src/Modules/CostAllocation/Rge.CostAllocation.Api/CostAllocationEndpoints.cs:22,implemented,-,none,authenticated,no,v0.5.0,
+CST-006,costalloc,POST,/api/cost-allocation/department,Backend/cost_allocation_routes.py:126,Backend.DotNet/src/Modules/CostAllocation/Rge.CostAllocation.Api/CostAllocationEndpoints.cs:32,implemented,-,none,authenticated,no,v0.5.0,
+CST-007,costalloc,GET,/api/dashboard,Backend/app.py:196,Backend.DotNet/src/Modules/CostAllocation/Rge.CostAllocation.Api/CostAllocationEndpoints.cs:43,implemented,-,none,public,no,v0.5.0,Legacy Dashboard Data
+CST-008,costalloc,GET,/api/department/{department_name},Backend/app.py:203,Backend.DotNet/src/Modules/CostAllocation/Rge.CostAllocation.Api/CostAllocationEndpoints.cs:46,implemented,-,none,public,no,v0.5.0,Legacy Department Detail
+CST-009,costalloc,GET,/api/products,Backend/app.py:214,Backend.DotNet/src/Modules/CostAllocation/Rge.CostAllocation.Api/CostAllocationEndpoints.cs:54,implemented,-,none,public,no,v0.5.0,Legacy Product Line Analysis
+CST-010,costalloc,GET,/api/variance,Backend/app.py:221,Backend.DotNet/src/Modules/CostAllocation/Rge.CostAllocation.Api/CostAllocationEndpoints.cs:57,implemented,-,none,public,no,v0.5.0,Legacy Variance Analysis
