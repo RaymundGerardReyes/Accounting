@@ -25,8 +25,8 @@ This directory contains hardened NGINX reverse proxy configurations designed for
                  /                             \
         location /api/                      location /
                v                                 v
-    [ FastAPI Backend ]                 [ Next.js Frontend ]
-    Port 5000                           Port 3000
+    [ .NET 10 Backend ]                 [ Next.js Frontend ]
+    Port 5080                           Port 3000
     - Live PostgreSQL                   - Server Components
     - PayMongo Payments                 - React UI
     - Auth & Cost Allocation            - API Proxy Handler
