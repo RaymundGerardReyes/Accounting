@@ -2,6 +2,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);CA1303</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Modules\Audit\Rge.Audit.Domain\Rge.Audit.Domain.csproj" />

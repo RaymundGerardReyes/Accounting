@@ -221,9 +221,7 @@ string sampleWebhookPayload = """
 
 var webhookHandler = new Rge.Payments.Application.Webhooks.ReceivePayMongoWebhook.ReceivePayMongoWebhookHandler();
 var webhookCmd = new Rge.Payments.Application.Webhooks.ReceivePayMongoWebhook.ReceivePayMongoWebhookCommand(null, sampleWebhookPayload);
-var webhookTask = webhookHandler.HandleAsync(webhookCmd);
-webhookTask.Wait();
-var webhookRes = webhookTask.Result;
+var webhookRes = await webhookHandler.HandleAsync(webhookCmd).ConfigureAwait(false);
 Assert("ReceivePayMongoWebhookHandler parses evt_test_999 and returns received", webhookRes.IsSuccess && webhookRes.Value.ProviderEventId == "evt_test_999" && webhookRes.Value.ProcessingStatus == "received");
 
 // 10. Test Tests.Common Infrastructure (FakeClock, WebhookSigner, Builders, Generators)
@@ -414,6 +412,50 @@ var optionsInstance = Rge.BuildingBlocks.Api.Serialization.JsonDefaults.Options;
 Assert("JsonDefaults.Options configures snake_case property naming",
     optionsInstance.PropertyNamingPolicy == System.Text.Json.JsonNamingPolicy.SnakeCaseLower);
 
+// 16. Execute Architecture Enforcement Test Suite (tests/Architecture.Tests)
+Console.WriteLine("\n--- Executing Architecture Enforcement Test Suite (Rge.Architecture.Tests) ---");
+var archTests = new Rge.Architecture.Tests.ModularMonolithArchitectureTests();
+archTests.Domain_Assemblies_Must_Only_Reference_SharedKernel_And_System_Libraries();
+Assert("ModularMonolithArchitectureTests.Domain_Assemblies_Must_Only_Reference_SharedKernel_And_System_Libraries", true);
+
+archTests.Domain_And_Money_Types_Must_Enforce_Zero_Float_Invariant();
+Assert("ModularMonolithArchitectureTests.Domain_And_Money_Types_Must_Enforce_Zero_Float_Invariant", true);
+
+archTests.Modules_Must_Never_Reference_Another_Modules_Internal_Projects();
+Assert("ModularMonolithArchitectureTests.Modules_Must_Never_Reference_Another_Modules_Internal_Projects", true);
+
+// 17. Execute Security & SoD Test Suite (tests/Security.Tests)
+Console.WriteLine("\n--- Executing Security & SoD Test Suite (Rge.Security.Tests) ---");
+var secTests = new Rge.Security.Tests.PlatformSecurityInvariantsTests();
+secTests.FourEyesRule_Blocks_SelfApproval_And_Conflicting_Disbursement_Actors();
+Assert("PlatformSecurityInvariantsTests.FourEyesRule_Blocks_SelfApproval_And_Conflicting_Disbursement_Actors", true);
+
+secTests.PayMongo_HmacVerifier_Accepts_Valid_Signature_And_Rejects_Tampering_Or_Replay();
+Assert("PlatformSecurityInvariantsTests.PayMongo_HmacVerifier_Accepts_Valid_Signature_And_Rejects_Tampering_Or_Replay", true);
+
+secTests.DocumentUpload_Enforces_MagicBytes_SizeCap_Antivirus_And_PathTraversal_Defense();
+Assert("PlatformSecurityInvariantsTests.DocumentUpload_Enforces_MagicBytes_SizeCap_Antivirus_And_PathTraversal_Defense", true);
+
+secTests.CsvInjectionSafeWriter_Neutralizes_Spreadsheet_Formula_Prefixes("=cmd|' /C calc'!A0", "'=cmd|' /C calc'!A0");
+secTests.CsvInjectionSafeWriter_Neutralizes_Spreadsheet_Formula_Prefixes("+SUM(A1:A10)", "'+SUM(A1:A10)");
+secTests.CsvInjectionSafeWriter_Neutralizes_Spreadsheet_Formula_Prefixes("-100+200", "'-100+200");
+secTests.CsvInjectionSafeWriter_Neutralizes_Spreadsheet_Formula_Prefixes("@SUM(1+1)", "'@SUM(1+1)");
+Assert("PlatformSecurityInvariantsTests.CsvInjectionSafeWriter_Neutralizes_Spreadsheet_Formula_Prefixes (4 theories)", true);
+
+secTests.FieldEncryptionService_Encrypts_And_Decrypts_With_Aes256Gcm_Authenticated_Tag();
+Assert("PlatformSecurityInvariantsTests.FieldEncryptionService_Encrypts_And_Decrypts_With_Aes256Gcm_Authenticated_Tag", true);
+
+secTests.CsrfTokenService_Validates_SessionBound_Tokens_In_ConstantTime();
+Assert("PlatformSecurityInvariantsTests.CsrfTokenService_Validates_SessionBound_Tokens_In_ConstantTime", true);
+
+// 18. Execute Golden-Master Contract Parity Test Suite (tests/Contract.Parity.Tests)
+Console.WriteLine("\n--- Executing Golden-Master Contract Parity Test Suite (Rge.Contract.Parity.Tests) ---");
+var parityTests = new Rge.Contract.Parity.Tests.GoldenMasterParityTests();
+await parityTests.EndToEnd_Order_PayMongoWebhook_Outbox_BirOfficialReceipt_And_Pdf_Parity().ConfigureAwait(false);
+Assert("GoldenMasterParityTests.EndToEnd_Order_PayMongoWebhook_Outbox_BirOfficialReceipt_And_Pdf_Parity", true);
+
+await parityTests.Cryptographic_Audit_HashChain_Detects_Zero_Tampering().ConfigureAwait(false);
+Assert("GoldenMasterParityTests.Cryptographic_Audit_HashChain_Detects_Zero_Tampering", true);
 
 Console.WriteLine("\n==============================================================");
 Console.WriteLine($" RESULTS: {passed} PASSED, {failed} FAILED");

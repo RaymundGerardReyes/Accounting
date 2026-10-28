@@ -19,5 +19,8 @@
     <ProjectReference Include="..\..\src\Modules\Identity\Rge.Identity.Infrastructure\Rge.Identity.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Modules\Documents\Rge.Documents.Infrastructure\Rge.Documents.Infrastructure.csproj" />
     <ProjectReference Include="..\..\tests\Tests.Common\Rge.Tests.Common.csproj" />
+    <ProjectReference Include="..\..\tests\Architecture.Tests\Rge.Architecture.Tests.csproj" />
+    <ProjectReference Include="..\..\tests\Security.Tests\Rge.Security.Tests.csproj" />
+    <ProjectReference Include="..\..\tests\Contract.Parity.Tests\Rge.Contract.Parity.Tests.csproj" />
   </ItemGroup>
 </Project>
