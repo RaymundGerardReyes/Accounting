@@ -87,9 +87,9 @@ app.UseMiddleware<RequestLoggingEnricher>();
 
 
 // 6. Map probes (/health, /api/health, /version) and all registered modules
-
 app.MapAccountingPlatformEndpoints(cachedVersionPayload);
 
-
-
 await app.RunAsync();
+
+public partial class Program;
+

@@ -5,6 +5,7 @@ namespace Rge.Documents.Domain;
 public static class FileSizePolicy
 {
     public const long MaxAllowedBytes = 10 * 1024 * 1024; // 10 MB
+    public const long MaxSizeBytes = MaxAllowedBytes;
 
     public static Result ValidateSize(long sizeBytes)
     {

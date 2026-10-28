@@ -20,5 +20,13 @@ public static class AuditAction
     public const string Logout = "logout";
     public const string SwitchUser = "switch_user";
     public const string IssueReceipt = "issue_receipt";
+    public const string AdvanceSubmitted = "advance_submitted";
+    public const string AdvanceApproved = "advance_approved";
+}
+
+public static class AuditActionCatalog
+{
+    public const string AdvanceSubmitted = AuditAction.AdvanceSubmitted;
+    public const string AdvanceApproved = AuditAction.AdvanceApproved;
 }
 

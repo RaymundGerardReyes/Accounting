@@ -7,6 +7,31 @@ public sealed record ChainIntegrityDto(
     long? BrokenAtSequence = null,
     string? Reason = null);
 
+public sealed record ChainVerificationReport(
+    bool IsIntact,
+    long TotalVerifiedRecords,
+    string HeadHash,
+    long? BrokenAtSequence = null,
+    string? Reason = null);
+
+public interface IAuditStore
+{
+    Task AppendAsync(
+        string actorId,
+        string actorRole,
+        string action,
+        string entityType,
+        string entityId,
+        string? previousState,
+        string? newState,
+        string? reason,
+        string? correlationId,
+        string? evidenceRef,
+        CancellationToken cancellationToken = default);
+
+    Task<ChainVerificationReport> VerifyChainAsync(CancellationToken cancellationToken = default);
+}
+
 public sealed record AuditEventItemDto(
     string Id,
     long SequenceNo,

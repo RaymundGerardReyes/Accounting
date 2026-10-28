@@ -184,5 +184,37 @@ public sealed class AuditEvent : AggregateRoot<string>
         string hashHex = Convert.ToHexStringLower(SHA256.HashData(bytes));
         return new AuditHash(hashHex);
     }
+
+    public static string BuildCanonicalChainPayload(
+        long sequenceNo,
+        string actorId,
+        string actorRole,
+        string action,
+        string entityType,
+        string entityId,
+        string? previousState,
+        string? newState,
+        string? reason,
+        string? correlationId,
+        string? evidenceRef,
+        DateTimeOffset occurredAtUtc,
+        string prevHash)
+    {
+        string occurredIso = occurredAtUtc.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.ffffffZ", CultureInfo.InvariantCulture);
+        return string.Join('|',
+            sequenceNo.ToString(CultureInfo.InvariantCulture),
+            actorId ?? string.Empty,
+            actorRole ?? string.Empty,
+            action ?? string.Empty,
+            entityType ?? string.Empty,
+            entityId ?? string.Empty,
+            previousState ?? string.Empty,
+            newState ?? string.Empty,
+            reason ?? string.Empty,
+            correlationId ?? string.Empty,
+            evidenceRef ?? string.Empty,
+            occurredIso,
+            prevHash ?? string.Empty);
+    }
 }
 

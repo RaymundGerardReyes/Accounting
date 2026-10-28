@@ -11,7 +11,9 @@ public sealed class JsonProductCatalog : IProductCatalog
         ["Product B"] = 89,
         ["Product C"] = 156,
         ["Product D"] = 203,
-        ["Product E"] = 67
+        ["Product E"] = 67,
+        ["COST-ACC-TEXT-2026"] = 1850,
+        ["CPA-REV-AUDIT-2026"] = 1450
     };
 
     private readonly Dictionary<string, int> _loadedPrices = new(StringComparer.OrdinalIgnoreCase);

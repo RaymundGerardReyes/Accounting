@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Rge.BuildingBlocks.Application.Abstractions;
 using Rge.BuildingBlocks.SharedKernel.Results;
+using Rge.Payments.Application.Webhooks.ProcessWebhookEvent;
 
 namespace Rge.Payments.Application.Webhooks.ReceivePayMongoWebhook;
 
@@ -14,10 +15,22 @@ public sealed class ReceivePayMongoWebhookHandler : ICommandHandler<ReceivePayMo
     {
         "checkout_session.payment.paid",
         "payment.paid",
-        "payment.failed"
+        "payment.failed",
+        "checkout_session.expired"
     };
 
-    public Task<Result<WebhookAckResponse>> HandleAsync(
+    private readonly ProcessWebhookEventHandler? _processHandler;
+
+    public ReceivePayMongoWebhookHandler()
+    {
+    }
+
+    public ReceivePayMongoWebhookHandler(ProcessWebhookEventHandler processHandler)
+    {
+        _processHandler = processHandler;
+    }
+
+    public async Task<Result<WebhookAckResponse>> HandleAsync(
         ReceivePayMongoWebhookCommand command,
         CancellationToken cancellationToken = default)
     {
@@ -25,8 +38,8 @@ public sealed class ReceivePayMongoWebhookHandler : ICommandHandler<ReceivePayMo
 
         if (string.IsNullOrWhiteSpace(command.RawJsonBody))
         {
-            return Task.FromResult(Result.Failure<WebhookAckResponse>(
-                Error.Validation("Webhooks.EmptyPayload", "Webhook body cannot be empty.")));
+            return Result.Failure<WebhookAckResponse>(
+                Error.Validation("Webhooks.EmptyPayload", "Webhook body cannot be empty."));
         }
 
         try
@@ -37,8 +50,8 @@ public sealed class ReceivePayMongoWebhookHandler : ICommandHandler<ReceivePayMo
             if (!root.TryGetProperty("data", out JsonElement dataElement) ||
                 !dataElement.TryGetProperty("id", out JsonElement idElement))
             {
-                return Task.FromResult(Result.Failure<WebhookAckResponse>(
-                    Error.Validation("Webhooks.MalformedEnvelope", "Missing 'data.id' in PayMongo webhook payload.")));
+                return Result.Failure<WebhookAckResponse>(
+                    Error.Validation("Webhooks.MalformedEnvelope", "Missing 'data.id' in PayMongo webhook payload."));
             }
 
             string providerEventId = idElement.GetString() ?? string.Empty;
@@ -52,13 +65,25 @@ public sealed class ReceivePayMongoWebhookHandler : ICommandHandler<ReceivePayMo
 
             if (string.IsNullOrWhiteSpace(providerEventId))
             {
-                return Task.FromResult(Result.Failure<WebhookAckResponse>(
-                    Error.Validation("Webhooks.MissingEventId", "PayMongo event ID (evt_...) is empty.")));
+                return Result.Failure<WebhookAckResponse>(
+                    Error.Validation("Webhooks.MissingEventId", "PayMongo event ID (evt_...) is empty."));
             }
 
             string processingStatus = SupportedEvents.Contains(eventType)
                 ? "received"
                 : "ignored";
+
+            if (_processHandler is not null && processingStatus == "received")
+            {
+                var processRes = await _processHandler.HandleAsync(
+                    new ProcessWebhookEventCommand(providerEventId, eventType, command.RawJsonBody),
+                    cancellationToken).ConfigureAwait(false);
+
+                if (processRes.IsSuccess)
+                {
+                    processingStatus = processRes.Value.ProcessingStatus;
+                }
+            }
 
             var response = new WebhookAckResponse(
                 WebhookEventId: Guid.NewGuid().ToString("D"),
@@ -66,12 +91,12 @@ public sealed class ReceivePayMongoWebhookHandler : ICommandHandler<ReceivePayMo
                 EventType: eventType,
                 ProcessingStatus: processingStatus);
 
-            return Task.FromResult(Result.Success(response));
+            return Result.Success(response);
         }
         catch (JsonException)
         {
-            return Task.FromResult(Result.Failure<WebhookAckResponse>(
-                Error.Validation("Webhooks.InvalidJson", "Webhook payload is not valid JSON.")));
+            return Result.Failure<WebhookAckResponse>(
+                Error.Validation("Webhooks.InvalidJson", "Webhook payload is not valid JSON."));
         }
     }
 }

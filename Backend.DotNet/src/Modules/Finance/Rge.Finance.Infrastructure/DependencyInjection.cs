@@ -21,24 +21,24 @@ public static class DependencyInjection
         // Core infrastructure singletons
         services.AddSingleton<PolicyCache>();
         services.AddSingleton<PolicyCacheInvalidator>();
-        services.AddSingleton<PhHolidayCalendarProvider>();
+        services.AddScoped<PhHolidayCalendarProvider>();
         services.AddSingleton<ISodGuard, SodGuard>();
 
         // Domain repositories
-        services.AddSingleton<ICashAdvanceRepository, CashAdvanceRepository>();
-        services.AddSingleton<IDisbursementRepository, DisbursementRepository>();
-        services.AddSingleton<IExpenseReportRepository, ExpenseReportRepository>();
-        services.AddSingleton<IPolicyRepository, PolicyRepository>();
-        services.AddSingleton<IExceptionRequestRepository, ExceptionRequestRepository>();
-        services.AddSingleton<IPurchaseRequestRepository, PurchaseRequestRepository>();
-        services.AddSingleton<IAccountPayableRepository, AccountPayableRepository>();
-        services.AddSingleton<IPaymentRecordRepository, PaymentRecordRepository>();
-        services.AddSingleton<IVendorRepository, VendorRepository>();
-        services.AddSingleton<ITaxCodeRepository, TaxCodeRepository>();
-        services.AddSingleton<IExceptionRegisterRepository, ExceptionRegisterRepository>();
-        services.AddSingleton<IAdvanceLedgerStore, AdvanceLedgerStore>();
-        services.AddSingleton<ISettlementApplicationStore, SettlementApplicationStore>();
-        services.AddSingleton<IAdvanceBalanceQuery, AdvanceBalanceQuery>();
+        services.AddScoped<ICashAdvanceRepository, CashAdvanceRepository>();
+        services.AddScoped<IDisbursementRepository, DisbursementRepository>();
+        services.AddScoped<IExpenseReportRepository, ExpenseReportRepository>();
+        services.AddScoped<IPolicyRepository, PolicyRepository>();
+        services.AddScoped<IExceptionRequestRepository, ExceptionRequestRepository>();
+        services.AddScoped<IPurchaseRequestRepository, PurchaseRequestRepository>();
+        services.AddScoped<IAccountPayableRepository, AccountPayableRepository>();
+        services.AddScoped<IPaymentRecordRepository, PaymentRecordRepository>();
+        services.AddScoped<IVendorRepository, VendorRepository>();
+        services.AddScoped<ITaxCodeRepository, TaxCodeRepository>();
+        services.AddScoped<IExceptionRegisterRepository, ExceptionRegisterRepository>();
+        services.AddScoped<IAdvanceLedgerStore, AdvanceLedgerStore>();
+        services.AddScoped<ISettlementApplicationStore, SettlementApplicationStore>();
+        services.AddScoped<IAdvanceBalanceQuery, AdvanceBalanceQuery>();
 
         // Cash Advance handlers
         services.AddTransient<Application.CashAdvances.Create.CreateCashAdvanceHandler>();

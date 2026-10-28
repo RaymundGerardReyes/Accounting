@@ -82,9 +82,13 @@ public sealed class CreateOrderHandler : ICommandHandler<CreateOrderCommand, Ord
 
         string metadataJson = JsonSerializer.Serialize(metadata);
 
+        string effectiveTitle = string.IsNullOrWhiteSpace(command.Title)
+            ? $"Order for {command.ReferenceCode.Trim()}"
+            : command.Title.Trim();
+
         var order = Order.Create(
             orderNumber: orderNumber,
-            title: command.Title.Trim(),
+            title: effectiveTitle,
             category: command.Category.Trim().ToLowerInvariant(),
             referenceCode: command.ReferenceCode.Trim(),
             authoritativeAmount: priceResult.Value,

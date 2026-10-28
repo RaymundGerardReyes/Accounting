@@ -23,5 +23,26 @@ public static class PathTraversalGuard
 
         return Result.Success();
     }
+
+    public static string GetSafeVaultFilePath(string vaultRootDirectory, string? candidateFileName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(vaultRootDirectory);
+
+        Result check = EnsureSafeFilename(candidateFileName);
+        if (check.IsFailure)
+        {
+            throw new UnauthorizedAccessException(check.Error.Message);
+        }
+
+        string fullVaultRoot = Path.GetFullPath(vaultRootDirectory);
+        string combined = Path.GetFullPath(Path.Combine(fullVaultRoot, candidateFileName!));
+
+        if (!combined.StartsWith(fullVaultRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new UnauthorizedAccessException("Resolved file path escapes the document vault root directory.");
+        }
+
+        return combined;
+    }
 }
 

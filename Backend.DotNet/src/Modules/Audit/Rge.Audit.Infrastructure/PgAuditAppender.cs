@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Data;
 using System.Data.Common;
+using Rge.Audit.Application.Ports;
 using Rge.Audit.Contracts;
 using Rge.Audit.Domain;
 using Rge.BuildingBlocks.Application.Behaviors;
@@ -12,18 +13,59 @@ namespace Rge.Audit.Infrastructure;
 /// Appends financial audit events transactionally via PostgreSQL stored procedure fn_append_audit_event.
 /// Falls back to an atomic in-memory chain for offline tests.
 /// </summary>
-public sealed class PgAuditAppender : IAuditTrail, IAuditBehaviorWriter
+public sealed class PgAuditAppender : IAuditTrail, IAuditBehaviorWriter, IAuditStore
 {
     private static readonly object SyncLock = new();
     internal static readonly ConcurrentDictionary<long, AuditEvent> InMemoryEvents = new();
     private static long _maxSequence;
 
     private readonly ConnectionScope _connectionScope;
+    private readonly ChainVerifier _chainVerifier;
 
     public PgAuditAppender(ConnectionScope connectionScope)
     {
         ArgumentNullException.ThrowIfNull(connectionScope);
         _connectionScope = connectionScope;
+        _chainVerifier = new ChainVerifier(connectionScope);
+    }
+
+    public Task AppendAsync(
+        string actorId,
+        string actorRole,
+        string action,
+        string entityType,
+        string entityId,
+        string? previousState,
+        string? newState,
+        string? reason,
+        string? correlationId,
+        string? evidenceRef,
+        CancellationToken cancellationToken = default)
+    {
+        var entry = new AuditTrailEntry(
+            ActorId: string.IsNullOrWhiteSpace(actorId) ? "system" : actorId,
+            ActorRole: string.IsNullOrWhiteSpace(actorRole) ? "system" : actorRole,
+            Action: action,
+            EntityType: entityType,
+            EntityId: entityId,
+            PreviousState: previousState,
+            NewState: newState,
+            Reason: reason,
+            CorrelationId: correlationId,
+            EvidenceRef: evidenceRef);
+
+        return RecordAsync(entry, cancellationToken);
+    }
+
+    public async Task<ChainVerificationReport> VerifyChainAsync(CancellationToken cancellationToken = default)
+    {
+        ChainIntegrityDto dto = await _chainVerifier.VerifyChainAsync(cancellationToken).ConfigureAwait(false);
+        return new ChainVerificationReport(
+            IsIntact: dto.Valid,
+            TotalVerifiedRecords: dto.EventCount,
+            HeadHash: dto.HeadHash,
+            BrokenAtSequence: dto.BrokenAtSequence,
+            Reason: dto.Reason);
     }
 
     public Task AppendAsync(

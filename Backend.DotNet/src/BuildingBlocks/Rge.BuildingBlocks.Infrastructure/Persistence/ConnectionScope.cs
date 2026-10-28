@@ -7,21 +7,13 @@ namespace Rge.BuildingBlocks.Infrastructure.Persistence;
 
 
 /// <summary>
-
 /// Scoped connection holder that lazily opens a single DbConnection per HTTP request
-
 /// and shares any active DbTransaction across repositories and the Outbox writer.
-
 /// </summary>
-
-public sealed class ConnectionScope : IAsyncDisposable
-
+public sealed class ConnectionScope : IAsyncDisposable, IDisposable
 {
-
     private readonly NpgsqlDataSourceFactory? _dataSourceFactory;
-
     private DbConnection? _connection;
-
     public DbTransaction? CurrentTransaction { get; internal set; }
 
     public ConnectionScope(NpgsqlDataSourceFactory? dataSourceFactory = null)
@@ -46,34 +38,27 @@ public sealed class ConnectionScope : IAsyncDisposable
         return _connection;
     }
 
-
-
-    public async ValueTask DisposeAsync()
-
+    public void Dispose()
     {
+        CurrentTransaction?.Dispose();
+        CurrentTransaction = null;
 
-        if (CurrentTransaction is not null)
-
-        {
-
-            await CurrentTransaction.DisposeAsync().ConfigureAwait(false);
-
-            CurrentTransaction = null;
-
-        }
-
-
-
-        if (_connection is not null)
-
-        {
-
-            await _connection.DisposeAsync().ConfigureAwait(false);
-
-            _connection = null;
-
-        }
-
+        _connection?.Dispose();
+        _connection = null;
     }
 
+    public async ValueTask DisposeAsync()
+    {
+        if (CurrentTransaction is not null)
+        {
+            await CurrentTransaction.DisposeAsync().ConfigureAwait(false);
+            CurrentTransaction = null;
+        }
+
+        if (_connection is not null)
+        {
+            await _connection.DisposeAsync().ConfigureAwait(false);
+            _connection = null;
+        }
+    }
 }

@@ -4,10 +4,14 @@ namespace Rge.Payments.Application.Webhooks.ReceivePayMongoWebhook;
 
 public sealed record ReceivePayMongoWebhookCommand(
     string? SignatureHeader,
-    string RawJsonBody) : ICommand<WebhookAckResponse>;
+    string RawJsonBody,
+    string? CorrelationId = null) : ICommand<WebhookAckResponse>;
 
 public sealed record WebhookAckResponse(
     string WebhookEventId,
     string ProviderEventId,
     string EventType,
-    string ProcessingStatus);
+    string ProcessingStatus)
+{
+    public string Status => ProcessingStatus;
+}

@@ -11,6 +11,8 @@ public static class CsvInjectionSafeWriter
 {
     private static readonly SearchValues<char> FormulaPrefixes = SearchValues.Create(['=', '+', '-', '@', '\t', '\r']);
 
+    public static string SanitizeCell(string? value) => EscapeCell(value);
+
     public static string EscapeCell(string? value)
     {
         if (string.IsNullOrEmpty(value))

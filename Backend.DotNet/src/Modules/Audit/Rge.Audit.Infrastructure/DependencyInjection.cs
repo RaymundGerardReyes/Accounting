@@ -17,6 +17,7 @@ public static class DependencyInjection
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddScoped<PgAuditAppender>();
+        services.AddScoped<IAuditStore>(sp => sp.GetRequiredService<PgAuditAppender>());
         services.AddScoped<IAuditTrail>(sp => sp.GetRequiredService<PgAuditAppender>());
         services.AddScoped<Rge.BuildingBlocks.Application.Behaviors.IAuditBehaviorWriter>(sp => sp.GetRequiredService<PgAuditAppender>());
 

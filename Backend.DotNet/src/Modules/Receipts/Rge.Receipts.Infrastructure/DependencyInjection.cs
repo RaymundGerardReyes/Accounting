@@ -106,49 +106,47 @@ public sealed class OrderPaidReceiptOutboxHandler : IOutboxEventHandler
             using JsonDocument doc = JsonDocument.Parse(message.PayloadJson);
             JsonElement root = doc.RootElement;
 
-            if (string.IsNullOrWhiteSpace(orderId) &&
-                root.TryGetProperty("order_id", out JsonElement ordIdEl))
+            if (string.IsNullOrWhiteSpace(orderId))
             {
-                orderId = ordIdEl.GetString();
+                orderId = TryGetString(root, "order_id", "OrderId");
             }
 
-            if (string.IsNullOrWhiteSpace(paymentAttemptId) &&
-                root.TryGetProperty("payment_attempt_id", out JsonElement payIdEl))
+            if (string.IsNullOrWhiteSpace(paymentAttemptId))
             {
-                paymentAttemptId = payIdEl.GetString();
+                paymentAttemptId = TryGetString(root, "payment_attempt_id", "PaymentAttemptId");
             }
 
-            if (root.TryGetProperty("amount_minor", out JsonElement amtEl) && amtEl.TryGetInt64(out long parsedAmt))
+            if (TryGetInt64(root, out long parsedAmt, "amount_minor", "AmountMinor"))
             {
                 amountMinor = parsedAmt;
             }
 
-            if (root.TryGetProperty("currency", out JsonElement currEl) && currEl.GetString() is { Length: > 0 } currStr)
+            if (TryGetString(root, "currency", "Currency") is { Length: > 0 } currStr)
             {
                 currency = currStr;
             }
 
-            if (root.TryGetProperty("order_number", out JsonElement ordNumEl) && ordNumEl.GetString() is { Length: > 0 } ordStr)
+            if (TryGetString(root, "order_number", "OrderNumber") is { Length: > 0 } ordStr)
             {
                 orderNumber = ordStr;
             }
 
-            if (root.TryGetProperty("customer_name", out JsonElement nameEl) && nameEl.GetString() is { Length: > 0 } nameStr)
+            if (TryGetString(root, "customer_name", "CustomerName") is { Length: > 0 } nameStr)
             {
                 customerName = nameStr;
             }
 
-            if (root.TryGetProperty("customer_email", out JsonElement emailEl) && emailEl.GetString() is { Length: > 0 } emailStr)
+            if (TryGetString(root, "customer_email", "CustomerEmail") is { Length: > 0 } emailStr)
             {
                 customerEmail = emailStr;
             }
 
-            if (root.TryGetProperty("description", out JsonElement descEl) && descEl.GetString() is { Length: > 0 } descStr)
+            if (TryGetString(root, "description", "Description") is { Length: > 0 } descStr)
             {
                 description = descStr;
             }
 
-            if (root.TryGetProperty("payment_method", out JsonElement pmEl) && pmEl.GetString() is { Length: > 0 } pmStr)
+            if (TryGetString(root, "payment_method", "PaymentMethod") is { Length: > 0 } pmStr)
             {
                 paymentMethod = pmStr;
             }
@@ -196,6 +194,33 @@ public sealed class OrderPaidReceiptOutboxHandler : IOutboxEventHandler
                 .HandleAsync(new ResendReceiptEmailCommand(paymentAttemptId, customerEmail), cancellationToken)
                 .ConfigureAwait(false);
         }
+    }
+
+    private static string? TryGetString(JsonElement root, string snakeName, string pascalName)
+    {
+        if (root.TryGetProperty(snakeName, out JsonElement el) && el.ValueKind == JsonValueKind.String)
+        {
+            return el.GetString();
+        }
+        if (root.TryGetProperty(pascalName, out JsonElement elPascal) && elPascal.ValueKind == JsonValueKind.String)
+        {
+            return elPascal.GetString();
+        }
+        return null;
+    }
+
+    private static bool TryGetInt64(JsonElement root, out long value, string snakeName, string pascalName)
+    {
+        if (root.TryGetProperty(snakeName, out JsonElement el) && el.TryGetInt64(out value))
+        {
+            return true;
+        }
+        if (root.TryGetProperty(pascalName, out JsonElement elPascal) && elPascal.TryGetInt64(out value))
+        {
+            return true;
+        }
+        value = 0;
+        return false;
     }
 }
 

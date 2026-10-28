@@ -9,6 +9,7 @@ namespace Rge.Audit.Domain;
 public readonly record struct AuditHash : IEquatable<AuditHash>
 {
     public static readonly AuditHash Genesis = new(new string('0', 64));
+    public static readonly AuditHash GenesisPrevHash = Genesis;
 
     public string Value { get; }
 
