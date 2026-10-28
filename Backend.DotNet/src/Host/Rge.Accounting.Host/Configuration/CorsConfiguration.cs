@@ -48,7 +48,7 @@ public static class CorsConfiguration
 
                       .WithMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
 
-                      .WithHeaders("Content-Type", "Authorization", "X-CSRF-Token", "X-Correlation-Id", "Idempotency-Key", "X-Idempotency-Key")
+                      .WithHeaders("Content-Type", "Authorization", "X-CSRF-Token", "X-Correlation-Id", "Idempotency-Key", "X-Idempotency-Key", "X-User-Id", "X-Act-As-User", "X-Google-Forms-Secret", "Paymongo-Signature")
 
                       .WithExposedHeaders("X-Correlation-Id")
 
