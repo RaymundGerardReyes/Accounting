@@ -6,10 +6,14 @@ async function proxyRequest(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> }
 ) {
-  const backendBase =
+  let backendBase =
     process.env.BACKEND_INTERNAL_URL ||
     process.env.BACKEND_API_URL ||
-    "http://127.0.0.1:5000"
+    "http://127.0.0.1:5080"
+
+  if (backendBase.includes(":5000")) {
+    backendBase = backendBase.replace(":5000", ":5080")
+  }
 
   const { path } = await context.params
   const joinedPath = path.join("/")
