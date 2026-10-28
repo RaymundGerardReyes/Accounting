@@ -41,9 +41,10 @@ if ($hasTagPush) {
         Write-Host " 3. Automated agents and scripts are forbidden from pushing tags."
         Write-Host ""
         Write-Host " To push an authorized tag, explicitly execute in your shell:" -ForegroundColor Cyan
-        Write-Host "   `$env:ALLOW_TAG_PUSH = '1'" -ForegroundColor Cyan
-        Write-Host "   git push origin <tag_name>" -ForegroundColor Cyan
-        Write-Host "   Remove-Item Env:ALLOW_TAG_PUSH" -ForegroundColor Cyan
+        Write-Host "   Git Bash / sh:" -ForegroundColor Cyan
+        Write-Host "     ALLOW_TAG_PUSH=1 git push origin <tag_name>" -ForegroundColor White
+        Write-Host "   PowerShell:" -ForegroundColor Cyan
+        Write-Host "     `$env:ALLOW_TAG_PUSH = '1'; git push origin <tag_name>; Remove-Item Env:ALLOW_TAG_PUSH" -ForegroundColor White
         Write-Host "=================================================================" -ForegroundColor Red
         exit 1
     }
