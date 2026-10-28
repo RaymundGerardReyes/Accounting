@@ -6,7 +6,41 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { ShieldCheck, Lock, AlertCircle, ArrowRight } from "lucide-react"
+import { ShieldCheck, Lock, AlertCircle, ArrowRight, Loader2 } from "lucide-react"
+
+function GoogleIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path
+        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.66v3.05h3.9c2.28-2.1 3.645-5.2 3.645-9.15z"
+        fill="#4285F4"
+      />
+      <path
+        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.9-3.05c-1.08.72-2.45 1.16-4.03 1.16-3.1 0-5.74-2.1-6.68-4.93H1.21v3.13C3.26 21.44 7.33 24 12 24z"
+        fill="#34A853"
+      />
+      <path
+        d="M5.32 14.27c-.24-.73-.38-1.5-.38-2.27s.14-1.54.38-2.27V6.6H1.21C.44 8.13 0 9.99 0 12s.44 3.87 1.21 5.4l4.11-3.13z"
+        fill="#FBBC05"
+      />
+      <path
+        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.56 1.21 6.6l4.11 3.13c.94-2.83 3.58-4.98 6.68-4.98z"
+        fill="#EA4335"
+      />
+    </svg>
+  )
+}
+
+function MicrosoftIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="1" y="1" width="9" height="9" fill="#F25022" />
+      <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
+      <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
+      <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
+    </svg>
+  )
+}
 
 export default function LoginPage() {
   const { loginWithCredentials, loginWithOAuth, allUsers, loading } = useAuth()
@@ -14,6 +48,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [oauthProvider, setOauthProvider] = useState<"google" | "microsoft" | null>(null)
+
+  const handleOAuthClick = (provider: "google" | "microsoft") => {
+    setOauthProvider(provider)
+    loginWithOAuth(provider, identifier)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -115,22 +155,35 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               <Button
+                type="button"
                 variant="outline"
-                size="sm"
-                className="text-xs text-muted-foreground"
-                onClick={() => loginWithOAuth("google", identifier)}
+                className="h-10 px-3 border-border/80 bg-background/80 hover:bg-blue-500/5 hover:border-blue-500/40 hover:text-foreground active:scale-[0.98] transition-all duration-150 rounded-lg shadow-2xs font-medium text-xs gap-2.5 justify-center group"
+                disabled={submitting || oauthProvider !== null}
+                onClick={() => handleOAuthClick("google")}
               >
-                Google Workspace
+                {oauthProvider === "google" ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
+                ) : (
+                  <GoogleIcon className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
+                )}
+                <span className="truncate">{oauthProvider === "google" ? "Connecting..." : "Google Workspace"}</span>
               </Button>
+
               <Button
+                type="button"
                 variant="outline"
-                size="sm"
-                className="text-xs text-muted-foreground"
-                onClick={() => loginWithOAuth("microsoft", identifier)}
+                className="h-10 px-3 border-border/80 bg-background/80 hover:bg-sky-500/5 hover:border-sky-500/40 hover:text-foreground active:scale-[0.98] transition-all duration-150 rounded-lg shadow-2xs font-medium text-xs gap-2.5 justify-center group"
+                disabled={submitting || oauthProvider !== null}
+                onClick={() => handleOAuthClick("microsoft")}
               >
-                Microsoft 365
+                {oauthProvider === "microsoft" ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
+                ) : (
+                  <MicrosoftIcon className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
+                )}
+                <span className="truncate">{oauthProvider === "microsoft" ? "Connecting..." : "Microsoft 365"}</span>
               </Button>
             </div>
           </CardContent>
