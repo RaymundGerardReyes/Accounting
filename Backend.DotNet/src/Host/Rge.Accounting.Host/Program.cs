@@ -6,36 +6,16 @@ using Rge.Accounting.Host.Configuration;
 
 using Rge.Accounting.Host.Pipeline;
 
-
-
 var builder = WebApplication.CreateBuilder(args);
 
-
-
 // 1. Harden Kestrel transport & payload limits
-
 builder.ConfigureHardenedKestrel();
-
-
-
 // 2. Fail fast if secrets are missing or using compromised legacy keys in non-Development
-
 SecretsConfiguration.ValidateRequiredSecretsOrThrow(builder.Configuration, builder.Environment);
-
-
-
 // 3. Register platform services, JSON snake_case source-generation, rate limiting, and observability
-
 builder.Services.AddAccountingPlatformHost(builder.Configuration);
-
-
-
 var app = builder.Build();
-
-
-
 // 4. Pre-compute version payload once at startup (zero reflection on hot requests)
-
 var entryAssembly = Assembly.GetEntryAssembly() ?? typeof(Program).Assembly;
 
 string infoVersion = entryAssembly
