@@ -18,5 +18,9 @@ public static class OrderErrors
 
     public static Error InvalidCategory(string category) =>
         Error.Validation("Orders.InvalidCategory", $"Invalid order category '{category}'.");
+
+    public static Error UnknownReferenceCode(string referenceCode) =>
+        Error.Validation("Orders.UnknownReferenceCode", $"Product or department reference '{referenceCode}' was not found in the authoritative catalog.");
 }
+
 
