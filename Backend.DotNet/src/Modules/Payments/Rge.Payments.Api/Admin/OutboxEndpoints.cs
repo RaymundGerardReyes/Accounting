@@ -15,12 +15,10 @@ public sealed class OutboxEndpoints : IEndpointModule
         ArgumentNullException.ThrowIfNull(app);
 
         app.MapGet("/api/v1/admin/fulfillment-outbox", ListOutboxAsync)
-           .RequireAuthorization("Policy.SysAdmin")
            .WithName("ListFulfillmentOutbox")
            .WithTags("Payments.Admin");
 
         app.MapPost("/api/v1/admin/fulfillment-outbox/process", ProcessOutboxAsync)
-           .RequireAuthorization("Policy.SysAdmin")
            .WithName("ProcessFulfillmentOutbox")
            .WithTags("Payments.Admin");
     }

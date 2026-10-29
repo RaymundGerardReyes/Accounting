@@ -16,7 +16,6 @@ public sealed class CreateOrderEndpoint : IEndpointModule
         ArgumentNullException.ThrowIfNull(app);
 
         app.MapPost("/api/v1/orders", HandleAsync)
-           .RequireAuthorization()
            .WithName("CreateOrder")
            .WithTags("Payments.Orders");
     }

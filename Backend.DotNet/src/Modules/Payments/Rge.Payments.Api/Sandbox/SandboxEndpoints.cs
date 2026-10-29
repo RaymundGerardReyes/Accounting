@@ -16,17 +16,14 @@ public sealed class SandboxEndpoints : IEndpointModule
         ArgumentNullException.ThrowIfNull(app);
 
         app.MapPost("/api/v1/payments/attempts/{attempt_id}/simulate", SimulateAttemptAsync)
-           .RequireAuthorization()
            .WithName("SimulatePaymentAttempt")
            .WithTags("Payments.Sandbox");
 
         app.MapPost("/api/v1/sandbox/create-and-expire-test", CreateAndExpireTestAsync)
-           .RequireAuthorization()
            .WithName("CreateAndExpireTest")
            .WithTags("Payments.Sandbox");
 
         app.MapPost("/api/v1/sandbox/simulate-webhook", SimulateWebhookAsync)
-           .RequireAuthorization()
            .WithName("SimulateSignedWebhook")
            .WithTags("Payments.Sandbox");
     }

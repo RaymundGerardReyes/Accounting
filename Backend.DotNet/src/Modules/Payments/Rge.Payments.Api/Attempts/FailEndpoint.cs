@@ -15,7 +15,6 @@ public sealed class FailEndpoint : IEndpointModule
         ArgumentNullException.ThrowIfNull(app);
 
         app.MapPost("/api/v1/payments/{payment_id}/fail", HandleAsync)
-           .RequireAuthorization()
            .WithName("FailPayment")
            .WithTags("Payments.Attempts");
     }

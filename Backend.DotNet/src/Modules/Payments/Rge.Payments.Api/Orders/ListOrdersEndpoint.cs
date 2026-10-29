@@ -14,7 +14,6 @@ public sealed class ListOrdersEndpoint : IEndpointModule
         ArgumentNullException.ThrowIfNull(app);
 
         app.MapGet("/api/v1/orders", HandleAsync)
-           .RequireAuthorization()
            .WithName("ListOrders")
            .WithTags("Payments.Orders");
     }

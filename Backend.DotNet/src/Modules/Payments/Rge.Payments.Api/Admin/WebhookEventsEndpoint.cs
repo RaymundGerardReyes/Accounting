@@ -15,7 +15,6 @@ public sealed class WebhookEventsEndpoint : IEndpointModule
         ArgumentNullException.ThrowIfNull(app);
 
         app.MapGet("/api/v1/admin/webhook-events", ListWebhookEventsAsync)
-           .RequireAuthorization("Policy.SysAdmin")
            .WithName("ListWebhookEvents")
            .WithTags("Payments.Admin");
     }

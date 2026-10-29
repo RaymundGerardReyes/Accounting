@@ -80,6 +80,10 @@ app.UseCors(CorsConfiguration.PolicyName);
 
 app.UseRateLimiter();
 
+app.UseAuthentication();
+
+app.UseAuthorization();
+
 app.UseMiddleware<IdempotencyKeyMiddleware>();
 
 app.UseMiddleware<RequestLoggingEnricher>();

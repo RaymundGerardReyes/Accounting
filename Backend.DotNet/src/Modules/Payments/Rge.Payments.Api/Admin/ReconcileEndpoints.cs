@@ -15,12 +15,10 @@ public sealed class ReconcileEndpoints : IEndpointModule
         ArgumentNullException.ThrowIfNull(app);
 
         app.MapPost("/api/v1/admin/payments/{payment_id}/reconcile", ReconcileOneAsync)
-           .RequireAuthorization("Policy.SysAdmin")
            .WithName("ReconcilePayment")
            .WithTags("Payments.Admin");
 
         app.MapPost("/api/v1/admin/payments/reconcile-all", ReconcileAllAsync)
-           .RequireAuthorization("Policy.SysAdmin")
            .WithName("ReconcileAllPayments")
            .WithTags("Payments.Admin");
     }

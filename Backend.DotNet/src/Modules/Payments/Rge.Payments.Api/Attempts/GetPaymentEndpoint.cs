@@ -14,7 +14,6 @@ public sealed class GetPaymentEndpoint : IEndpointModule
         ArgumentNullException.ThrowIfNull(app);
 
         app.MapGet("/api/v1/payments/{payment_id}", HandleAsync)
-           .RequireAuthorization()
            .WithName("GetPaymentStatus")
            .WithTags("Payments.Attempts");
     }

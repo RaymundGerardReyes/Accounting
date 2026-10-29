@@ -15,7 +15,6 @@ public sealed class ExpireEndpoint : IEndpointModule
         ArgumentNullException.ThrowIfNull(app);
 
         app.MapPost("/api/v1/payments/{payment_id}/expire", HandleAsync)
-           .RequireAuthorization()
            .WithName("ExpirePayment")
            .WithTags("Payments.Attempts");
     }

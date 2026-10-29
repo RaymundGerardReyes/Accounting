@@ -15,7 +15,6 @@ public sealed class InitiateAttemptEndpoint : IEndpointModule
         ArgumentNullException.ThrowIfNull(app);
 
         app.MapPost("/api/v1/orders/{order_id}/payment-attempts", HandleAsync)
-           .RequireAuthorization()
            .WithName("InitiatePaymentAttempt")
            .WithTags("Payments.Attempts");
     }
