@@ -26,3 +26,22 @@ description: .NET 10 Modular Monolith architectural rules, Roslyn compiler guard
   <FrameworkReference Include="Microsoft.AspNetCore.App" />
   ```
   in its `.csproj` file to resolve ASP.NET Core abstractions without pulling mismatched NuGet packages.
+
+## 5. ASP.NET Core Minimal API Authorization Middleware Pipeline Invariant
+- **Invariant**: If any mapped route contains authorization metadata (via `.RequireAuthorization()` or `[Authorize]`), `app.UseAuthentication()` and `app.UseAuthorization()` MUST be invoked in `Program.cs` before endpoint routing.
+- **DI Registration**: `services.AddAuthentication(...)` and `services.AddAuthorizationBuilder()` must be configured in `IServiceCollection` with default challenge schemes and named policies (e.g., `Policy.SysAdmin`).
+- **Failure Mode**: Omitting `app.UseAuthorization()` causes Kestrel's `EndpointMiddleware` to throw `System.InvalidOperationException: Endpoint ... contains authorization metadata, but a middleware was not found that supports authorization`, returning 500 Internal Server Error.
+
+## 6. Public Checkout vs Internal Protected API Boundary
+- **Invariant**: Public customer checkout routes (`/api/v1/orders`, `/api/v1/orders/{id}/payment-attempts`, `/api/v1/payments/{id}`) and developer sandbox inspection endpoints (`/api/v1/sandbox/*`, `/api/v1/admin/fulfillment-outbox`, `/api/v1/admin/webhook-events`) MUST NOT be decorated with `.RequireAuthorization()`.
+- **Rationale**: Next.js client components and guest checkout server actions invoke these endpoints without corporate bearer tokens or employee cookies. Restricting them breaks legacy contract parity and prevents customers or dashboard tabs from loading data.
+- **Pattern**: Enforce authorization strictly on internal corporate finance workflows (cash advances, disbursements, reconciliations) using `ICurrentActor` and role verification.
+
+## 7. Dynamic PaaS & Preview Domain Ingestion in Strict CORS
+- **Invariant**: Kestrel's CORS policy must never rely solely on hardcoded localhost addresses.
+- **Pattern**: In `CorsConfiguration.cs`, dynamically read environment variables (`FRONTEND_ORIGIN`, `NEXT_PUBLIC_APP_DOMAIN`, `APP_DOMAIN`), strip any trailing slashes, and add them to the allowed origins set alongside localhost and production domains.
+
+## 8. Direct Project References for Core SharedKernel Types
+- **Invariant**: Any module or infrastructure project consuming core domain primitives (`Money`, `IClock`, `Result`) must declare a direct `<ProjectReference Include="..\..\..\BuildingBlocks\Rge.BuildingBlocks.SharedKernel\Rge.BuildingBlocks.SharedKernel.csproj" />`.
+- **Rationale**: Relying purely on transitive project dependencies can cause CLR assembly load failures (`FileNotFoundException`) when projects are built or versioned independently under MinVer.
+

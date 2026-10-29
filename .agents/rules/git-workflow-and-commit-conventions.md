@@ -73,3 +73,23 @@ description: Repository rules for Conventional Commits, scoped staging, secret p
    - **SemVer 0.x Meaning**: In `0.x`: MINOR = milestone or breaking change, PATCH = fix. Do not use `-preview.N` as a work counter. Use `-preview`/`-rc` only for builds that are actually deployed to a named environment for testing.
    - **Tag Immutability & Historical Checkpoints**: Never delete or move an existing tag. Existing tags `dotnet/v0.1.0-preview.1` through `.4` are internal checkpoints, not releases.
    - **Migration Invariant**: A language migration is not a MAJOR change. MAJOR changes only when the public API contract breaks, or at the `1.0.0` production gate.
+
+10. **Refspec Case-Sensitivity & Shell-Specific Tag Push Syntax**:
+    - **Branch Name Casing Invariant**: All branch refspecs in Git are strictly case-sensitive. Always verify branch casing (e.g., `migrating-C#` with capital `C`). Attempting to push `migrating-c#` fails immediately with `fatal: migrating-c# cannot be resolved to branch`.
+    - **Pre-Push Tag Authorization by Shell**:
+      - **Git Bash / MINGW64 / Linux / macOS**:
+        ```bash
+        git push origin migrating-C#
+        ALLOW_TAG_PUSH=1 git push origin dotnet/v0.5.0-preview.parity
+        # or together:
+        ALLOW_TAG_PUSH=1 git push origin migrating-C# --tags
+        ```
+      - **Windows PowerShell**:
+        ```powershell
+        git push origin migrating-C#
+        $env:ALLOW_TAG_PUSH = '1'; git push origin dotnet/v0.5.0-preview.parity; Remove-Item Env:ALLOW_TAG_PUSH
+        # or together:
+        $env:ALLOW_TAG_PUSH = '1'; git push origin migrating-C# --tags; Remove-Item Env:ALLOW_TAG_PUSH
+        ```
+      - Never execute PowerShell `$env:` syntax inside Bash, as Bash treats `$env` as a variable and throws `:ALLOW_TAG_PUSH: command not found`.
+
