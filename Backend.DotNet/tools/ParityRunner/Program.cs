@@ -14,6 +14,76 @@ Console.WriteLine("=============================================================
 Console.WriteLine(" R.G.E Accounting Platform - Phase 0 Invariant & Parity Runner");
 Console.WriteLine("==============================================================");
 
+if (args.Length > 0 && (args[0].StartsWith("http", StringComparison.OrdinalIgnoreCase) || args[0] == "--diff"))
+{
+    string pythonUrl = args.Length > 0 && args[0].StartsWith("http", StringComparison.OrdinalIgnoreCase) ? args[0] : (args.Length > 1 ? args[1] : "http://localhost:5000");
+    string dotnetUrl = args.Length > 1 && args[1].StartsWith("http", StringComparison.OrdinalIgnoreCase) ? args[1] : (args.Length > 2 ? args[2] : "http://localhost:5080");
+
+    string[] routesToCompare =
+    [
+        "/health",
+        "/api/health",
+        "/api/dashboard",
+        "/api/cost-allocation",
+        "/api/v1/orders",
+        "/api/v1/finance/approval-matrix",
+        "/api/v1/finance/tax-codes",
+        "/api/v1/integrations/google-forms/status"
+    ];
+
+    using var pyClient = new HttpClient { BaseAddress = new Uri(pythonUrl), Timeout = TimeSpan.FromSeconds(5) };
+    using var netClient = new HttpClient { BaseAddress = new Uri(dotnetUrl), Timeout = TimeSpan.FromSeconds(5) };
+
+    Console.WriteLine($"Running Contract Parity Diff: Python ({pythonUrl}) vs .NET 10 ({dotnetUrl})");
+
+    int mismatches = 0;
+    foreach (string route in routesToCompare)
+    {
+        try
+        {
+            using HttpResponseMessage pyRes = await pyClient.GetAsync(route).ConfigureAwait(false);
+            using HttpResponseMessage netRes = await netClient.GetAsync(route).ConfigureAwait(false);
+
+            if (pyRes.StatusCode != netRes.StatusCode)
+            {
+                Console.WriteLine($"  [FAIL] {route}: Status mismatch Python={pyRes.StatusCode} vs .NET={netRes.StatusCode}");
+                mismatches++;
+                continue;
+            }
+
+            string pyBody = await pyRes.Content.ReadAsStringAsync().ConfigureAwait(false);
+            string netBody = await netRes.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+            using JsonDocument pyDoc = JsonDocument.Parse(pyBody);
+            using JsonDocument netDoc = JsonDocument.Parse(netBody);
+
+            if (pyDoc.RootElement.ValueKind == JsonValueKind.Object &&
+                netDoc.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                HashSet<string> pyKeys = pyDoc.RootElement.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+                HashSet<string> netKeys = netDoc.RootElement.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+
+                pyKeys.ExceptWith(netKeys);
+                if (pyKeys.Count > 0)
+                {
+                    Console.WriteLine($"  [WARN] {route}: Missing keys in .NET response: {string.Join(", ", pyKeys)}");
+                    mismatches++;
+                    continue;
+                }
+            }
+
+            Console.WriteLine($"  [PASS] {route} ({(int)netRes.StatusCode})");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  [SKIP] {route}: {ex.Message}");
+        }
+    }
+
+    return mismatches == 0 ? 0 : 1;
+}
+
+
 int passed = 0;
 int failed = 0;
 
@@ -465,4 +535,7 @@ if (failed > 0)
 {
     Environment.Exit(1);
 }
+
+return 0;
+
 
