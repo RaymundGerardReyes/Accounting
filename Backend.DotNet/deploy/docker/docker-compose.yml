@@ -1,1 +1,43 @@
-﻿
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: rge-accounting-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rge_local_dev_pg_pass_2026}
+      POSTGRES_DB: rge_accounting
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../../db/migrations:/docker-entrypoint-initdb.d/10-migrations:ro
+      - ../../db/functions:/docker-entrypoint-initdb.d/20-functions:ro
+      - ../../db/seed:/docker-entrypoint-initdb.d/30-seed:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rge_accounting"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend-dotnet:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    container_name: rge-accounting-dotnet
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__AccountingDb: "Host=postgres;Port=5432;Database=rge_accounting;Username=postgres;Password=${POSTGRES_PASSWORD:-rge_local_dev_pg_pass_2026};Maximum Pool Size=100;Multiplexing=true"
+      Secrets__PayMongoWebhookSecret: ${PAYMONGO_WEBHOOK_SECRET:-whsec_live_rotated_2026}
+      Secrets__PayMongoSecretKey: ${PAYMONGO_SECRET_KEY:-sk_live_rotated_2026}
+      Secrets__GoogleFormsSecret: ${GOOGLE_FORMS_SECRET:-rge_gforms_rotated_vault_secret_2026}
+      Secrets__FieldEncryptionKeyBase64: ${FIELD_ENCRYPTION_KEY_BASE64:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:

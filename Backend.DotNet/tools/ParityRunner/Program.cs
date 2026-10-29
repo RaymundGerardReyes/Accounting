@@ -296,7 +296,7 @@ Assert("ReceivePayMongoWebhookHandler parses evt_test_999 and returns received",
 
 // 10. Test Tests.Common Infrastructure (FakeClock, WebhookSigner, Builders, Generators)
 Console.WriteLine("\n--- Testing Tests.Common Infrastructure ---");
-var fakeClock = new Rge.Tests.Common.Time.FakeClock(new DateTimeOffset(2026, 10, 25, 0, 0, 0, TimeSpan.Zero));
+var fakeClock = new Rge.Tests.Common.FakeClock(new DateTimeOffset(2026, 10, 25, 0, 0, 0, TimeSpan.Zero));
 fakeClock.Advance(TimeSpan.FromHours(8));
 Assert("FakeClock advances time deterministically", fakeClock.UtcNow.Hour == 8);
 
@@ -526,6 +526,12 @@ Assert("GoldenMasterParityTests.EndToEnd_Order_PayMongoWebhook_Outbox_BirOfficia
 
 await parityTests.Cryptographic_Audit_HashChain_Detects_Zero_Tampering().ConfigureAwait(false);
 Assert("GoldenMasterParityTests.Cryptographic_Audit_HashChain_Detects_Zero_Tampering", true);
+
+// 19. Execute Performance Latency Budget Gate Test Suite (tests/Performance.Tests)
+Console.WriteLine("\n--- Executing Performance Latency Budget Gate Suite (Rge.Performance.Tests) ---");
+var perfTests = new Rge.Performance.Tests.LatencyBudgetGateTests();
+await perfTests.P99_Latency_Budgets_Are_Satisfied_For_Webhooks_Orders_And_Reads().ConfigureAwait(false);
+Assert("LatencyBudgetGateTests.P99_Latency_Budgets_Are_Satisfied_For_Webhooks_Orders_And_Reads", true);
 
 Console.WriteLine("\n==============================================================");
 Console.WriteLine($" RESULTS: {passed} PASSED, {failed} FAILED");

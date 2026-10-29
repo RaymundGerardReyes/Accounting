@@ -13,5 +13,11 @@ public sealed record CreateOrderCommand(
     string? CustomerEmail = null,
     string? CustomerPhone = null,
     IReadOnlyDictionary<string, object?>? Metadata = null,
-    string UserId = "acme_admin") : ICommand<OrderDto>;
+    string UserId = "acme_admin") : ICommand<OrderDto>
+{
+    public CreateOrderCommand(string referenceCode, int quantity = 1)
+        : this(Title: referenceCode, Category: "product_order", ReferenceCode: referenceCode, AmountMinor: null, Quantity: quantity)
+    {
+    }
+}
 

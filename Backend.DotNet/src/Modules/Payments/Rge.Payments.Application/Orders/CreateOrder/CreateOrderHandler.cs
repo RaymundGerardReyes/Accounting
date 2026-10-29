@@ -39,9 +39,13 @@ public sealed class CreateOrderHandler : ICommandHandler<CreateOrderCommand, Ord
 
         DateTimeOffset nowUtc = _clock.UtcNow;
 
+        string refCode = !string.IsNullOrWhiteSpace(command.ReferenceCode)
+            ? command.ReferenceCode.Trim()
+            : (command.Title ?? string.Empty).Trim();
+
         Result<Money> priceResult = _pricingPolicy.CalculateAuthoritativeAmount(
             category: command.Category,
-            referenceCode: command.ReferenceCode,
+            referenceCode: refCode,
             quantity: command.Quantity,
             clientSuppliedAmountMinor: command.AmountMinor);
 
@@ -83,14 +87,14 @@ public sealed class CreateOrderHandler : ICommandHandler<CreateOrderCommand, Ord
         string metadataJson = JsonSerializer.Serialize(metadata);
 
         string effectiveTitle = string.IsNullOrWhiteSpace(command.Title)
-            ? $"Order for {command.ReferenceCode.Trim()}"
+            ? $"Order for {refCode}"
             : command.Title.Trim();
 
         var order = Order.Create(
             orderNumber: orderNumber,
             title: effectiveTitle,
             category: command.Category.Trim().ToLowerInvariant(),
-            referenceCode: command.ReferenceCode.Trim(),
+            referenceCode: refCode,
             authoritativeAmount: priceResult.Value,
             metadataJson: metadataJson,
             nowUtc: nowUtc,

@@ -25,3 +25,4 @@ BEGIN
     RETURN p_prefix || '-' || lpad(v_next::TEXT, GREATEST(p_pad, 1), '0');
 END;
 $$;
+

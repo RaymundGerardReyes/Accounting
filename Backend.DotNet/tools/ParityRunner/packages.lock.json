@@ -414,6 +414,16 @@
           "Rge.Payments.Domain": "[1.0.0, )"
         }
       },
+      "rge.performance.tests": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.NET.Test.Sdk": "[17.12.0, )",
+          "Rge.Accounting.Host": "[1.0.0, )",
+          "Rge.Tests.Common": "[1.0.0, )",
+          "xunit": "[2.9.2, )",
+          "xunit.runner.visualstudio": "[2.8.2, )"
+        }
+      },
       "rge.receipts.api": {
         "type": "Project",
         "dependencies": {
@@ -495,6 +505,12 @@
           "xunit.assert": "2.9.2",
           "xunit.core": "[2.9.2]"
         }
+      },
+      "xunit.runner.visualstudio": {
+        "type": "CentralTransitive",
+        "requested": "[2.8.2, )",
+        "resolved": "2.8.2",
+        "contentHash": "vm1tbfXhFmjFMUmS4M0J0ASXz3/U5XvXBa6DOQUL3fEz4Vt6YPhv+ESCarx6M6D+9kJkJYZKCNvJMas1+nVfmQ=="
       }
     }
   }

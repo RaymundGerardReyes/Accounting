@@ -25,7 +25,8 @@ public sealed record SwitchUserApiRequest(string? TargetUserId = null);
 /// </summary>
 public sealed class AuthEndpoints : IEndpointModule
 {
-    public const string SessionCookieName = "acme_fin_session";
+    public const string SessionCookieName = "rge_session";
+    public const string LegacySessionCookieName = "acme_fin_session";
     public const string CsrfCookieName = "acme_fin_csrf";
     public const int SessionMaxAgeSeconds = 43200; // 12 hours
 
@@ -293,9 +294,18 @@ public sealed class AuthEndpoints : IEndpointModule
         });
     }
 
+    public static string ExtractSessionTokenHash(HttpContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        string? raw = ExtractSessionToken(context);
+        return string.IsNullOrWhiteSpace(raw) ? string.Empty : HashSessionToken(raw);
+    }
+
     private static string? ExtractSessionToken(HttpContext context)
     {
-        if (context.Request.Cookies.TryGetValue(SessionCookieName, out string? cookieToken) && !string.IsNullOrWhiteSpace(cookieToken))
+        if ((context.Request.Cookies.TryGetValue(SessionCookieName, out string? cookieToken) ||
+             context.Request.Cookies.TryGetValue(LegacySessionCookieName, out cookieToken)) &&
+            !string.IsNullOrWhiteSpace(cookieToken))
         {
             return cookieToken;
         }
