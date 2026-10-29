@@ -144,3 +144,4 @@ public sealed class PgSecurityProcedureExecutor
         cmd.Parameters.Add(param);
     }
 }
+

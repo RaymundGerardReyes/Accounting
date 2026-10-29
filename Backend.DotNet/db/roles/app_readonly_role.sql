@@ -12,3 +12,4 @@ $$;
 GRANT USAGE ON SCHEMA public TO rge_app_readonly;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO rge_app_readonly;
 REVOKE SELECT ON public.user_credentials, public.oauth_states FROM rge_app_readonly;
+

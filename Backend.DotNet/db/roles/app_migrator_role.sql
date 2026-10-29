@@ -12,3 +12,4 @@ $$;
 GRANT ALL PRIVILEGES ON SCHEMA public TO rge_app_migrator;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO rge_app_migrator;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO rge_app_migrator;
+

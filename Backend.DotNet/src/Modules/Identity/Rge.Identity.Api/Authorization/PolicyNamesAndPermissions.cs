@@ -48,3 +48,4 @@ public static class PermissionCatalog
         RolePermissions.TryGetValue(role, out string[]? perms) &&
         perms.Contains(permission, StringComparer.OrdinalIgnoreCase);
 }
+

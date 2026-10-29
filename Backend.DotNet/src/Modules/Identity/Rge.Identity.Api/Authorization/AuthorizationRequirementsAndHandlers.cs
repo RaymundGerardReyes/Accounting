@@ -121,3 +121,4 @@ public sealed class SodAuthorizationHandler : AuthorizationHandler<SodRequiremen
         return Task.CompletedTask;
     }
 }
+

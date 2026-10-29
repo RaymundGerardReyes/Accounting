@@ -18,3 +18,4 @@ public sealed class FakeClock : IClock
     public void Advance(TimeSpan delta) => UtcNow = UtcNow.Add(delta);
     public void SetUtcNow(DateTimeOffset value) => UtcNow = value;
 }
+

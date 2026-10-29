@@ -145,3 +145,4 @@ public sealed class SessionAndBearerAuthHandler : AuthenticationHandler<Authenti
         return AuthenticateResult.Success(ticket);
     }
 }
+

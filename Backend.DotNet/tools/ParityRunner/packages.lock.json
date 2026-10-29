@@ -117,7 +117,8 @@
           "Rge.Receipts.Application": "[1.0.0, )",
           "Rge.Receipts.Domain": "[1.0.0, )",
           "Rge.Receipts.Infrastructure": "[1.0.0, )",
-          "xunit": "[2.9.2, )"
+          "xunit": "[2.9.2, )",
+          "xunit.runner.visualstudio": "[2.8.2, )"
         }
       },
       "rge.audit.api": {
@@ -185,7 +186,8 @@
         "dependencies": {
           "Microsoft.NET.Test.Sdk": "[17.12.0, )",
           "Rge.Accounting.Host": "[1.0.0, )",
-          "xunit": "[2.9.2, )"
+          "xunit": "[2.9.2, )",
+          "xunit.runner.visualstudio": "[2.8.2, )"
         }
       },
       "rge.costallocation.api": {
@@ -472,7 +474,8 @@
           "Rge.Finance.Domain": "[1.0.0, )",
           "Rge.Finance.Infrastructure": "[1.0.0, )",
           "Rge.Identity.Infrastructure": "[1.0.0, )",
-          "xunit": "[2.9.2, )"
+          "xunit": "[2.9.2, )",
+          "xunit.runner.visualstudio": "[2.8.2, )"
         }
       },
       "rge.tests.common": {
