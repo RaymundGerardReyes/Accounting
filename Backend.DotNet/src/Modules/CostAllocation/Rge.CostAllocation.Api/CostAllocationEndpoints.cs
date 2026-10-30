@@ -43,8 +43,13 @@ public sealed class CostAllocationEndpoints : IEndpointModule
         app.MapGet("/api/dashboard", (LegacyDashboardReader reader) =>
             Results.Json(reader.BuildDashboardSummary(), JsonDefaults.Options)).WithTags("CostAllocation.Legacy");
 
-        app.MapGet("/api/department/{name}", (string name, HttpContext httpContext, ICostAllocationStore store) =>
+        app.MapGet("/api/department/{name}", (string name, HttpContext httpContext, LegacyDashboardReader reader, ICostAllocationStore store) =>
         {
+            var detail = reader.BuildDepartmentDetail(name);
+            if (detail is not null)
+            {
+                return Results.Json(detail, JsonDefaults.Options);
+            }
             CostDepartmentDto? dept = store.GetDepartmentByName(name);
             return dept is not null
                 ? Results.Json(dept, JsonDefaults.Options)

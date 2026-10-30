@@ -83,14 +83,52 @@ export function Dashboard({ onSelectDepartment }: DashboardProps) {
     return <div className="p-8 text-center text-sm text-muted-foreground">No dashboard data available.</div>
   }
 
-  const { costTrendData, departmentData, departmentMetrics, varianceTrendData } = data
+  const costTrendData = data?.costTrendData ?? (data as any)?.cost_trend_data ?? []
+  const rawDepartmentData = data?.departmentData ?? (data as any)?.department_data
+  const rawDepartmentMetrics = data?.departmentMetrics ?? (data as any)?.department_metrics
+  const varianceTrendData = data?.varianceTrendData ?? (data as any)?.variance_trend_data ?? []
 
-  const totalAllocated = departmentMetrics.reduce((sum, dept) => sum + dept.allocated, 0)
-  const totalActual = departmentMetrics.reduce((sum, dept) => sum + dept.actual, 0)
+  const departmentMetrics: any[] = (
+    Array.isArray(rawDepartmentMetrics)
+      ? rawDepartmentMetrics
+      : Array.isArray((data as any)?.departments)
+        ? (data as any).departments
+        : []
+  ).map((d: any) => {
+    const budgetLimit = d.budget_limit_minor ?? d.budgetLimitMinor
+    const totalCost = d.total_cost_minor ?? d.totalCostMinor
+    const allocated = d.allocated ?? (budgetLimit !== undefined ? budgetLimit / 100 : 0)
+    const actual = d.actual ?? (totalCost !== undefined ? totalCost / 100 : 0)
+    const variance = d.variance ?? (allocated - actual)
+    const status = d.status ?? (variance < 0 ? "unfavorable" : variance > 0 ? "favorable" : "neutral")
+    const variancePercent = d.variancePercent ?? d.variance_percent ?? (allocated > 0 ? Number(((variance / allocated) * 100).toFixed(1)) : 0)
+    return {
+      name: d.name ?? d.Name ?? "Unknown",
+      allocated,
+      actual,
+      variance,
+      status,
+      variancePercent,
+    }
+  })
+
+  const departmentData: any[] = Array.isArray(rawDepartmentData) && rawDepartmentData.length > 0
+    ? rawDepartmentData
+    : departmentMetrics.map((dept, index) => {
+        const totalActualAll = departmentMetrics.reduce((sum, d) => sum + (d.actual || 0), 0) || 1
+        return {
+          name: dept.name,
+          value: Number(((dept.actual / totalActualAll) * 100).toFixed(1)),
+          color: `hsl(var(--color-chart-${(index % 5) + 1}))`,
+        }
+      })
+
+  const totalAllocated = departmentMetrics.reduce((sum, dept) => sum + (dept?.allocated || 0), 0)
+  const totalActual = departmentMetrics.reduce((sum, dept) => sum + (dept?.actual || 0), 0)
   const totalVariance = totalAllocated - totalActual
   const isOverBudget = totalVariance < 0
-  const favorableCount = departmentMetrics.filter((d) => d.status === "favorable").length
-  const unfavorableCount = departmentMetrics.filter((d) => d.status === "unfavorable").length
+  const favorableCount = departmentMetrics.filter((d) => d?.status === "favorable").length
+  const unfavorableCount = departmentMetrics.filter((d) => d?.status === "unfavorable").length
 
   // Strict palette shades for pie slices (Black, Red, and Neutrals)
   const PIE_COLORS = [
@@ -363,8 +401,8 @@ export function Dashboard({ onSelectDepartment }: DashboardProps) {
                       </span>
                     </div>
                     <div className="flex gap-6 text-xs text-muted-foreground font-mono tabular-nums">
-                      <span>Allocated: ₱{(dept.allocated / 1000).toFixed(0)}K</span>
-                      <span>Actual: ₱{(dept.actual / 1000).toFixed(0)}K</span>
+                      <span>Allocated: ₱{((dept.allocated || 0) / 1000).toFixed(0)}K</span>
+                      <span>Actual: ₱{((dept.actual || 0) / 1000).toFixed(0)}K</span>
                     </div>
                   </div>
 
@@ -375,11 +413,11 @@ export function Dashboard({ onSelectDepartment }: DashboardProps) {
                       }`}
                     >
                       <div className="text-sm font-bold">
-                        {dept.variance > 0 ? "+" : ""}₱{Math.abs(dept.variance / 1000).toFixed(1)}K
+                        {dept.variance > 0 ? "+" : ""}₱{Math.abs((dept.variance || 0) / 1000).toFixed(1)}K
                       </div>
                       <div className="text-[11px] text-muted-foreground">
-                        {dept.variancePercent > 0 ? "+" : ""}
-                        {dept.variancePercent.toFixed(1)}%
+                        {(dept.variancePercent ?? 0) > 0 ? "+" : ""}
+                        {(dept.variancePercent ?? 0).toFixed(1)}%
                       </div>
                     </div>
                     <Button
