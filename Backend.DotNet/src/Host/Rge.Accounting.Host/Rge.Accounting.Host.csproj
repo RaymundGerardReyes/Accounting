@@ -19,4 +19,9 @@
     <ProjectReference Include="..\..\Modules\Integrations\Rge.Integrations.Api\Rge.Integrations.Api.csproj" />
     <ProjectReference Include="..\..\Modules\Integrations\Rge.Integrations.Infrastructure\Rge.Integrations.Infrastructure.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\..\data\**\*.*" Link="data\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 </Project>

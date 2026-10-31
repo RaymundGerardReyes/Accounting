@@ -32,17 +32,8 @@ public sealed class JsonProductCatalog : IProductCatalog
     {
         try
         {
-            string candidatePath = Path.Combine(AppContext.BaseDirectory, "data", "product_data.json");
-            if (!File.Exists(candidatePath))
-            {
-                candidatePath = Path.Combine(Directory.GetCurrentDirectory(), "data", "product_data.json");
-            }
-            if (!File.Exists(candidatePath))
-            {
-                candidatePath = Path.Combine(Directory.GetCurrentDirectory(), "..", "Backend", "data", "product_data.json");
-            }
-
-            if (File.Exists(candidatePath))
+            string? candidatePath = LocateProductDataFile();
+            if (candidatePath is not null && File.Exists(candidatePath))
             {
                 string json = File.ReadAllText(candidatePath);
                 using JsonDocument doc = JsonDocument.Parse(json);
@@ -65,6 +56,56 @@ public sealed class JsonProductCatalog : IProductCatalog
         catch (Exception ex) when (ex is IOException or JsonException)
         {
         }
+    }
+
+    private static string? LocateProductDataFile()
+    {
+        string[] candidates =
+        [
+            Path.Combine(AppContext.BaseDirectory, "data", "product_data.json"),
+            Path.Combine(AppContext.BaseDirectory, "Backend.DotNet", "data", "product_data.json"),
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "Backend.DotNet", "data", "product_data.json"),
+            Path.Combine(Directory.GetCurrentDirectory(), "data", "product_data.json"),
+            Path.Combine(Directory.GetCurrentDirectory(), "Backend.DotNet", "data", "product_data.json"),
+            Path.Combine(Directory.GetCurrentDirectory(), "..", "Backend.DotNet", "data", "product_data.json"),
+            Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "Backend.DotNet", "data", "product_data.json")
+        ];
+
+        foreach (string candidate in candidates)
+        {
+            try
+            {
+                string fullPath = Path.GetFullPath(candidate);
+                if (File.Exists(fullPath))
+                {
+                    return fullPath;
+                }
+            }
+            catch
+            {
+                // Ignore path resolution errors
+            }
+        }
+
+        DirectoryInfo? current = new DirectoryInfo(Directory.GetCurrentDirectory());
+        while (current is not null)
+        {
+            string checkDotNet = Path.Combine(current.FullName, "Backend.DotNet", "data", "product_data.json");
+            if (File.Exists(checkDotNet))
+            {
+                return checkDotNet;
+            }
+
+            string checkDirect = Path.Combine(current.FullName, "data", "product_data.json");
+            if (File.Exists(checkDirect))
+            {
+                return checkDirect;
+            }
+
+            current = current.Parent;
+        }
+
+        return null;
     }
 
     public Task<int?> GetUnitPricePesosAsync(string productCode, CancellationToken cancellationToken = default)

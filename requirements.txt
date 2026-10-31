@@ -1,3 +1,3 @@
--r Backend/requirements.txt
-gunicorn>=22.0.0
+# Python legacy requirements retired on migrating-C# branch (preserved on legacy-python branch)
+
 
