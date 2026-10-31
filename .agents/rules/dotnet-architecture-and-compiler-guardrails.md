@@ -45,3 +45,23 @@ description: .NET 10 Modular Monolith architectural rules, Roslyn compiler guard
 - **Invariant**: Any module or infrastructure project consuming core domain primitives (`Money`, `IClock`, `Result`) must declare a direct `<ProjectReference Include="..\..\..\BuildingBlocks\Rge.BuildingBlocks.SharedKernel\Rge.BuildingBlocks.SharedKernel.csproj" />`.
 - **Rationale**: Relying purely on transitive project dependencies can cause CLR assembly load failures (`FileNotFoundException`) when projects are built or versioned independently under MinVer.
 
+## 9. Minimal API JSON Property Serialization Collision Invariant
+- **Invariant**: When returning anonymous types or records from endpoints with `JsonNamingPolicy.SnakeCaseLower`, **never manually project both camelCase and snake_case properties** for the same data element (e.g. `costBreakdown` and `cost_breakdown`).
+- **Rationale**: The serializer's naming policy converts `costBreakdown` to `cost_breakdown`, colliding with the existing property key and throwing `System.InvalidOperationException: The JSON property name for '<>f__AnonymousType...cost_breakdown' collides with another property` (500 Internal Server Error).
+- **Pattern**: Let the serializer's `PropertyNamingPolicy` handle the case transformation, or use explicit snake_case naming exclusively across all properties in the anonymous object.
+
+## 10. Session Token Cookie Authentication Scheme Invariant
+- **Invariant**: In platforms where sessions are hashed and validated via a custom database or cache store (e.g. `rge_session`), `SessionAndBearerAuthHandler` (or equivalent custom token scheme) MUST be registered as `options.DefaultScheme` and `options.DefaultChallengeScheme`.
+- **Rationale**: Registering `AddCookie()` sets the default handler to ASP.NET Core Data Protection cookies, which expects encrypted tickets and fails with `Cookies was not authenticated. Failure message: Unprotect ticket failed` when receiving platform session tokens.
+- **Pattern**:
+  ```csharp
+  services.AddAuthentication(options =>
+  {
+      options.DefaultScheme = SessionAndBearerAuthHandler.SchemeName;
+      options.DefaultChallengeScheme = SessionAndBearerAuthHandler.SchemeName;
+  })
+  .AddScheme<AuthenticationSchemeOptions, SessionAndBearerAuthHandler>(
+      SessionAndBearerAuthHandler.SchemeName, _ => { });
+  ```
+
+
