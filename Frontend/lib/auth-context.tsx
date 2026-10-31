@@ -150,13 +150,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const switchPersona = async (targetUserId: string) => {
-    const data = await apiFetch<{ user: FinanceUser }>("/auth/switch-user", {
-      method: "POST",
-      csrfToken,
-      body: { targetUserId },
-    })
-    if (data?.user) {
-      setUser(data.user)
+    try {
+      const data = await apiFetch<{ user: FinanceUser }>("/auth/switch-user", {
+        method: "POST",
+        csrfToken,
+        body: { targetUserId, target_user_id: targetUserId },
+      })
+      if (data?.user) {
+        const matched = allUsers.find((u) => u.id === data.user.id)
+        setUser(matched ? { ...matched, ...data.user } : data.user)
+      }
+    } catch (err: any) {
+      console.warn("Switch persona failed:", err?.message || err)
     }
   }
 

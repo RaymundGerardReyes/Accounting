@@ -63,10 +63,15 @@ export async function apiFetch<T = any>(
   const data = isJson ? await response.json() : await response.text()
 
   if (!response.ok) {
-    const errorDetail =
-      typeof data === "object" && data !== null
-        ? data.detail || data.error || response.statusText
-        : response.statusText
+    let errorDetail = response.statusText
+    if (typeof data === "object" && data !== null) {
+      errorDetail =
+        data.message ||
+        data.detail ||
+        data.error_description ||
+        data.error ||
+        response.statusText
+    }
     throw new Error(errorDetail)
   }
 
