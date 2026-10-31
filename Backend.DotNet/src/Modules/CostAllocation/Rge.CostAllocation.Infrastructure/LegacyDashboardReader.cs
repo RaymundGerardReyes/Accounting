@@ -80,17 +80,68 @@ public sealed class LegacyDashboardReader
     public object BuildVarianceAnalysis()
     {
         CostAllocationSnapshotDto snapshot = _store.GetSnapshot();
+
+        var varianceData = new[]
+        {
+            new { category = "Labor", budget = 180000.0, actual = 185000.0, variance = -5000.0, variance_percent = -2.8 },
+            new { category = "Materials", budget = 150000.0, actual = 148000.0, variance = 2000.0, variance_percent = 1.3 },
+            new { category = "Overhead", budget = 90000.0, actual = 92000.0, variance = -2000.0, variance_percent = -2.2 },
+            new { category = "Utilities", budget = 30000.0, actual = 28000.0, variance = 2000.0, variance_percent = 6.7 }
+        };
+
+        var monthlyVariance = new[]
+        {
+            new { month = "Jan", variance = -3000.0, percentage = -2.4, favorable = 0, unfavorable = 1 },
+            new { month = "Feb", variance = 2500.0, percentage = 1.9, favorable = 1, unfavorable = 0 },
+            new { month = "Mar", variance = -7000.0, percentage = -5.5, favorable = 0, unfavorable = 1 },
+            new { month = "Apr", variance = 2000.0, percentage = 1.4, favorable = 1, unfavorable = 0 },
+            new { month = "May", variance = 3000.0, percentage = 2.1, favorable = 1, unfavorable = 0 },
+            new { month = "Jun", variance = -3000.0, percentage = -2.0, favorable = 0, unfavorable = 1 }
+        };
+
+        var varianceReasons = new[]
+        {
+            new { reason = "Labor Rate Variance", amount = -4500.0, type = "unfavorable", impact = "High" },
+            new { reason = "Material Price Variance", amount = 1800.0, type = "favorable", impact = "Medium" },
+            new { reason = "Overhead Allocation", amount = -2000.0, type = "unfavorable", impact = "Medium" },
+            new { reason = "Efficiency Variance", amount = 3200.0, type = "favorable", impact = "High" },
+            new { reason = "Volume Variance", amount = -1200.0, type = "unfavorable", impact = "Low" }
+        };
+
+        var departmentVariance = snapshot.Departments.Count > 0
+            ? snapshot.Departments.Select(static d => new
+            {
+                department = d.Name,
+                budget = d.BudgetLimitMinor / 100.0,
+                actual = d.TotalCostMinor / 100.0,
+                variance = (d.BudgetLimitMinor - d.TotalCostMinor) / 100.0,
+                status = d.VarianceMinor < 0 ? "unfavorable" : d.VarianceMinor > 0 ? "favorable" : "neutral"
+            }).ToArray()
+            :
+            [
+                new { department = "Manufacturing", budget = 450000.0, actual = 465000.0, variance = -15000.0, status = "unfavorable" },
+                new { department = "Assembly", budget = 300000.0, actual = 292000.0, variance = 8000.0, status = "favorable" },
+                new { department = "QA", budget = 150000.0, actual = 148000.0, variance = 2000.0, status = "favorable" },
+                new { department = "Logistics", budget = 100000.0, actual = 100000.0, variance = 0.0, status = "neutral" }
+            ];
+
+        var variances = snapshot.Departments.Select(static d => new
+        {
+            department = d.Name,
+            budget_limit_minor = d.BudgetLimitMinor,
+            actual_total_minor = d.TotalCostMinor,
+            variance_minor = d.VarianceMinor,
+            is_favorable = d.VarianceMinor >= 0
+        }).ToList();
+
         return new
         {
             currency = snapshot.Currency,
-            variances = snapshot.Departments.Select(static d => new
-            {
-                department = d.Name,
-                budget_limit_minor = d.BudgetLimitMinor,
-                actual_total_minor = d.TotalCostMinor,
-                variance_minor = d.VarianceMinor,
-                is_favorable = d.VarianceMinor >= 0
-            }).ToList()
+            variance_data = varianceData,
+            monthly_variance = monthlyVariance,
+            variance_reasons = varianceReasons,
+            department_variance = departmentVariance,
+            variances = variances
         };
     }
 

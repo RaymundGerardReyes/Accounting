@@ -91,6 +91,50 @@ public sealed class ChallengerVerificationTests
         }
     }
 
+    [Fact]
+    public void LegacyDashboardReader_BuildVarianceAnalysis_Serializes_Without_SnakeCase_Collision()
+    {
+        var store = new JsonConfigurationStore();
+        var reader = new LegacyDashboardReader(store);
+
+        object varianceAnalysis = reader.BuildVarianceAnalysis();
+
+        // Must serialize cleanly with snake_case naming policy
+        string json = JsonSerializer.Serialize(varianceAnalysis, JsonDefaults.Options);
+        Assert.NotNull(json);
+        Assert.NotEmpty(json);
+
+        using var doc = JsonDocument.Parse(json);
+        JsonElement root = doc.RootElement;
+
+        // Verify top-level snake_case properties exist and camelCase ones do not collide
+        Assert.True(root.TryGetProperty("variance_data", out JsonElement varData));
+        Assert.False(root.TryGetProperty("varianceData", out _));
+
+        Assert.True(root.TryGetProperty("monthly_variance", out JsonElement monthlyVar));
+        Assert.False(root.TryGetProperty("monthlyVariance", out _));
+
+        Assert.True(root.TryGetProperty("variance_reasons", out JsonElement varReasons));
+        Assert.False(root.TryGetProperty("varianceReasons", out _));
+
+        Assert.True(root.TryGetProperty("department_variance", out JsonElement deptVar));
+        Assert.False(root.TryGetProperty("departmentVariance", out _));
+
+        Assert.True(root.TryGetProperty("variances", out _));
+        Assert.True(root.TryGetProperty("currency", out _));
+
+        // Verify items in variance_data
+        foreach (JsonElement item in varData.EnumerateArray())
+        {
+            Assert.True(item.TryGetProperty("category", out _));
+            Assert.True(item.TryGetProperty("budget", out _));
+            Assert.True(item.TryGetProperty("actual", out _));
+            Assert.True(item.TryGetProperty("variance", out _));
+            Assert.True(item.TryGetProperty("variance_percent", out _));
+            Assert.False(item.TryGetProperty("variancePercent", out _));
+        }
+    }
+
     [Theory]
     [InlineData("manufacturing")]
     [InlineData("dept_mfg")]
