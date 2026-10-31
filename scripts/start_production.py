@@ -3,15 +3,16 @@
 scripts/start_production.py
 Unified Production Process Supervisor for Heroku Dynos
 
-Runs FastAPI Backend on internal loopback (127.0.0.1) and Next.js Frontend
-bound to Heroku's assigned dynamic $PORT (0.0.0.0:$PORT).
+Supervises the C# ASP.NET Core (.NET 10) Modular Monolith Backend on internal loopback
+(127.0.0.1:5080) and Next.js Frontend bound to Heroku's assigned dynamic $PORT (0.0.0.0:$PORT).
 Ensures zero-latency internal API reverse proxying, robust health readiness checks,
-and graceful shutdown on SIGTERM / SIGINT.
+intelligent environment variable mapping for Heroku, and graceful shutdown on SIGTERM / SIGINT.
 """
 
 import os
 import sys
 import time
+import shutil
 import signal
 import urllib.request
 import urllib.error
@@ -83,27 +84,123 @@ def cleanup(signum=None, frame=None):
     sys.exit(0)
 
 
-def wait_for_backend_health(url: str, timeout: int = 30) -> bool:
-    log(f"Waiting for FastAPI backend readiness at {url} (timeout: {timeout}s)...")
+def wait_for_backend_health(url: str, timeout: int = 35) -> bool:
+    log(f"Waiting for .NET backend readiness at {url} (timeout: {timeout}s)...")
     start_time = time.time()
-    # Give uvicorn a brief moment for socket binding
     time.sleep(0.5)
     while time.time() - start_time < timeout:
-        if backend_proc.poll() is not None:
+        if backend_proc and backend_proc.poll() is not None:
             time.sleep(0.5)
-            log(f"Backend process terminated prematurely with code {backend_proc.returncode}!")
+            log(f"Backend process terminated prematurely with exit code {backend_proc.returncode}!")
             return False
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "HerokuHealthCheck/1.0"})
             with urllib.request.urlopen(req, timeout=1.5) as resp:
                 if resp.status in (200, 204):
-                    log(f"FastAPI backend is healthy! (HTTP {resp.status})")
+                    log(f".NET backend is healthy! (HTTP {resp.status})")
                     return True
         except Exception:
             pass
         time.sleep(0.5)
     log(f"Backend health check timed out after {timeout} seconds.")
     return False
+
+
+def resolve_dotnet_executable() -> str | None:
+    """Finds the dotnet executable in PATH or standard Heroku installation paths."""
+    candidate = shutil.which("dotnet")
+    if candidate:
+        return candidate
+
+    common_paths = [
+        Path("/app/.dotnet/dotnet"),
+        Path("/app/.heroku/dotnet/dotnet"),
+        Path("/usr/share/dotnet/dotnet"),
+        Path("/usr/bin/dotnet"),
+        Path.home() / ".dotnet" / "dotnet",
+    ]
+    for p in common_paths:
+        if p.exists() and (os.access(p, os.X_OK) or sys.platform == "win32"):
+            return str(p)
+
+    return None
+
+
+def resolve_backend_command(internal_port: int, env: dict) -> tuple[list[str], Path]:
+    """
+    Resolves the startup command for the C# ASP.NET Core (.NET 10) Modular Monolith backend.
+    Searches for pre-compiled standalone DLL first, then project-based execution via dotnet run.
+    """
+    dotnet_bin = resolve_dotnet_executable()
+
+    if dotnet_bin:
+        log(f"Found .NET runtime: {dotnet_bin}")
+        dotnet_dir = str(Path(dotnet_bin).parent)
+        current_path = env.get("PATH", "")
+        if dotnet_dir not in current_path:
+            env["PATH"] = f"{dotnet_dir}:{current_path}" if sys.platform != "win32" else f"{dotnet_dir};{current_path}"
+
+        # 1. Check for pre-published standalone DLL
+        dll_candidates = [
+            BACKEND_DIR / "publish" / "Rge.Accounting.Host.dll",
+            ROOT_DIR / "publish" / "Rge.Accounting.Host.dll",
+            BACKEND_DIR / "src" / "Host" / "Rge.Accounting.Host" / "bin" / "Release" / "net10.0" / "publish" / "Rge.Accounting.Host.dll",
+            BACKEND_DIR / "src" / "Host" / "Rge.Accounting.Host" / "bin" / "Release" / "net10.0" / "Rge.Accounting.Host.dll",
+        ]
+
+        for dll in dll_candidates:
+            if dll.exists():
+                log(f"Found compiled .NET Host assembly: {dll}")
+                cmd = [
+                    dotnet_bin,
+                    str(dll),
+                    "--urls",
+                    f"http://127.0.0.1:{internal_port}",
+                ]
+                return cmd, dll.parent
+
+        # 2. Fallback to running project via dotnet run
+        csproj_path = BACKEND_DIR / "src" / "Host" / "Rge.Accounting.Host" / "Rge.Accounting.Host.csproj"
+        if csproj_path.exists():
+            log(f"Running .NET Host via project: {csproj_path}")
+            cmd = [
+                dotnet_bin,
+                "run",
+                "--project",
+                str(csproj_path),
+                "--configuration",
+                "Release",
+                "--urls",
+                f"http://127.0.0.1:{internal_port}",
+            ]
+            return cmd, BACKEND_DIR
+
+    # 3. Dynamic search for compiled Host assembly (excluding obj directories)
+    for dll in BACKEND_DIR.glob("**/Rge.Accounting.Host.dll"):
+        if "obj" not in dll.parts:
+            log(f"Found compiled .NET Host assembly via search: {dll}")
+            cmd = [
+                dotnet_bin,
+                str(dll),
+                "--urls",
+                f"http://127.0.0.1:{internal_port}",
+            ]
+            return cmd, dll.parent
+
+    # 4. Error state: neither .NET runtime nor project found
+    error_msg = (
+        "=================================================================\n"
+        "FATAL: Unable to launch .NET backend process on Heroku Dyno!\n"
+        "1. The .NET runtime ('dotnet') was not found in PATH or standard Heroku paths.\n"
+        "2. All legacy Python backend logic has been permanently retired.\n\n"
+        "Resolution:\n"
+        "Configure the .NET buildpack on your Heroku application:\n"
+        "  heroku buildpacks:add --index 1 https://github.com/jincod/dotnetcore-buildpack.git -a <app-name>\n"
+        "  heroku config:set PROJECT_FILE=Backend/src/Host/Rge.Accounting.Host/Rge.Accounting.Host.csproj -a <app-name>\n"
+        "================================================================="
+    )
+    log(error_msg)
+    raise RuntimeError(error_msg)
 
 
 def main():
@@ -121,56 +218,80 @@ def main():
     except ValueError:
         heroku_port = 3000
 
-    # Avoid port collision if Heroku happens to assign port 5000
-    internal_backend_port = 5001 if heroku_port == 5000 else 5000
+    # Default internal loopback port for .NET Host is 5080 (aligned with Next.js proxy)
+    internal_backend_port = 5081 if heroku_port == 5080 else 5080
     backend_internal_url = f"http://127.0.0.1:{internal_backend_port}"
 
-    # Inherit and inject BACKEND_INTERNAL_URL and BACKEND_API_URL into environment for Next.js proxy
+    # Prepare environment
     env = os.environ.copy()
     env["BACKEND_INTERNAL_URL"] = backend_internal_url
     env["BACKEND_API_URL"] = backend_internal_url
+    env["ASPNETCORE_URLS"] = backend_internal_url
     env["PYTHONUNBUFFERED"] = "1"
-    # Ensure Uvicorn runs in single-process mode on internal loopback, avoiding Multiprocess signals
     env["WEB_CONCURRENCY"] = "1"
 
+    # Set ASPNETCORE_ENVIRONMENT to Production if not set
+    if "ASPNETCORE_ENVIRONMENT" not in env:
+        env["ASPNETCORE_ENVIRONMENT"] = "Production"
+
+    # Map Heroku flat environment variables to ASP.NET Core hierarchical format
+    db_url = env.get("DATABASE_URL")
+    if db_url:
+        if db_url.startswith("postgres://"):
+            db_url = "postgresql://" + db_url[len("postgres://"):]
+        if "ConnectionStrings__AccountingDb" not in env:
+            env["ConnectionStrings__AccountingDb"] = db_url
+
+    if "PAYMONGO_SECRET_KEY" in env and "Secrets__PayMongoSecretKey" not in env:
+        env["Secrets__PayMongoSecretKey"] = env["PAYMONGO_SECRET_KEY"]
+
+    if "PAYMONGO_WEBHOOK_SECRET_KEY" in env and "Secrets__PayMongoWebhookSecret" not in env:
+        env["Secrets__PayMongoWebhookSecret"] = env["PAYMONGO_WEBHOOK_SECRET_KEY"]
+    elif "PAYMONGO_WEBHOOK_SECRET" in env and "Secrets__PayMongoWebhookSecret" not in env:
+        env["Secrets__PayMongoWebhookSecret"] = env["PAYMONGO_WEBHOOK_SECRET"]
+
+    if "GOOGLE_FORMS_WEBHOOK_SECRET" in env and "Secrets__GoogleFormsSecret" not in env:
+        env["Secrets__GoogleFormsSecret"] = env["GOOGLE_FORMS_WEBHOOK_SECRET"]
+    elif "GOOGLE_FORMS_SECRET" in env and "Secrets__GoogleFormsSecret" not in env:
+        env["Secrets__GoogleFormsSecret"] = env["GOOGLE_FORMS_SECRET"]
+
+    if "FIELD_ENCRYPTION_KEY_BASE64" in env and "Secrets__FieldEncryptionKeyBase64" not in env:
+        env["Secrets__FieldEncryptionKeyBase64"] = env["FIELD_ENCRYPTION_KEY_BASE64"]
+    elif "FIELD_ENCRYPTION_KEY" in env and "Secrets__FieldEncryptionKeyBase64" not in env:
+        env["Secrets__FieldEncryptionKeyBase64"] = env["FIELD_ENCRYPTION_KEY"]
+
     log("=================================================================")
-    log("  R.G.E Accounting Firm Inc. Production Supervisor Dyno")
-    log(f"  Heroku Public Port:       {heroku_port}")
-    log(f"  FastAPI Internal Loopback: {backend_internal_url}")
+    log("  R.G.E Accounting Platform Production Supervisor Dyno")
+    log(f"  Heroku Public Port:        {heroku_port}")
+    log(f"  Backend Internal Loopback: {backend_internal_url}")
     log("=================================================================")
 
-    # 1. Start FastAPI Backend (single-process mode with isolated stdin)
-    backend_cmd = [
-        sys.executable,
-        "-m",
-        "uvicorn",
-        "app:app",
-        "--app-dir",
-        str(BACKEND_DIR),
-        "--host",
-        "127.0.0.1",
-        "--port",
-        str(internal_backend_port),
-        "--workers",
-        "1",
-    ]
+    # 1. Resolve and start Backend
+    try:
+        backend_cmd, backend_cwd = resolve_backend_command(internal_backend_port, env)
+    except Exception as e:
+        log(f"Failed to resolve backend command: {e}")
+        sys.exit(1)
 
     log(f"Starting Backend: {' '.join(backend_cmd)}")
     backend_proc = subprocess.Popen(
         backend_cmd,
-        cwd=str(BACKEND_DIR),
+        cwd=str(backend_cwd),
         env=env,
         stdin=subprocess.DEVNULL,
     )
 
-    # 2. Wait for backend readiness
-    health_url = f"{backend_internal_url}/api/health"
-    if not wait_for_backend_health(health_url, timeout=30):
-        log("Backend failed to start properly. Aborting dyno startup.")
-        cleanup()
-        sys.exit(1)
+    # 2. Wait for backend readiness (/health probe)
+    health_url = f"{backend_internal_url}/health"
+    if not wait_for_backend_health(health_url, timeout=35):
+        # Retry with /api/health before aborting
+        api_health_url = f"{backend_internal_url}/api/health"
+        if not wait_for_backend_health(api_health_url, timeout=10):
+            log("Backend failed to start properly or respond to health probe. Aborting dyno startup.")
+            cleanup()
+            sys.exit(1)
 
-    # 3. Start Next.js Frontend (with isolated stdin)
+    # 3. Start Next.js Frontend
     next_bin = FRONTEND_DIR / "node_modules" / "next" / "dist" / "bin" / "next"
     if next_bin.exists():
         frontend_cmd = [
@@ -183,7 +304,6 @@ def main():
             "0.0.0.0",
         ]
     else:
-        # Fallback to npx next start
         frontend_cmd = [
             "npx",
             "next",
@@ -202,18 +322,16 @@ def main():
         stdin=subprocess.DEVNULL,
     )
 
-    log("Both services launched. Monitoring supervisor loop...")
+    log("Both services launched and healthy. Monitoring supervisor loop...")
 
     # 4. Supervisor loop
     while True:
-        # Check backend
         b_code = backend_proc.poll()
         if b_code is not None:
             log(f"Backend exited unexpectedly with exit code {b_code}!")
             cleanup()
             sys.exit(b_code)
 
-        # Check frontend
         f_code = frontend_proc.poll()
         if f_code is not None:
             log(f"Frontend exited unexpectedly with exit code {f_code}!")
@@ -225,4 +343,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -18,20 +18,20 @@ public static class SecretsConfiguration
 
         var missingOrInvalid = new List<string>();
 
-        RequireNonEmpty(configuration, "ConnectionStrings:AccountingDb", missingOrInvalid);
-        RequireNonEmpty(configuration, "Secrets:PayMongoWebhookSecret", missingOrInvalid);
-        RequireNonEmpty(configuration, "Secrets:PayMongoSecretKey", missingOrInvalid);
-        RequireNonEmpty(configuration, "Secrets:GoogleFormsSecret", missingOrInvalid);
-        RequireNonEmpty(configuration, "Secrets:FieldEncryptionKeyBase64", missingOrInvalid);
+        RequireSecret(configuration, "ConnectionStrings:AccountingDb", ["ConnectionStrings__AccountingDb", "DATABASE_URL"], missingOrInvalid);
+        RequireSecret(configuration, "Secrets:PayMongoWebhookSecret", ["Secrets__PayMongoWebhookSecret", "PAYMONGO_WEBHOOK_SECRET_KEY", "PAYMONGO_WEBHOOK_SECRET"], missingOrInvalid);
+        RequireSecret(configuration, "Secrets:PayMongoSecretKey", ["Secrets__PayMongoSecretKey", "PAYMONGO_SECRET_KEY"], missingOrInvalid);
+        RequireSecret(configuration, "Secrets:GoogleFormsSecret", ["Secrets__GoogleFormsSecret", "GOOGLE_FORMS_WEBHOOK_SECRET", "GOOGLE_FORMS_SECRET"], missingOrInvalid);
+        RequireSecret(configuration, "Secrets:FieldEncryptionKeyBase64", ["Secrets__FieldEncryptionKeyBase64", "FIELD_ENCRYPTION_KEY_BASE64", "FIELD_ENCRYPTION_KEY"], missingOrInvalid);
 
-        string? googleFormsSecret = configuration["Secrets:GoogleFormsSecret"];
+        string? googleFormsSecret = ResolveSecretValue(configuration, "Secrets:GoogleFormsSecret", ["Secrets__GoogleFormsSecret", "GOOGLE_FORMS_WEBHOOK_SECRET", "GOOGLE_FORMS_SECRET"]);
         if (string.Equals(googleFormsSecret, CompromisedLegacyGoogleFormsSecret, StringComparison.Ordinal))
         {
             missingOrInvalid.Add(
                 "Secrets:GoogleFormsSecret is using the compromised legacy key 'rge_gforms_live_sec_89f3a21'. Rotate immediately.");
         }
 
-        string? encryptionKeyBase64 = configuration["Secrets:FieldEncryptionKeyBase64"];
+        string? encryptionKeyBase64 = ResolveSecretValue(configuration, "Secrets:FieldEncryptionKeyBase64", ["Secrets__FieldEncryptionKeyBase64", "FIELD_ENCRYPTION_KEY_BASE64", "FIELD_ENCRYPTION_KEY"]);
         if (!string.IsNullOrWhiteSpace(encryptionKeyBase64))
         {
             try
@@ -55,14 +55,34 @@ public static class SecretsConfiguration
         }
     }
 
-    private static void RequireNonEmpty(IConfiguration config, string key, List<string> errors)
+    private static string? ResolveSecretValue(IConfiguration config, string primaryKey, string[] fallbackKeys)
     {
-        string? value = config[key];
+        string? val = config[primaryKey];
+        if (!string.IsNullOrWhiteSpace(val))
+        {
+            return val;
+        }
+
+        foreach (string fallback in fallbackKeys)
+        {
+            string? fallbackVal = config[fallback];
+            if (!string.IsNullOrWhiteSpace(fallbackVal))
+            {
+                return fallbackVal;
+            }
+        }
+
+        return null;
+    }
+
+    private static void RequireSecret(IConfiguration config, string primaryKey, string[] fallbackKeys, List<string> errors)
+    {
+        string? value = ResolveSecretValue(config, primaryKey, fallbackKeys);
         if (string.IsNullOrWhiteSpace(value) ||
             value.Contains("REPLACE_ME", StringComparison.OrdinalIgnoreCase) ||
             value.Contains("TODO", StringComparison.OrdinalIgnoreCase))
         {
-            errors.Add($"Missing or placeholder secret for '{key}'");
+            errors.Add($"Missing or placeholder secret for '{primaryKey}'");
         }
     }
 }

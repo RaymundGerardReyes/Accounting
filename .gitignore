@@ -76,6 +76,8 @@ desktop.ini
 # .NET
 [Bb]in/
 [Oo]bj/
+[Pp]ublish/
+.dotnet_build/
 *.user
 *.suo
 *.userosscache

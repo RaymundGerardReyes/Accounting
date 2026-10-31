@@ -9,7 +9,8 @@
   },
   "scripts": {
     "build": "cd Frontend && npm install --include=dev && npm run build",
-    "heroku-postbuild": "npm run build",
+    "build:dotnet": "node -e \"const { execSync } = require('child_process'); try { execSync('dotnet publish Backend/src/Host/Rge.Accounting.Host/Rge.Accounting.Host.csproj -c Release -o Backend/publish', { stdio: 'inherit' }); } catch (e) { console.log('Notice: dotnet publish skipped in node build phase: ' + e.message); }\"",
+    "heroku-postbuild": "npm run build && npm run build:dotnet",
     "start": "python scripts/start_production.py"
   }
 }
