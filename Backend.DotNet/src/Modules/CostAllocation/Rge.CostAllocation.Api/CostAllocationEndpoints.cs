@@ -66,9 +66,19 @@ public sealed class CostAllocationEndpoints : IEndpointModule
         app.MapGet("/api/configuration", (ICostAllocationStore store) =>
             Results.Json(store.GetConfiguration(), JsonDefaults.Options)).WithTags("CostAllocation.Configuration");
 
-        app.MapPut("/api/configuration", (Dictionary<string, object> config, ICostAllocationStore store) =>
+        app.MapPut("/api/configuration", (Dictionary<string, object> body, ICostAllocationStore store) =>
         {
-            store.SaveConfiguration(config);
+            if (body.TryGetValue("config", out object? nestedConfig) && nestedConfig is not null)
+            {
+                store.SaveConfiguration(new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["config"] = nestedConfig
+                });
+            }
+            else
+            {
+                store.SaveConfiguration(body);
+            }
             return Results.Json(store.GetConfiguration(), JsonDefaults.Options);
         }).WithTags("CostAllocation.Configuration");
 
@@ -84,12 +94,12 @@ public sealed class CostAllocationEndpoints : IEndpointModule
 
         app.MapPost("/api/configuration/users", (Dictionary<string, object> body, ICostAllocationStore store) =>
         {
-            if (!body.TryGetValue("users", out object? users) || users is null)
+            if (body.TryGetValue("users", out object? users) && users is not null)
             {
-                return Results.BadRequest(new { error = "Missing users array." });
+                store.SaveConfiguration(new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase) { ["users"] = users });
+                return Results.Json(new { success = true, users }, JsonDefaults.Options);
             }
-            store.SaveConfiguration(new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase) { ["users"] = users });
-            return Results.Json(new { success = true, users }, JsonDefaults.Options);
+            return Results.BadRequest(new { error = "Missing users array." });
         }).WithTags("CostAllocation.Configuration");
     }
 }

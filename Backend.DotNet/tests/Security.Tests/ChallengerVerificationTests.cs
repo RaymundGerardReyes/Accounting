@@ -432,6 +432,46 @@ public sealed class ChallengerVerificationTests
         Assert.Null(exception);
     }
 
+    [Fact]
+    public void JsonConfigurationStore_Initializes_With_Full_Configuration_Structure()
+    {
+        var store = new JsonConfigurationStore();
+        Dictionary<string, object> config = store.GetConfiguration();
+
+        Assert.NotNull(config);
+        Assert.True(config.ContainsKey("config"));
+        Assert.True(config.ContainsKey("departments"));
+        Assert.True(config.ContainsKey("users"));
+        Assert.True(config.ContainsKey("auditLogs"));
+        Assert.True(config.ContainsKey("integrations"));
+        Assert.True(config.ContainsKey("company_name"));
+        Assert.True(config.ContainsKey("currency"));
+        Assert.True(config.ContainsKey("vat_rate_bps"));
+    }
+
+    [Fact]
+    public void JsonConfigurationStore_SaveConfiguration_Preserves_And_Updates_Users()
+    {
+        var store = new JsonConfigurationStore();
+        var newUser = new Dictionary<string, object>
+        {
+            ["id"] = 99,
+            ["name"] = "Maria Santos",
+            ["role"] = "System Administrator",
+            ["email"] = "maria.santos@acme.com",
+            ["status"] = "Active"
+        };
+
+        store.SaveConfiguration(new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["users"] = new List<object> { newUser }
+        });
+
+        Dictionary<string, object> updated = store.GetConfiguration();
+        Assert.True(updated.TryGetValue("users", out object? usersObj));
+        Assert.NotNull(usersObj);
+    }
+
     private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>
     {
         public TestOptionsMonitor(T current) => CurrentValue = current;

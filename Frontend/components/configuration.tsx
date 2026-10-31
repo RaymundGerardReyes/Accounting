@@ -23,6 +23,7 @@ import {
   X,
 } from "lucide-react"
 import { useEffect, useState } from "react"
+import { useAuth } from "@/lib/auth-context"
 
 interface ConfigurationProps {
   onBack: () => void
@@ -53,6 +54,13 @@ interface ConfigData {
 }
 
 export function Configuration({ onBack }: ConfigurationProps) {
+  const { user: currentUser, refreshSession } = useAuth()
+  const isAdmin =
+    currentUser?.roles?.some((r) =>
+      ["system_admin", "admin", "sys_admin", "System Administrator", "Admin"].includes(r)
+    ) ||
+    currentUser?.id === "sys_admin_01" ||
+    !currentUser
   const [data, setData] = useState<ConfigData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -257,10 +265,19 @@ export function Configuration({ onBack }: ConfigurationProps) {
           throw new Error(`HTTP error! status: ${response.status}`)
         }
         const result = await response.json()
-        setData(result)
-        setConfig(result.config)
-        setDepartments(result.departments || [])
-        setUsers(result.users || [])
+        const configObj = result?.config || {
+          companyName: result?.company_name || result?.companyName || "R.G.E Accounting Firm Inc.",
+          fiscalYear: result?.fiscal_year || result?.fiscalYear || "2025",
+          allocationMethod: result?.allocation_method || result?.allocationMethod || "activity-based",
+          reportingCurrency: result?.reporting_currency || result?.currency || result?.reportingCurrency || "PHP",
+          decimalPlaces: result?.decimal_places ?? result?.decimalPlaces ?? 2,
+          autoBackup: result?.auto_backup ?? result?.autoBackup ?? true,
+          notificationEmail: result?.notification_email || result?.notificationEmail || "admin@acme.com",
+        }
+        setData(result || { config: configObj, departments: [], users: [], auditLogs: [], integrations: [] })
+        setConfig(configObj)
+        setDepartments(result?.departments || [])
+        setUsers(result?.users || [])
       } catch (e: any) {
         setError(e.message)
       } finally {
@@ -378,6 +395,9 @@ export function Configuration({ onBack }: ConfigurationProps) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ users: updated }),
         })
+        if (refreshSession) {
+          await refreshSession()
+        }
       } catch (err) {
         console.error("Failed to persist user:", err)
       }
@@ -407,6 +427,9 @@ export function Configuration({ onBack }: ConfigurationProps) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ users: updated }),
         })
+        if (refreshSession) {
+          await refreshSession()
+        }
       } catch (err) {
         console.error("Failed to persist user edits:", err)
       }
@@ -425,6 +448,9 @@ export function Configuration({ onBack }: ConfigurationProps) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ users: updated }),
         })
+        if (refreshSession) {
+          await refreshSession()
+        }
       } catch (err) {
         console.error("Failed to persist user deletion:", err)
       }
@@ -463,7 +489,17 @@ export function Configuration({ onBack }: ConfigurationProps) {
     )
   }
 
-  if (!data || !config) {
+  const activeConfig = config || {
+    companyName: (data as any)?.company_name || "R.G.E Accounting Firm Inc.",
+    fiscalYear: "2025",
+    allocationMethod: "activity-based",
+    reportingCurrency: "PHP",
+    decimalPlaces: 2,
+    autoBackup: true,
+    notificationEmail: "admin@acme.com",
+  }
+
+  if (!data) {
     return <div className="p-8 text-center text-sm text-muted-foreground">No configuration data available.</div>
   }
 
@@ -696,8 +732,13 @@ export function Configuration({ onBack }: ConfigurationProps) {
         <Card className="shadow-none border-border/90 overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between border-b border-border/60 pb-4">
             <div>
-              <CardTitle className="text-base font-semibold">User Access Control</CardTitle>
-              <CardDescription className="text-xs">Manage platform operators and role permissions</CardDescription>
+              <div className="flex items-center gap-2.5">
+                <CardTitle className="text-base font-semibold">User Access Control & RBAC</CardTitle>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                  {isAdmin ? "System Administrator Access" : "Read-Only Mode"}
+                </span>
+              </div>
+              <CardDescription className="text-xs">Manage platform operators, role permissions, and allocation authorities</CardDescription>
             </div>
             <Button
               className="bg-primary text-primary-foreground hover:bg-primary/90 text-xs gap-1.5 shadow-xs"
@@ -779,7 +820,7 @@ export function Configuration({ onBack }: ConfigurationProps) {
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y divide-border/70">
-              {auditLogs.map((log, index) => (
+              {auditLogs.map((log: any, index: number) => (
                 <div
                   key={`${log.id}-${index}-${log.action}`}
                   className="flex items-center justify-between px-6 py-4 hover:bg-muted/30 transition-colors"
@@ -828,7 +869,7 @@ export function Configuration({ onBack }: ConfigurationProps) {
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y divide-border/70">
-              {(liveIntegrations.length > 0 ? liveIntegrations : integrations).map((integration) => {
+              {(liveIntegrations.length > 0 ? liveIntegrations : integrations).map((integration: any) => {
                 const isConnected =
                   integration.operational_state === "connected" ||
                   integration.status?.includes("Active") ||
@@ -1061,7 +1102,14 @@ export function Configuration({ onBack }: ConfigurationProps) {
                   onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}
                   className="w-full px-3 py-2 text-sm border border-border rounded-md bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 >
+                  <option value="System Administrator">System Administrator (Full RBAC & Access Control)</option>
                   <option value="Admin">Admin</option>
+                  <option value="Finance Controller">Finance Controller</option>
+                  <option value="Finance Reviewer">Finance Reviewer</option>
+                  <option value="Supervisor">Supervisor</option>
+                  <option value="Maker">Maker</option>
+                  <option value="Verifier">Verifier</option>
+                  <option value="Bank Approver">Bank Approver</option>
                   <option value="Cost Analyst">Cost Analyst</option>
                   <option value="Department Manager">Department Manager</option>
                   <option value="Auditor">Auditor</option>

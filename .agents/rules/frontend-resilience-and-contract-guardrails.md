@@ -37,3 +37,7 @@ description: Frontend defensive aggregation invariants, collection reducers, API
 - **Profile Merging**: When a mutation endpoint returns a partial profile object (e.g. `{ id, full_name, department_id, roles }`), merge it with existing cached user data (`allUsers.find(...)`) to preserve optional profile properties (`email`, `employee_code`, `cost_center_id`).
 
 
+## 5. Defensive Configuration Normalization & Unified RBAC User Invariant
+- **Contract Resilience**: Administration and settings components (such as `configuration.tsx`) must never assume API responses strictly adhere to a nested wrapper (`data.config`) vs flat dictionary keys (`data.company_name` / `data.companyName`). When reading configuration responses, components must defensively reconstruct missing nested keys from top-level properties or provide valid domain defaults so the UI never crashes or traps the user in an empty state ("No configuration data available.").
+- **Unified RBAC User Synchronization**: When a user is created or updated in administrative settings, the component must synchronize with the global `AuthContext` persona switcher (`refreshSession` or direct persona merge) so that newly provisioned users and roles are immediately switchable and operable across the platform.
+- **Admin Role Superuser Permissiveness**: System Administrator accounts (`sys_admin_01`, roles `system_admin`, `admin`, `System Administrator`) must always bypass restrictive read-only gates and retain full mutation privileges over configuration parameters, departments, and user access controls.

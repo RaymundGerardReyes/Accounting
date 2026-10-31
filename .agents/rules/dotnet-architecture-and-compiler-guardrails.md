@@ -93,3 +93,6 @@ description: .NET 10 Modular Monolith architectural rules, Roslyn compiler guard
 
 
 
+## 12. Configuration Store Schema & Persistence Invariant
+- **Seed Parity**: Any configuration or setting store (`JsonConfigurationStore`, `ICostAllocationStore`) mapped to `GET /api/configuration` must initialize from authoritative repository seed files (`Backend/data/configuration.json`) or construct an equivalent complete schema (`config`, `departments`, `users`, `auditLogs`, `integrations`) with backward-compatible legacy keys (`company_name`, `currency`, `vat_rate_bps`).
+- **Disk Synchronization**: Mutations performed via `SaveConfiguration`, `POST /api/configuration/departments`, or `POST /api/configuration/users` must update in-memory state and persist to the underlying JSON file on disk, preventing state loss across runtime restarts or container recycling.

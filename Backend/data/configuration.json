@@ -1,235 +1,217 @@
 {
-    "config": {
-        "companyName": "R.G.E Accounting Firm Inc.",
-        "fiscalYear": "2025",
-        "allocationMethod": "activity-based",
-        "reportingCurrency": "PHP",
-        "decimalPlaces": 2,
-        "autoBackup": true,
-        "notificationEmail": "admin@acme.com"
+  "config": {
+    "companyName": "R.G.E Accounting Firm Inc.",
+    "fiscalYear": "2025",
+    "allocationMethod": "activity-based",
+    "reportingCurrency": "PHP",
+    "decimalPlaces": 2,
+    "autoBackup": true,
+    "notificationEmail": "admin@acme.com"
+  },
+  "departments": [
+    {
+      "id": "manufacturing",
+      "name": "Manufacturing",
+      "costCenter": "CC-001",
+      "manager": "John Smith",
+      "budget": 450000
     },
-    "departments": [
-        {
-            "id": "manufacturing",
-            "name": "Manufacturing",
-            "costCenter": "CC-001",
-            "manager": "John Smith",
-            "budget": 450000
-        },
-        {
-            "id": "assembly",
-            "name": "Assembly",
-            "costCenter": "CC-002",
-            "manager": "Sarah Johnson",
-            "budget": 300000
-        },
-        {
-            "id": "qa",
-            "name": "QA",
-            "costCenter": "CC-003",
-            "manager": "Mike Davis",
-            "budget": 150000
-        },
-        {
-            "id": "logistics",
-            "name": "Logistics",
-            "costCenter": "CC-004",
-            "manager": "Lisa Chen",
-            "budget": 100000
-        }
-    ],
-    "users": [
-        {
-            "id": 1,
-            "name": "John Smith",
-            "role": "Admin",
-            "email": "john@acme.com",
-            "status": "Active"
-        },
-        {
-            "id": 2,
-            "name": "Sarah Johnson",
-            "role": "Analyst",
-            "email": "sarah@acme.com",
-            "status": "Active"
-        },
-        {
-            "id": 3,
-            "name": "Mike Davis",
-            "role": "Viewer",
-            "email": "mike@acme.com",
-            "status": "Active"
-        },
-        {
-            "id": 4,
-            "name": "Lisa Chen",
-            "role": "Analyst",
-            "email": "lisa@acme.com",
-            "status": "Inactive"
-        }
-    ],
-    "auditLogs": [
-        {
-            "id": 774,
-            "action": "Payment received: \u20b189.00 for ORD-202610-2581 (QRPh Paid Test Order)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 773,
-            "action": "Payment received: \u20b1125.00 for ORD-202610-2569 (Settled Terminal Order)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 772,
-            "action": "Payment received: \u20b1406.00 for ORD-202610-2566 (Corporate Packaging Materials)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 771,
-            "action": "Payment received: \u20b1125.00 for ORD-202610-2565 (GL Posted Order)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 770,
-            "action": "Payment received: \u20b1156.00 for ORD-202610-2564 (Non-VAT Agricultural Supplies)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 769,
-            "action": "Payment received: \u20b189.00 for ORD-202610-2563 (Zero-Rated Export Services)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 768,
-            "action": "Payment received: \u20b1125.00 for ORD-202610-2562 (VAT-Exempt Solar Panels)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 767,
-            "action": "Payment received: \u20b1100.00 for ORD-202610-2561 (Real-Time Auto-Sync Test Order)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 766,
-            "action": "Payment received: \u20b1250.00 for ORD-202610-2560 (Official Receipt Validation Order)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 765,
-            "action": "Payment received: \u20b1156.00 for ORD-202610-2557 (Recovery Workflow Order)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 764,
-            "action": "Payment received: \u20b1500.00 for ORD-OUTBOX-3807d3 (Outbox Processor Test)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 763,
-            "action": "Payment received: \u20b1500.00 for ORD-OUTBOX-3807d3 (Outbox Processor Test)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 762,
-            "action": "Payment received: \u20b1178.00 for ORD-202610-2555 (Simulate Fallback Order)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 761,
-            "action": "Payment received: \u20b1250.00 for ORD-202610-2548 (Webhook Transition Order)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 760,
-            "action": "Payment received: \u20b189.00 for ORD-202610-2544 (QRPh Paid Test Order)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 759,
-            "action": "Payment received: \u20b1125.00 for ORD-202610-2532 (Settled Terminal Order)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 758,
-            "action": "Payment received: \u20b1406.00 for ORD-202610-2529 (Corporate Packaging Materials)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 757,
-            "action": "Payment received: \u20b1125.00 for ORD-202610-2528 (GL Posted Order)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 756,
-            "action": "Payment received: \u20b1156.00 for ORD-202610-2527 (Non-VAT Agricultural Supplies)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        },
-        {
-            "id": 755,
-            "action": "Payment received: \u20b189.00 for ORD-202610-2526 (Zero-Rated Export Services)",
-            "user": "PayMongo Gateway",
-            "time": "Just now",
-            "severity": "success"
-        }
-    ],
-    "integrations": [
-        {
-            "name": "PayMongo Payment Gateway",
-            "status": "Active (Hosted Checkout & Webhooks)",
-            "lastSync": "Real-time"
-        },
-        {
-            "name": "Database",
-            "status": "Connected",
-            "lastSync": "5 minutes ago"
-        },
-        {
-            "name": "Email Notifications",
-            "status": "Configured",
-            "lastSync": "N/A"
-        },
-        {
-            "name": "API Access",
-            "status": "Enabled",
-            "lastSync": "N/A"
-        }
-    ]
+    {
+      "id": "assembly",
+      "name": "Assembly",
+      "costCenter": "CC-002",
+      "manager": "Sarah Johnson",
+      "budget": 300000
+    },
+    {
+      "id": "qa",
+      "name": "QA",
+      "costCenter": "CC-003",
+      "manager": "Mike Davis",
+      "budget": 150000
+    },
+    {
+      "id": "logistics",
+      "name": "Logistics",
+      "costCenter": "CC-004",
+      "manager": "Lisa Chen",
+      "budget": 100000
+    }
+  ],
+  "users": [
+    {
+      "id": 99,
+      "name": "Maria Santos",
+      "role": "System Administrator",
+      "email": "maria.santos@acme.com",
+      "status": "Active"
+    }
+  ],
+  "auditLogs": [
+    {
+      "id": 774,
+      "action": "Payment received: \u20B189.00 for ORD-202610-2581 (QRPh Paid Test Order)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 773,
+      "action": "Payment received: \u20B1125.00 for ORD-202610-2569 (Settled Terminal Order)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 772,
+      "action": "Payment received: \u20B1406.00 for ORD-202610-2566 (Corporate Packaging Materials)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 771,
+      "action": "Payment received: \u20B1125.00 for ORD-202610-2565 (GL Posted Order)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 770,
+      "action": "Payment received: \u20B1156.00 for ORD-202610-2564 (Non-VAT Agricultural Supplies)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 769,
+      "action": "Payment received: \u20B189.00 for ORD-202610-2563 (Zero-Rated Export Services)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 768,
+      "action": "Payment received: \u20B1125.00 for ORD-202610-2562 (VAT-Exempt Solar Panels)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 767,
+      "action": "Payment received: \u20B1100.00 for ORD-202610-2561 (Real-Time Auto-Sync Test Order)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 766,
+      "action": "Payment received: \u20B1250.00 for ORD-202610-2560 (Official Receipt Validation Order)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 765,
+      "action": "Payment received: \u20B1156.00 for ORD-202610-2557 (Recovery Workflow Order)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 764,
+      "action": "Payment received: \u20B1500.00 for ORD-OUTBOX-3807d3 (Outbox Processor Test)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 763,
+      "action": "Payment received: \u20B1500.00 for ORD-OUTBOX-3807d3 (Outbox Processor Test)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 762,
+      "action": "Payment received: \u20B1178.00 for ORD-202610-2555 (Simulate Fallback Order)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 761,
+      "action": "Payment received: \u20B1250.00 for ORD-202610-2548 (Webhook Transition Order)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 760,
+      "action": "Payment received: \u20B189.00 for ORD-202610-2544 (QRPh Paid Test Order)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 759,
+      "action": "Payment received: \u20B1125.00 for ORD-202610-2532 (Settled Terminal Order)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 758,
+      "action": "Payment received: \u20B1406.00 for ORD-202610-2529 (Corporate Packaging Materials)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 757,
+      "action": "Payment received: \u20B1125.00 for ORD-202610-2528 (GL Posted Order)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 756,
+      "action": "Payment received: \u20B1156.00 for ORD-202610-2527 (Non-VAT Agricultural Supplies)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    },
+    {
+      "id": 755,
+      "action": "Payment received: \u20B189.00 for ORD-202610-2526 (Zero-Rated Export Services)",
+      "user": "PayMongo Gateway",
+      "time": "Just now",
+      "severity": "success"
+    }
+  ],
+  "integrations": [
+    {
+      "name": "PayMongo Payment Gateway",
+      "status": "Active (Hosted Checkout \u0026 Webhooks)",
+      "lastSync": "Real-time"
+    },
+    {
+      "name": "Database",
+      "status": "Connected",
+      "lastSync": "5 minutes ago"
+    },
+    {
+      "name": "Email Notifications",
+      "status": "Configured",
+      "lastSync": "N/A"
+    },
+    {
+      "name": "API Access",
+      "status": "Enabled",
+      "lastSync": "N/A"
+    }
+  ],
+  "company_name": "R.G.E Accounting Firm Inc.",
+  "currency": "PHP",
+  "vat_rate_bps": 1200
 }

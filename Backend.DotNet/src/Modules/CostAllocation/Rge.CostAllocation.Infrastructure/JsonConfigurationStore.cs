@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Rge.BuildingBlocks.SharedKernel.Money;
 using Rge.CostAllocation.Application.Ports;
 using Rge.CostAllocation.Domain;
@@ -6,7 +7,9 @@ namespace Rge.CostAllocation.Infrastructure;
 
 public sealed class JsonConfigurationStore : ICostAllocationStore
 {
+    private static readonly JsonSerializerOptions IndentedJsonOptions = new() { WriteIndented = true };
     private readonly object _lock = new();
+    private readonly string? _filePath;
     private readonly List<CostDepartment> _departments =
     [
         new("dept_mfg", "Manufacturing", "CC-001", Money.Php(45_000_00), Money.Php(60_000_00), 400, 800, 1200),
@@ -27,12 +30,137 @@ public sealed class JsonConfigurationStore : ICostAllocationStore
         new("act_02", "Quality & Binding Inspection", 12_000_00, "LABOR_HRS", "Labor Hours", 2100)
     ];
 
-    private readonly Dictionary<string, object> _config = new(StringComparer.OrdinalIgnoreCase)
+    private readonly Dictionary<string, object> _config = new(StringComparer.OrdinalIgnoreCase);
+
+    public JsonConfigurationStore()
     {
-        ["company_name"] = "R.G.E Accounting Firm Inc.",
-        ["currency"] = "PHP",
-        ["vat_rate_bps"] = 1200
-    };
+        _filePath = LocateConfigurationFile();
+        InitializeConfig();
+    }
+
+    private static string? LocateConfigurationFile()
+    {
+        string[] candidates =
+        [
+            Path.Combine(AppContext.BaseDirectory, "Backend", "data", "configuration.json"),
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "Backend", "data", "configuration.json"),
+            Path.Combine(Directory.GetCurrentDirectory(), "Backend", "data", "configuration.json"),
+            Path.Combine(Directory.GetCurrentDirectory(), "..", "Backend", "data", "configuration.json")
+        ];
+
+        foreach (string candidate in candidates)
+        {
+            try
+            {
+                string fullPath = Path.GetFullPath(candidate);
+                if (File.Exists(fullPath))
+                {
+                    return fullPath;
+                }
+            }
+            catch
+            {
+                // Ignore path resolution errors
+            }
+        }
+
+        DirectoryInfo? current = new DirectoryInfo(Directory.GetCurrentDirectory());
+        while (current is not null)
+        {
+            string check = Path.Combine(current.FullName, "Backend", "data", "configuration.json");
+            if (File.Exists(check))
+            {
+                return check;
+            }
+            current = current.Parent;
+        }
+
+        return null;
+    }
+
+    private void InitializeConfig()
+    {
+        if (_filePath is not null && File.Exists(_filePath))
+        {
+            try
+            {
+                string json = File.ReadAllText(_filePath);
+                var loaded = JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+                if (loaded is not null)
+                {
+                    foreach (var kvp in loaded)
+                    {
+                        _config[kvp.Key] = kvp.Value;
+                    }
+                }
+            }
+            catch
+            {
+                // Fall back to default seeded structure
+            }
+        }
+
+        if (!_config.ContainsKey("config"))
+        {
+            _config["config"] = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["companyName"] = "R.G.E Accounting Firm Inc.",
+                ["fiscalYear"] = "2025",
+                ["allocationMethod"] = "activity-based",
+                ["reportingCurrency"] = "PHP",
+                ["decimalPlaces"] = 2,
+                ["autoBackup"] = true,
+                ["notificationEmail"] = "admin@acme.com"
+            };
+        }
+
+        if (!_config.ContainsKey("departments"))
+        {
+            _config["departments"] = new List<object>
+            {
+                new Dictionary<string, object> { ["id"] = "manufacturing", ["name"] = "Manufacturing", ["costCenter"] = "CC-001", ["manager"] = "John Smith", ["budget"] = 450000 },
+                new Dictionary<string, object> { ["id"] = "assembly", ["name"] = "Assembly", ["costCenter"] = "CC-002", ["manager"] = "Sarah Johnson", ["budget"] = 300000 },
+                new Dictionary<string, object> { ["id"] = "qa", ["name"] = "QA", ["costCenter"] = "CC-003", ["manager"] = "Mike Davis", ["budget"] = 150000 },
+                new Dictionary<string, object> { ["id"] = "logistics", ["name"] = "Logistics", ["costCenter"] = "CC-004", ["manager"] = "Lisa Chen", ["budget"] = 100000 }
+            };
+        }
+
+        if (!_config.ContainsKey("users"))
+        {
+            _config["users"] = new List<object>
+            {
+                new Dictionary<string, object> { ["id"] = 1, ["name"] = "John Smith", ["role"] = "System Administrator", ["email"] = "admin@rge.com.ph", ["status"] = "Active" },
+                new Dictionary<string, object> { ["id"] = 2, ["name"] = "Sarah Johnson", ["role"] = "Cost Analyst", ["email"] = "sarah@acme.com", ["status"] = "Active" },
+                new Dictionary<string, object> { ["id"] = 3, ["name"] = "Mike Davis", ["role"] = "Auditor", ["email"] = "mike@acme.com", ["status"] = "Active" },
+                new Dictionary<string, object> { ["id"] = 4, ["name"] = "Lisa Chen", ["role"] = "Department Manager", ["email"] = "lisa@acme.com", ["status"] = "Inactive" }
+            };
+        }
+
+        if (!_config.ContainsKey("auditLogs"))
+        {
+            _config["auditLogs"] = new List<object>
+            {
+                new Dictionary<string, object> { ["id"] = 774, ["action"] = "Payment received: \u20b189.00 for ORD-202610-2581 (QRPh Paid Test Order)", ["user"] = "PayMongo Gateway", ["time"] = "Just now", ["severity"] = "success" },
+                new Dictionary<string, object> { ["id"] = 773, ["action"] = "System configuration updated: Default Allocation Basis set to activity-based", ["user"] = "System Administrator", ["time"] = "1 hour ago", ["severity"] = "info" }
+            };
+        }
+
+        if (!_config.ContainsKey("integrations"))
+        {
+            _config["integrations"] = new List<object>
+            {
+                new Dictionary<string, object> { ["name"] = "PayMongo Payment Gateway", ["status"] = "Connected & Operational", ["lastSync"] = "Just now", ["type"] = "payment" },
+                new Dictionary<string, object> { ["name"] = "Database", ["status"] = "Connected & Operational", ["lastSync"] = "Real-time", ["type"] = "database" },
+                new Dictionary<string, object> { ["name"] = "Email Notifications", ["status"] = "Connected & Operational", ["lastSync"] = "Real-time", ["type"] = "notification" },
+                new Dictionary<string, object> { ["name"] = "API Access", ["status"] = "Connected & Operational", ["lastSync"] = "Real-time", ["type"] = "api" }
+            };
+        }
+
+        // Backward compatibility flat keys
+        _config["company_name"] = "R.G.E Accounting Firm Inc.";
+        _config["currency"] = "PHP";
+        _config["vat_rate_bps"] = 1200;
+    }
 
     public CostAllocationSnapshotDto GetSnapshot()
     {
@@ -122,7 +250,19 @@ public sealed class JsonConfigurationStore : ICostAllocationStore
             {
                 _config[kvp.Key] = kvp.Value;
             }
+
+            if (_filePath is not null)
+            {
+                try
+                {
+                    string json = JsonSerializer.Serialize(_config, IndentedJsonOptions);
+                    File.WriteAllText(_filePath, json);
+                }
+                catch
+                {
+                    // In-memory update succeeded; disk persistence failure is non-fatal
+                }
+            }
         }
     }
 }
-
