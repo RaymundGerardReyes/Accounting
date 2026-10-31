@@ -6,9 +6,10 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useRef,
 } from "react"
 import { useRouter, usePathname } from "next/navigation"
-import { apiFetch } from "@/lib/api-client"
+import { apiFetch, getCsrfTokenFromCookie } from "@/lib/api-client"
 import type { FinanceUser } from "@/lib/finance-api"
 
 interface AuthContextValue {
@@ -43,7 +44,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authenticatedUser, setAuthenticatedUser] =
     useState<FinanceUser | null>(null)
   const [allUsers, setAllUsers] = useState<FinanceUser[]>([])
-  const [csrfToken, setCsrfToken] = useState("")
+  const [csrfToken, setCsrfToken] = useState<string>(() =>
+    typeof document !== "undefined" ? getCsrfTokenFromCookie() : ""
+  )
+  const csrfTokenRef = useRef<string>(csrfToken)
+
+  useEffect(() => {
+    csrfTokenRef.current = csrfToken
+  }, [csrfToken])
 
   const refreshSession = useCallback(async () => {
     try {
@@ -59,6 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       ])
 
       if (csrfData?.csrfToken) {
+        csrfTokenRef.current = csrfData.csrfToken
         setCsrfToken(csrfData.csrfToken)
       }
       if (Array.isArray(csrfData?.accounts)) {
@@ -71,7 +80,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setAuthenticatedUser(
           sessionData.authenticatedUser || sessionData.user
         )
-        if (sessionData.csrfToken) setCsrfToken(sessionData.csrfToken)
+        if (sessionData.csrfToken) {
+          csrfTokenRef.current = sessionData.csrfToken
+          setCsrfToken(sessionData.csrfToken)
+        }
         if (Array.isArray(sessionData.allUsers)) {
           setAllUsers(sessionData.allUsers)
         }
@@ -109,11 +121,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loginWithCredentials = async (identifier: string, password: string) => {
     try {
-      let activeCsrf = csrfToken
+      let activeCsrf = csrfTokenRef.current || csrfToken || getCsrfTokenFromCookie()
       if (!activeCsrf) {
-        const csrfData = await apiFetch<{ csrfToken: string }>("/auth/csrf")
-        activeCsrf = csrfData.csrfToken
-        setCsrfToken(activeCsrf)
+        const csrfData = await apiFetch<{ csrfToken: string; accounts?: FinanceUser[] }>("/auth/csrf").catch(() => null)
+        if (csrfData?.csrfToken) {
+          activeCsrf = csrfData.csrfToken
+          csrfTokenRef.current = activeCsrf
+          setCsrfToken(activeCsrf)
+        }
+        if (Array.isArray(csrfData?.accounts) && csrfData.accounts.length > 0) {
+          setAllUsers(csrfData.accounts)
+        }
       }
 
       const data = await apiFetch<{
@@ -131,7 +149,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAuthenticated(true)
       setUser(data.user)
       setAuthenticatedUser(data.authenticatedUser || data.user)
-      setCsrfToken(data.csrfToken || activeCsrf)
+      const nextCsrf = data.csrfToken || activeCsrf
+      csrfTokenRef.current = nextCsrf
+      setCsrfToken(nextCsrf)
       if (Array.isArray(data.allUsers)) setAllUsers(data.allUsers)
       router.push("/")
       return { ok: true }

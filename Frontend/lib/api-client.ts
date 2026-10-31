@@ -70,6 +70,7 @@ export async function apiFetch<T = any>(
         data.detail ||
         data.error_description ||
         data.error ||
+        data.title ||
         response.statusText
     }
     throw new Error(errorDetail)

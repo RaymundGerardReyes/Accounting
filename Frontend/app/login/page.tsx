@@ -42,6 +42,13 @@ function MicrosoftIcon({ className }: { className?: string }) {
   )
 }
 
+const DEFAULT_PERSONAS = [
+  { id: "usr_mgmt_01", full_name: "Juan Dela Cruz", email: "juan@rge.ph" },
+  { id: "usr_mgmt_02", full_name: "Roberto Lim", email: "roberto@rge.ph" },
+  { id: "usr_mgmt_03", full_name: "Victorino Bautista", email: "victorino@rge.ph" },
+  { id: "usr_mgmt_04", full_name: "Patricia Tan", email: "patricia@rge.ph" },
+]
+
 export default function LoginPage() {
   const { loginWithCredentials, loginWithOAuth, allUsers, loading } = useAuth()
   const [identifier, setIdentifier] = useState("")
@@ -50,6 +57,8 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false)
   const [oauthProvider, setOauthProvider] = useState<"google" | "microsoft" | null>(null)
 
+  const activePersonas = allUsers && allUsers.length > 0 ? allUsers.slice(0, 4) : DEFAULT_PERSONAS
+
   const handleOAuthClick = (provider: "google" | "microsoft") => {
     setOauthProvider(provider)
     loginWithOAuth(provider, identifier)
@@ -57,12 +66,13 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError(null)
     setSubmitting(true)
     try {
       const res = await loginWithCredentials(identifier, password)
       if (!res.ok) {
         setError(res.error || "Authentication failed. Check your credentials.")
+      } else {
+        setError(null)
       }
     } catch (err: any) {
       setError(err?.message || "An unexpected error occurred during login.")
@@ -74,6 +84,7 @@ export default function LoginPage() {
   const handleQuickSelect = (userEmail: string) => {
     setIdentifier(userEmail)
     setPassword("password123")
+    if (error) setError(null)
   }
 
   return (
@@ -91,7 +102,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <Card className="border-border bg-card shadow-lg">
+        <Card className="border-border bg-card shadow-lg transition-shadow">
           <CardHeader className="space-y-1 pb-4">
             <CardTitle className="text-lg">Sign In</CardTitle>
             <CardDescription className="text-xs">
@@ -100,12 +111,23 @@ export default function LoginPage() {
           </CardHeader>
 
           <CardContent className="space-y-4">
-            {error && (
-              <div className="p-3 text-xs rounded-lg bg-destructive/10 border border-destructive/20 text-destructive flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
+            {/* Reserved-height notification area preventing vertical layout shift & form displacement */}
+            <div className="h-11 flex items-center" aria-live="polite">
+              {error ? (
+                <div
+                  role="alert"
+                  className="w-full p-2.5 text-xs rounded-lg bg-destructive/10 border border-destructive/20 text-destructive flex items-center gap-2 transition-all duration-150 animate-in fade-in"
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0 text-destructive" />
+                  <span className="font-medium truncate leading-tight" title={error}>{error}</span>
+                </div>
+              ) : (
+                <div className="w-full p-2.5 text-xs rounded-lg bg-muted/40 border border-border/40 text-muted-foreground/80 flex items-center gap-2 select-none transition-all duration-150">
+                  <ShieldCheck className="w-4 h-4 shrink-0 text-muted-foreground/60" />
+                  <span className="truncate leading-tight">Corporate credentials &amp; session security protected</span>
+                </div>
+              )}
+            </div>
 
             <form onSubmit={handleSubmit} className="space-y-3">
               <div className="space-y-1">
@@ -115,7 +137,10 @@ export default function LoginPage() {
                   type="text"
                   placeholder="emp_field_01 or employee@rge.ph"
                   value={identifier}
-                  onChange={(e) => setIdentifier(e.target.value)}
+                  onChange={(e) => {
+                    setIdentifier(e.target.value)
+                    if (error) setError(null)
+                  }}
                   required
                   className="text-xs"
                 />
@@ -128,7 +153,10 @@ export default function LoginPage() {
                   type="password"
                   placeholder="••••••••••••"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value)
+                    if (error) setError(null)
+                  }}
                   required
                   className="text-xs"
                 />
@@ -136,11 +164,20 @@ export default function LoginPage() {
 
               <Button
                 type="submit"
-                className="w-full text-xs font-semibold gap-2 mt-2"
+                className="w-full text-xs font-semibold gap-2 mt-2 h-9"
                 disabled={submitting || loading}
               >
-                {submitting ? "Signing in..." : "Authenticate"}
-                <ArrowRight className="w-4 h-4" />
+                {submitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    <span>Signing in...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Authenticate</span>
+                    <ArrowRight className="w-4 h-4 shrink-0" />
+                  </>
+                )}
               </Button>
             </form>
 
@@ -188,25 +225,23 @@ export default function LoginPage() {
             </div>
           </CardContent>
 
-          {allUsers && allUsers.length > 0 && (
-            <CardFooter className="flex flex-col items-start border-t border-border pt-4 bg-muted/20">
-              <span className="text-[11px] font-medium text-muted-foreground mb-2 flex items-center gap-1">
-                <Lock className="w-3 h-3" /> Quick Persona Fill
-              </span>
-              <div className="flex flex-wrap gap-1.5 w-full">
-                {allUsers.slice(0, 4).map((u) => (
-                  <button
-                    key={u.id}
-                    type="button"
-                    onClick={() => handleQuickSelect(u.email || u.id)}
-                    className="text-[10px] font-mono px-2 py-1 rounded bg-secondary hover:bg-secondary/80 text-secondary-foreground border border-border"
-                  >
-                    {u.full_name || u.id}
-                  </button>
-                ))}
-              </div>
-            </CardFooter>
-          )}
+          <CardFooter className="flex flex-col items-start border-t border-border pt-4 bg-muted/20">
+            <span className="text-[11px] font-medium text-muted-foreground mb-2 flex items-center gap-1">
+              <Lock className="w-3 h-3" /> Quick Persona Fill
+            </span>
+            <div className="flex flex-wrap gap-1.5 w-full">
+              {activePersonas.map((u) => (
+                <button
+                  key={u.id}
+                  type="button"
+                  onClick={() => handleQuickSelect(u.email || u.id)}
+                  className="text-[10px] font-mono px-2 py-1 rounded bg-secondary hover:bg-secondary/80 text-secondary-foreground border border-border"
+                >
+                  {u.full_name || u.id}
+                </button>
+              ))}
+            </div>
+          </CardFooter>
         </Card>
       </div>
     </div>
