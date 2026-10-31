@@ -126,10 +126,26 @@ def resolve_dotnet_executable() -> str | None:
     return None
 
 
+def is_dotnet_sdk_installed(dotnet_bin: str) -> bool:
+    """Checks whether the dotnet binary has full SDK capabilities (not runtime-only)."""
+    try:
+        res = subprocess.run(
+            [dotnet_bin, "--list-sdks"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+        )
+        return res.returncode == 0 and bool(res.stdout.strip())
+    except Exception:
+        return False
+
+
 def resolve_backend_command(internal_port: int, env: dict) -> tuple[list[str], Path]:
     """
     Resolves the startup command for the C# ASP.NET Core (.NET 10) Modular Monolith backend.
-    Searches for pre-compiled standalone DLL first, then project-based execution via dotnet run.
+    Prioritizes pre-compiled published DLLs and native binaries for production runtime dynos,
+    falling back to project-based execution via dotnet run ONLY when a full .NET SDK is detected.
     """
     dotnet_bin = resolve_dotnet_executable()
 
@@ -139,6 +155,8 @@ def resolve_backend_command(internal_port: int, env: dict) -> tuple[list[str], P
         current_path = env.get("PATH", "")
         if dotnet_dir not in current_path:
             env["PATH"] = f"{dotnet_dir}:{current_path}" if sys.platform != "win32" else f"{dotnet_dir};{current_path}"
+
+        host_proj_dir = BACKEND_DIR / "src" / "Host" / "Rge.Accounting.Host"
 
         # 1. Check DOTNET_STARTUP_FILE set by heroku/dotnet CNB buildpack
         startup_file = env.get("DOTNET_STARTUP_FILE") or os.environ.get("DOTNET_STARTUP_FILE")
@@ -152,36 +170,32 @@ def resolve_backend_command(internal_port: int, env: dict) -> tuple[list[str], P
             ]
             return cmd, Path(startup_file).parent
 
-        # 2. Check heroku/dotnet CNB published output layer paths (typical CNB workspace paths)
-        cnb_dll_candidates = [
-            Path("/workspace/Rge.Accounting.Host.dll"),
-            Path("/workspace/publish/Rge.Accounting.Host.dll"),
+        # 2. Check direct candidate paths for published DLL (including Heroku -p:PublishDir=bin/publish)
+        direct_dll_candidates = [
+            # Heroku -p:PublishDir=bin/publish relative to Host project
+            host_proj_dir / "bin" / "publish" / "Rge.Accounting.Host.dll",
+            host_proj_dir / "bin" / "publish" / "linux-x64" / "Rge.Accounting.Host.dll",
+            host_proj_dir / "bin" / "publish" / "linux-arm64" / "Rge.Accounting.Host.dll",
+            # Standard Release output
+            host_proj_dir / "bin" / "Release" / "net10.0" / "publish" / "Rge.Accounting.Host.dll",
+            host_proj_dir / "bin" / "Release" / "net10.0" / "Rge.Accounting.Host.dll",
+            # Relative to Backend root
+            BACKEND_DIR / "bin" / "publish" / "Rge.Accounting.Host.dll",
+            BACKEND_DIR / "publish" / "Rge.Accounting.Host.dll",
+            # Relative to repository root
+            ROOT_DIR / "bin" / "publish" / "Rge.Accounting.Host.dll",
+            ROOT_DIR / "publish" / "Rge.Accounting.Host.dll",
+            # CNB standard layer paths
             Path("/layers/heroku_dotnet/launch/Rge.Accounting.Host.dll"),
             Path("/layers/heroku_dotnet/publish/Rge.Accounting.Host.dll"),
             Path("/layers/heroku_dotnet/launch/publish/Rge.Accounting.Host.dll"),
-        ]
-        for dll in cnb_dll_candidates:
-            if dll.exists():
-                log(f"Found heroku/dotnet CNB published DLL: {dll}")
-                cmd = [
-                    dotnet_bin,
-                    str(dll),
-                    "--urls",
-                    f"http://127.0.0.1:{internal_port}",
-                ]
-                return cmd, dll.parent
-
-        # 3. Check for pre-published standalone DLL in repo paths
-        dll_candidates = [
-            BACKEND_DIR / "publish" / "Rge.Accounting.Host.dll",
-            ROOT_DIR / "publish" / "Rge.Accounting.Host.dll",
-            BACKEND_DIR / "src" / "Host" / "Rge.Accounting.Host" / "bin" / "Release" / "net10.0" / "publish" / "Rge.Accounting.Host.dll",
-            BACKEND_DIR / "src" / "Host" / "Rge.Accounting.Host" / "bin" / "Release" / "net10.0" / "Rge.Accounting.Host.dll",
+            Path("/workspace/publish/Rge.Accounting.Host.dll"),
+            Path("/workspace/Rge.Accounting.Host.dll"),
         ]
 
-        for dll in dll_candidates:
-            if dll.exists():
-                log(f"Found compiled .NET Host assembly: {dll}")
+        for dll in direct_dll_candidates:
+            if dll.exists() and dll.is_file():
+                log(f"Found compiled .NET Host assembly at candidate path: {dll}")
                 cmd = [
                     dotnet_bin,
                     str(dll),
@@ -190,36 +204,108 @@ def resolve_backend_command(internal_port: int, env: dict) -> tuple[list[str], P
                 ]
                 return cmd, dll.parent
 
-        # 4. Fallback to running project via dotnet run
-        csproj_path = BACKEND_DIR / "src" / "Host" / "Rge.Accounting.Host" / "Rge.Accounting.Host.csproj"
-        if csproj_path.exists():
-            log(f"Running .NET Host via project: {csproj_path}")
-            cmd = [
-                dotnet_bin,
-                "run",
-                "--project",
-                str(csproj_path),
-                "--configuration",
-                "Release",
-                "--urls",
-                f"http://127.0.0.1:{internal_port}",
-            ]
-            return cmd, BACKEND_DIR
-
-    # 5. Dynamic search for compiled Host assembly in BACKEND_DIR (excluding obj directories)
-    if dotnet_bin:
-        for dll in BACKEND_DIR.glob("**/Rge.Accounting.Host.dll"):
-            if "obj" not in dll.parts:
-                log(f"Found compiled .NET Host assembly via search: {dll}")
+        # 3. Check direct candidate paths for native ELF executable (Linux)
+        direct_exe_candidates = [
+            host_proj_dir / "bin" / "publish" / "Rge.Accounting.Host",
+            host_proj_dir / "bin" / "publish" / "linux-x64" / "Rge.Accounting.Host",
+            host_proj_dir / "bin" / "Release" / "net10.0" / "publish" / "Rge.Accounting.Host",
+            BACKEND_DIR / "bin" / "publish" / "Rge.Accounting.Host",
+            ROOT_DIR / "bin" / "publish" / "Rge.Accounting.Host",
+            Path("/workspace/publish/Rge.Accounting.Host"),
+            Path("/workspace/Rge.Accounting.Host"),
+        ]
+        for exe in direct_exe_candidates:
+            if exe.exists() and exe.is_file() and (os.access(exe, os.X_OK) or sys.platform == "win32"):
+                log(f"Found standalone native .NET Host executable at candidate path: {exe}")
                 cmd = [
-                    dotnet_bin,
-                    str(dll),
+                    str(exe),
                     "--urls",
                     f"http://127.0.0.1:{internal_port}",
                 ]
-                return cmd, dll.parent
+                return cmd, exe.parent
 
-    # 6. Error state: .NET runtime not found or no published DLL located
+        # 4. Comprehensive recursive search across filesystem roots (excluding obj directories)
+        search_roots = [ROOT_DIR, Path("/app"), Path("/workspace"), Path("/layers")]
+        seen_dirs = set()
+
+        for s_root in search_roots:
+            if not s_root.exists():
+                continue
+            try:
+                resolved_key = str(s_root.resolve())
+            except Exception:
+                resolved_key = str(s_root)
+            if resolved_key in seen_dirs:
+                continue
+            seen_dirs.add(resolved_key)
+
+            # Look for Rge.Accounting.Host.dll
+            try:
+                for candidate in s_root.glob("**/Rge.Accounting.Host.dll"):
+                    if "obj" not in candidate.parts and candidate.is_file():
+                        log(f"Found compiled .NET Host assembly via recursive search in {s_root}: {candidate}")
+                        cmd = [
+                            dotnet_bin,
+                            str(candidate),
+                            "--urls",
+                            f"http://127.0.0.1:{internal_port}",
+                        ]
+                        return cmd, candidate.parent
+            except Exception as e:
+                log(f"Warning during DLL glob search in {s_root}: {e}")
+
+            # Look for native ELF executable without extension
+            try:
+                for candidate in s_root.glob("**/Rge.Accounting.Host"):
+                    if candidate.is_file() and candidate.suffix == "" and "obj" not in candidate.parts:
+                        if os.access(candidate, os.X_OK) or sys.platform == "win32":
+                            log(f"Found native .NET Host executable via recursive search in {s_root}: {candidate}")
+                            cmd = [
+                                str(candidate),
+                                "--urls",
+                                f"http://127.0.0.1:{internal_port}",
+                            ]
+                            return cmd, candidate.parent
+            except Exception as e:
+                log(f"Warning during executable glob search in {s_root}: {e}")
+
+        # 5. Fallback ONLY for local development with full .NET SDK installed
+        if is_dotnet_sdk_installed(dotnet_bin):
+            csproj_path = host_proj_dir / "Rge.Accounting.Host.csproj"
+            if csproj_path.exists():
+                log(f"SDK detected: running .NET Host via project (local dev): {csproj_path}")
+                cmd = [
+                    dotnet_bin,
+                    "run",
+                    "--project",
+                    str(csproj_path),
+                    "--configuration",
+                    "Release",
+                    "--urls",
+                    f"http://127.0.0.1:{internal_port}",
+                ]
+                return cmd, BACKEND_DIR
+        else:
+            log("No .NET SDK found (runtime-only environment). Skipping 'dotnet run' fallback.")
+
+    # 6. Diagnostic dump if no executable or DLL could be located
+    log("DIAGNOSTIC: Searching for compiled artifacts under application directory...")
+    found_artifacts = []
+    try:
+        for p in ROOT_DIR.glob("**/*"):
+            if p.is_file() and ("publish" in p.parts or p.suffix in (".dll", ".so")):
+                if "obj" not in p.parts:
+                    found_artifacts.append(str(p))
+                    if len(found_artifacts) >= 30:
+                        break
+    except Exception:
+        pass
+    if found_artifacts:
+        log(f"Discovered potential artifacts: {found_artifacts}")
+    else:
+        log("No matching .dll or publish artifacts found under application root.")
+
+    # 7. Error state: .NET runtime not found or no published DLL located
     error_msg = (
         "=================================================================\n"
         "FATAL: Unable to launch .NET backend process on Heroku Dyno!\n"
