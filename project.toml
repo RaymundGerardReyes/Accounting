@@ -1,0 +1,10 @@
+# project.toml – Heroku Cloud Native Buildpack (.NET) configuration
+# Instructs heroku/dotnet to target the Host project inside the Backend/ subdirectory.
+# See: https://devcenter.heroku.com/articles/dotnet-behavior-in-heroku
+
+schema-version = "0.2"
+
+[com.heroku.buildpacks.dotnet]
+solution_file = "Backend/src/Host/Rge.Accounting.Host/Rge.Accounting.Host.csproj"
+build_configuration = "Release"
+

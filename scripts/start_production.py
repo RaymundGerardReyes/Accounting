@@ -140,7 +140,38 @@ def resolve_backend_command(internal_port: int, env: dict) -> tuple[list[str], P
         if dotnet_dir not in current_path:
             env["PATH"] = f"{dotnet_dir}:{current_path}" if sys.platform != "win32" else f"{dotnet_dir};{current_path}"
 
-        # 1. Check for pre-published standalone DLL
+        # 1. Check DOTNET_STARTUP_FILE set by heroku/dotnet CNB buildpack
+        startup_file = env.get("DOTNET_STARTUP_FILE") or os.environ.get("DOTNET_STARTUP_FILE")
+        if startup_file and Path(startup_file).exists():
+            log(f"Using DOTNET_STARTUP_FILE from heroku/dotnet buildpack: {startup_file}")
+            cmd = [
+                dotnet_bin,
+                str(startup_file),
+                "--urls",
+                f"http://127.0.0.1:{internal_port}",
+            ]
+            return cmd, Path(startup_file).parent
+
+        # 2. Check heroku/dotnet CNB published output layer paths (typical CNB workspace paths)
+        cnb_dll_candidates = [
+            Path("/workspace/Rge.Accounting.Host.dll"),
+            Path("/workspace/publish/Rge.Accounting.Host.dll"),
+            Path("/layers/heroku_dotnet/launch/Rge.Accounting.Host.dll"),
+            Path("/layers/heroku_dotnet/publish/Rge.Accounting.Host.dll"),
+            Path("/layers/heroku_dotnet/launch/publish/Rge.Accounting.Host.dll"),
+        ]
+        for dll in cnb_dll_candidates:
+            if dll.exists():
+                log(f"Found heroku/dotnet CNB published DLL: {dll}")
+                cmd = [
+                    dotnet_bin,
+                    str(dll),
+                    "--urls",
+                    f"http://127.0.0.1:{internal_port}",
+                ]
+                return cmd, dll.parent
+
+        # 3. Check for pre-published standalone DLL in repo paths
         dll_candidates = [
             BACKEND_DIR / "publish" / "Rge.Accounting.Host.dll",
             ROOT_DIR / "publish" / "Rge.Accounting.Host.dll",
@@ -159,7 +190,7 @@ def resolve_backend_command(internal_port: int, env: dict) -> tuple[list[str], P
                 ]
                 return cmd, dll.parent
 
-        # 2. Fallback to running project via dotnet run
+        # 4. Fallback to running project via dotnet run
         csproj_path = BACKEND_DIR / "src" / "Host" / "Rge.Accounting.Host" / "Rge.Accounting.Host.csproj"
         if csproj_path.exists():
             log(f"Running .NET Host via project: {csproj_path}")
@@ -175,28 +206,31 @@ def resolve_backend_command(internal_port: int, env: dict) -> tuple[list[str], P
             ]
             return cmd, BACKEND_DIR
 
-    # 3. Dynamic search for compiled Host assembly (excluding obj directories)
-    for dll in BACKEND_DIR.glob("**/Rge.Accounting.Host.dll"):
-        if "obj" not in dll.parts:
-            log(f"Found compiled .NET Host assembly via search: {dll}")
-            cmd = [
-                dotnet_bin,
-                str(dll),
-                "--urls",
-                f"http://127.0.0.1:{internal_port}",
-            ]
-            return cmd, dll.parent
+    # 5. Dynamic search for compiled Host assembly in BACKEND_DIR (excluding obj directories)
+    if dotnet_bin:
+        for dll in BACKEND_DIR.glob("**/Rge.Accounting.Host.dll"):
+            if "obj" not in dll.parts:
+                log(f"Found compiled .NET Host assembly via search: {dll}")
+                cmd = [
+                    dotnet_bin,
+                    str(dll),
+                    "--urls",
+                    f"http://127.0.0.1:{internal_port}",
+                ]
+                return cmd, dll.parent
 
-    # 4. Error state: neither .NET runtime nor project found
+    # 6. Error state: .NET runtime not found or no published DLL located
     error_msg = (
         "=================================================================\n"
         "FATAL: Unable to launch .NET backend process on Heroku Dyno!\n"
-        "1. The .NET runtime ('dotnet') was not found in PATH or standard Heroku paths.\n"
-        "2. All legacy Python backend logic has been permanently retired.\n\n"
+        "The .NET runtime ('dotnet') was not found, or no published DLL was located.\n"
+        "All legacy Python backend logic has been permanently retired.\n\n"
         "Resolution:\n"
-        "Configure the .NET buildpack on your Heroku application:\n"
-        "  heroku buildpacks:add --index 1 https://github.com/jincod/dotnetcore-buildpack.git -a <app-name>\n"
-        "  heroku config:set PROJECT_FILE=Backend/src/Host/Rge.Accounting.Host/Rge.Accounting.Host.csproj -a <app-name>\n"
+        "Ensure the heroku/dotnet buildpack is configured with:\n"
+        "  project.toml in the repo root with:\n"
+        "    [com.heroku.buildpacks.dotnet]\n"
+        "    solution_file = \"Backend/src/Host/Rge.Accounting.Host/Rge.Accounting.Host.csproj\"\n"
+        "Or set: heroku config:set SOLUTION_FILE=Backend/src/Host/Rge.Accounting.Host/Rge.Accounting.Host.csproj\n"
         "================================================================="
     )
     log(error_msg)
