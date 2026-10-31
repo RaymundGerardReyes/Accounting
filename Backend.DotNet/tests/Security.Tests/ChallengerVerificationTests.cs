@@ -136,6 +136,18 @@ public sealed class ChallengerVerificationTests
     }
 
     [Theory]
+    [InlineData("{\"targetUserId\": \"fin_maker_01\"}", "fin_maker_01")]
+    [InlineData("{\"target_user_id\": \"fin_approver_01\"}", "fin_approver_01")]
+    [InlineData("{\"targetUserId\": \"emp_field_01\", \"target_user_id\": \"emp_field_01\"}", "emp_field_01")]
+    [InlineData("{}", null)]
+    public void SwitchUserApiRequest_Binds_Both_CamelCase_And_SnakeCase(string json, string? expectedUserId)
+    {
+        var request = JsonSerializer.Deserialize<SwitchUserApiRequest>(json, JsonDefaults.Options);
+        Assert.NotNull(request);
+        Assert.Equal(expectedUserId, request.TargetUserId);
+    }
+
+    [Theory]
     [InlineData("manufacturing")]
     [InlineData("dept_mfg")]
     [InlineData("assembly")]

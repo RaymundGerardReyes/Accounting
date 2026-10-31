@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -18,7 +19,28 @@ using Rge.Identity.Application.SwitchUser;
 namespace Rge.Identity.Api;
 
 public sealed record LoginApiRequest(string Identifier, string Password, string? CsrfToken = null);
-public sealed record SwitchUserApiRequest(string? TargetUserId = null);
+
+public sealed class SwitchUserApiRequest
+{
+    [JsonPropertyName("target_user_id")]
+    public string? TargetUserIdSnake { get; set; }
+
+    [JsonPropertyName("targetUserId")]
+    public string? TargetUserIdCamel { get; set; }
+
+    [JsonIgnore]
+    public string? TargetUserId => !string.IsNullOrWhiteSpace(TargetUserIdCamel)
+        ? TargetUserIdCamel
+        : TargetUserIdSnake;
+
+    public SwitchUserApiRequest() { }
+
+    public SwitchUserApiRequest(string? targetUserId)
+    {
+        TargetUserIdCamel = targetUserId;
+        TargetUserIdSnake = targetUserId;
+    }
+}
 
 /// <summary>
 /// Mounts Authentication and Session Management endpoints (IDN-001 through IDN-007).
