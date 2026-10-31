@@ -1,10 +1,8 @@
 using System.Reflection;
-
 using Rge.Accounting.Host.Composition;
-
 using Rge.Accounting.Host.Configuration;
-
 using Rge.Accounting.Host.Pipeline;
+using Rge.Identity.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,6 +13,9 @@ SecretsConfiguration.ValidateRequiredSecretsOrThrow(builder.Configuration, build
 // 3. Register platform services, JSON snake_case source-generation, rate limiting, and observability
 builder.Services.AddAccountingPlatformHost(builder.Configuration);
 var app = builder.Build();
+
+// Seed default development credentials if running in Development or FINANCE_SEED == "dev"
+await IdentityDbSeeder.SeedDevelopmentCredentialsAsync(app.Services);
 // 4. Pre-compute version payload once at startup (zero reflection on hot requests)
 var entryAssembly = Assembly.GetEntryAssembly() ?? typeof(Program).Assembly;
 

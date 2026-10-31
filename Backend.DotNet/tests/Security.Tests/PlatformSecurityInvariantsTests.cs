@@ -121,5 +121,35 @@ public sealed class PlatformSecurityInvariantsTests
         Assert.True(csrf.ValidateToken(sessionHash, token, now.AddMinutes(5)));
         Assert.False(csrf.ValidateToken("different_session_hash", token, now.AddMinutes(5)));
     }
+
+    [Fact]
+    public void IdentityDbSeeder_Integrity_And_Persona_Seed_Invariants()
+    {
+        Assert.Equal("password123", IdentityDbSeeder.DefaultDevPassword);
+
+        string sql = IdentityDbSeeder.SeedSql;
+        string[] personas =
+        [
+            "emp_field_01",
+            "sup_mfg_01",
+            "fin_maker_01",
+            "fin_verifier_01",
+            "fin_bank_01",
+            "fin_evidence_01",
+            "fin_reviewer_01",
+            "fin_controller_01",
+            "sys_admin_01"
+        ];
+
+        foreach (string persona in personas)
+        {
+            Assert.Contains(persona, sql, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("admin", sql, StringComparison.Ordinal);
+        Assert.Contains("public.crypt('password123', public.gen_salt('bf', 10))", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT (id) DO UPDATE", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT (user_id) DO UPDATE", sql, StringComparison.Ordinal);
+    }
 }
 

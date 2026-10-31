@@ -10,12 +10,16 @@
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\..\src\BuildingBlocks\Rge.BuildingBlocks.SharedKernel\Rge.BuildingBlocks.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\src\BuildingBlocks\Rge.BuildingBlocks.Api\Rge.BuildingBlocks.Api.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\Rge.BuildingBlocks.Infrastructure\Rge.BuildingBlocks.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Modules\Finance\Rge.Finance.Domain\Rge.Finance.Domain.csproj" />
     <ProjectReference Include="..\..\src\Modules\Finance\Rge.Finance.Infrastructure\Rge.Finance.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Modules\Documents\Rge.Documents.Domain\Rge.Documents.Domain.csproj" />
     <ProjectReference Include="..\..\src\Modules\Documents\Rge.Documents.Infrastructure\Rge.Documents.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\CostAllocation\Rge.CostAllocation.Infrastructure\Rge.CostAllocation.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Modules\Identity\Rge.Identity.Infrastructure\Rge.Identity.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Identity\Rge.Identity.Api\Rge.Identity.Api.csproj" />
   </ItemGroup>
 </Project>

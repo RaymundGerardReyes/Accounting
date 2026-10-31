@@ -467,12 +467,15 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.NET.Test.Sdk": "[17.12.0, )",
+          "Rge.BuildingBlocks.Api": "[1.0.0, )",
           "Rge.BuildingBlocks.Infrastructure": "[1.0.0, )",
           "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )",
+          "Rge.CostAllocation.Infrastructure": "[1.0.0, )",
           "Rge.Documents.Domain": "[1.0.0, )",
           "Rge.Documents.Infrastructure": "[1.0.0, )",
           "Rge.Finance.Domain": "[1.0.0, )",
           "Rge.Finance.Infrastructure": "[1.0.0, )",
+          "Rge.Identity.Api": "[1.0.0, )",
           "Rge.Identity.Infrastructure": "[1.0.0, )",
           "xunit": "[2.9.2, )",
           "xunit.runner.visualstudio": "[2.8.2, )"

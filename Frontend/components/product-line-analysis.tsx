@@ -19,22 +19,40 @@ import {
   YAxis,
 } from "recharts"
 
-interface ProductLineAnalysisProps {
+export interface ProductItem {
+  product: string
+  unitCost: number
+  volume: number
+  margin: number
+  revenue: number
+  profit: number
+  status: string
+}
+
+export interface ProductDataPayload {
+  productData?: any[]
+  profitabilityData?: any[]
+  trendData?: any[]
+  products?: any[]
+}
+
+export interface ProductLineAnalysisProps {
   onBack: () => void
+  initialData?: ProductDataPayload | any[]
 }
 
-interface ProductData {
-  productData: any[]
-  profitabilityData: any[]
-  trendData: any[]
-}
-
-export function ProductLineAnalysis({ onBack }: ProductLineAnalysisProps) {
-  const [data, setData] = useState<ProductData | null>(null)
-  const [loading, setLoading] = useState(true)
+export function ProductLineAnalysis({ onBack, initialData }: ProductLineAnalysisProps) {
+  const [data, setData] = useState<any | null>(initialData ?? null)
+  const [loading, setLoading] = useState(initialData === undefined)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (initialData !== undefined) {
+      setData(initialData)
+      setLoading(false)
+      return
+    }
+
     const fetchProductData = async () => {
       try {
         const response = await fetch("/api/products")
@@ -51,7 +69,7 @@ export function ProductLineAnalysis({ onBack }: ProductLineAnalysisProps) {
     }
 
     fetchProductData()
-  }, [])
+  }, [initialData])
 
   if (loading) {
     return <div className="p-8 text-center text-sm text-muted-foreground">Loading product analysis...</div>
@@ -72,12 +90,56 @@ export function ProductLineAnalysis({ onBack }: ProductLineAnalysisProps) {
     return <div className="p-8 text-center text-sm text-muted-foreground">No product data available.</div>
   }
 
-  const { productData, profitabilityData, trendData } = data
+  // Handle both array responses (from .NET) and object responses (from Python / JSON)
+  const rawProductList: any[] = Array.isArray(data)
+    ? data
+    : Array.isArray((data as any)?.productData)
+      ? (data as any).productData
+      : Array.isArray((data as any)?.products)
+        ? (data as any).products
+        : []
 
-  const totalVolume = productData.reduce((sum, p) => sum + p.volume, 0)
-  const totalProfit = productData.reduce((sum, p) => sum + p.profit, 0)
-  const avgMargin = (productData.reduce((sum, p) => sum + p.margin, 0) / productData.length).toFixed(1)
-  const avgUnitCost = (productData.reduce((sum, p) => sum + p.unitCost, 0) / productData.length).toFixed(0)
+  const productData: ProductItem[] = rawProductList.map((p: any, idx: number) => {
+    const name = p?.product ?? p?.name ?? `Product ${idx + 1}`
+    const unitCost = Number(p?.unitCost ?? (p?.unitDirectCostMinor != null ? p.unitDirectCostMinor / 100 : 0)) || 0
+    const volume = Number(p?.volume ?? p?.unitsProduced ?? 0) || 0
+    const revenue = Number(p?.revenue ?? (unitCost * volume * 1.3)) || 0
+    const profit = Number(p?.profit ?? (revenue - unitCost * volume)) || 0
+    const margin = Number(p?.margin ?? (revenue > 0 ? Math.round((profit / revenue) * 100) : 0)) || 0
+    const status = String(p?.status ?? (margin >= 30 ? "growing" : margin < 20 ? "declining" : "stable"))
+    return {
+      product: String(name),
+      unitCost,
+      volume,
+      margin,
+      revenue,
+      profit,
+      status,
+    }
+  })
+
+  const profitabilityData: any[] = Array.isArray((data as any)?.profitabilityData)
+    ? (data as any).profitabilityData
+    : productData.map((p) => ({
+        product: p.product,
+        revenue: p.revenue,
+        cost: Math.max(0, p.revenue - p.profit),
+        profit: p.profit,
+      }))
+
+  const trendData: any[] = Array.isArray((data as any)?.trendData)
+    ? (data as any).trendData
+    : []
+
+  const totalVolume = productData.reduce((sum, p) => sum + (p?.volume || 0), 0)
+  const totalProfit = productData.reduce((sum, p) => sum + (p?.profit || 0), 0)
+  const productCount = productData.length
+  const avgMargin = productCount > 0
+    ? (productData.reduce((sum, p) => sum + (p?.margin || 0), 0) / productCount).toFixed(1)
+    : "0.0"
+  const avgUnitCost = productCount > 0
+    ? (productData.reduce((sum, p) => sum + (p?.unitCost || 0), 0) / productCount).toFixed(0)
+    : "0"
 
   return (
     <div className="p-8 space-y-8 max-w-7xl mx-auto">
@@ -251,48 +313,54 @@ export function ProductLineAnalysis({ onBack }: ProductLineAnalysisProps) {
           <CardDescription className="text-xs">Unit cost, gross margin, and net contribution</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="divide-y divide-border/70">
-            {productData.map((product) => (
-              <div
-                key={product.product}
-                className="flex items-center justify-between px-6 py-4 hover:bg-muted/30 transition-colors"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2.5">
-                    <span className="font-semibold text-sm text-foreground">{product.product}</span>
-                    {product.status === "growing" && (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-muted text-foreground">
-                        <TrendingUp className="w-3 h-3" /> Growing
-                      </span>
-                    )}
-                    {product.status === "declining" && (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/20">
-                        <AlertCircle className="w-3 h-3" /> Declining
-                      </span>
-                    )}
+          {productData.length === 0 ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">
+              No active product lines found.
+            </div>
+          ) : (
+            <div className="divide-y divide-border/70">
+              {productData.map((product, idx) => (
+                <div
+                  key={`${product.product}-${idx}`}
+                  className="flex items-center justify-between px-6 py-4 hover:bg-muted/30 transition-colors"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2.5">
+                      <span className="font-semibold text-sm text-foreground">{product.product}</span>
+                      {product.status === "growing" && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-muted text-foreground">
+                          <TrendingUp className="w-3 h-3" /> Growing
+                        </span>
+                      )}
+                      {product.status === "declining" && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/20">
+                          <AlertCircle className="w-3 h-3" /> Declining
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex gap-6 text-xs text-muted-foreground font-mono tabular-nums">
+                      <span>Volume: {(product.volume || 0).toLocaleString()} units</span>
+                      <span>Revenue: ₱{((product.revenue || 0) / 1000).toFixed(0)}K</span>
+                    </div>
                   </div>
-                  <div className="flex gap-6 text-xs text-muted-foreground font-mono tabular-nums">
-                    <span>Volume: {product.volume.toLocaleString()} units</span>
-                    <span>Revenue: ₱{(product.revenue / 1000).toFixed(0)}K</span>
+                  <div className="flex items-center gap-8 font-mono tabular-nums">
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-foreground">₱{product.unitCost ?? 0}</p>
+                      <p className="text-[11px] text-muted-foreground">Unit Cost</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-foreground">{product.margin ?? 0}%</p>
+                      <p className="text-[11px] text-muted-foreground">Margin</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-foreground">₱{((product.profit || 0) / 1000).toFixed(0)}K</p>
+                      <p className="text-[11px] text-muted-foreground">Profit</p>
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-8 font-mono tabular-nums">
-                  <div className="text-right">
-                    <p className="text-sm font-semibold text-foreground">₱{product.unitCost}</p>
-                    <p className="text-[11px] text-muted-foreground">Unit Cost</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold text-foreground">{product.margin}%</p>
-                    <p className="text-[11px] text-muted-foreground">Margin</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-bold text-foreground">₱{(product.profit / 1000).toFixed(0)}K</p>
-                    <p className="text-[11px] text-muted-foreground">Profit</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

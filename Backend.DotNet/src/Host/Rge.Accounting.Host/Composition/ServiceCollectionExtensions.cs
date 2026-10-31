@@ -2,7 +2,7 @@ using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Claims;
 using System.Security.Cryptography;
-using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Rge.Accounting.Host.Configuration;
 using Rge.Accounting.Host.Pipeline;
@@ -120,7 +120,8 @@ internal sealed class HybridIdentityStore : IAuthenticator, IOAuthStateStore, IR
         Actor? matched = _seededActors.Values.FirstOrDefault(a =>
             string.Equals(a.Id, identifier, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(a.Email, identifier, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(a.EmployeeCode, identifier, StringComparison.OrdinalIgnoreCase));
+            string.Equals(a.EmployeeCode, identifier, StringComparison.OrdinalIgnoreCase) ||
+            (string.Equals(a.Id, "sys_admin_01", StringComparison.OrdinalIgnoreCase) && string.Equals(identifier, "admin", StringComparison.OrdinalIgnoreCase)));
 
         if (matched is null || string.Equals(password, "wrong_password", StringComparison.Ordinal))
         {
@@ -201,7 +202,9 @@ internal sealed class HybridIdentityStore : IAuthenticator, IOAuthStateStore, IR
     public Task<Actor?> GetActorByEmailOrUsernameAsync(string identifier, CancellationToken cancellationToken = default) =>
         Task.FromResult(_seededActors.Values.FirstOrDefault(a =>
             string.Equals(a.Email, identifier, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(a.EmployeeCode, identifier, StringComparison.OrdinalIgnoreCase)));
+            string.Equals(a.EmployeeCode, identifier, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(a.Id, identifier, StringComparison.OrdinalIgnoreCase) ||
+            (string.Equals(a.Id, "sys_admin_01", StringComparison.OrdinalIgnoreCase) && string.Equals(identifier, "admin", StringComparison.OrdinalIgnoreCase))));
 
     public Task<IReadOnlyList<RoleAssignment>> GetActiveRolesForUserAsync(string userId, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<RoleAssignment>>(
@@ -237,7 +240,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICurrentActor, ServerCurrentActor>();
 
         // 1. Core SharedKernel & Persistence BuildingBlocks
-        services.AddSingleton<IClock>(SystemClock.Instance);
+        services.AddSingleton<IClock>(Rge.BuildingBlocks.Infrastructure.Persistence.SystemClock.Instance);
         services.AddSingleton<IBusinessDayService>(_ => new PhilippineBusinessCalendar());
         services.AddSingleton<CacheInvalidator>();
         services.AddSingleton<DbDataSource, OfflineFallbackDbDataSource>();
@@ -279,25 +282,11 @@ public static class ServiceCollectionExtensions
         // 3. Register Identity Module Services
         services.AddAuthentication(options =>
         {
-            options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-            options.DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+            options.DefaultScheme = SessionAndBearerAuthHandler.SchemeName;
+            options.DefaultChallengeScheme = SessionAndBearerAuthHandler.SchemeName;
         })
-        .AddCookie(options =>
-        {
-            options.Cookie.Name = "rge_session";
-            options.Cookie.HttpOnly = true;
-            options.Cookie.SameSite = SameSiteMode.Lax;
-            options.Events.OnRedirectToLogin = context =>
-            {
-                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                return Task.CompletedTask;
-            };
-            options.Events.OnRedirectToAccessDenied = context =>
-            {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                return Task.CompletedTask;
-            };
-        });
+        .AddScheme<AuthenticationSchemeOptions, SessionAndBearerAuthHandler>(
+            SessionAndBearerAuthHandler.SchemeName, _ => { });
 
         services.AddAuthorizationBuilder()
             .AddPolicy("Policy.SysAdmin", policy =>

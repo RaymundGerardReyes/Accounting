@@ -38,19 +38,18 @@ public sealed class LegacyDashboardReader
                 actual,
                 variance,
                 status,
-                variance_percent = variancePercent,
-                variancePercent
+                variance_percent = variancePercent
             };
         }).ToList();
 
         var costTrendData = new[]
         {
-            new { month = "Jan", allocated = 125000, actual = 128000, variance = -3000, variance_percent = -2.4, variancePercent = -2.4 },
-            new { month = "Feb", allocated = 132000, actual = 129500, variance = 2500, variance_percent = 1.9, variancePercent = 1.9 },
-            new { month = "Mar", allocated = 128000, actual = 135000, variance = -7000, variance_percent = -5.5, variancePercent = -5.5 },
-            new { month = "Apr", allocated = 140000, actual = 138000, variance = 2000, variance_percent = 1.4, variancePercent = 1.4 },
-            new { month = "May", allocated = 145000, actual = 142000, variance = 3000, variance_percent = 2.1, variancePercent = 2.1 },
-            new { month = "Jun", allocated = 152000, actual = 155000, variance = -3000, variance_percent = -2.0, variancePercent = -2.0 }
+            new { month = "Jan", allocated = 125000, actual = 128000, variance = -3000, variance_percent = -2.4 },
+            new { month = "Feb", allocated = 132000, actual = 129500, variance = 2500, variance_percent = 1.9 },
+            new { month = "Mar", allocated = 128000, actual = 135000, variance = -7000, variance_percent = -5.5 },
+            new { month = "Apr", allocated = 140000, actual = 138000, variance = 2000, variance_percent = 1.4 },
+            new { month = "May", allocated = 145000, actual = 142000, variance = 3000, variance_percent = 2.1 },
+            new { month = "Jun", allocated = 152000, actual = 155000, variance = -3000, variance_percent = -2.0 }
         };
 
         var varianceTrendData = new[]
@@ -72,13 +71,9 @@ public sealed class LegacyDashboardReader
             departments = snapshot.Departments,
             products = snapshot.Products,
             department_metrics = departmentMetrics,
-            departmentMetrics,
             department_data = departmentData,
-            departmentData,
             cost_trend_data = costTrendData,
-            costTrendData,
-            variance_trend_data = varianceTrendData,
-            varianceTrendData
+            variance_trend_data = varianceTrendData
         };
     }
 
@@ -125,10 +120,10 @@ public sealed class LegacyDashboardReader
             case "manufacturing":
                 costBreakdown =
                 [
-                    new { category = "Labor", allocated = 180000, actual = 185000, variance = -5000, variance_percent = -2.8, variancePercent = -2.8 },
-                    new { category = "Materials", allocated = 150000, actual = 148000, variance = 2000, variance_percent = 1.3, variancePercent = 1.3 },
-                    new { category = "Overhead", allocated = 90000, actual = 92000, variance = -2000, variance_percent = -2.2, variancePercent = -2.2 },
-                    new { category = "Utilities", allocated = 30000, actual = 28000, variance = 2000, variance_percent = 6.7, variancePercent = 6.7 }
+                    new { category = "Labor", allocated = 180000, actual = 185000, variance = -5000, variance_percent = -2.8 },
+                    new { category = "Materials", allocated = 150000, actual = 148000, variance = 2000, variance_percent = 1.3 },
+                    new { category = "Overhead", allocated = 90000, actual = 92000, variance = -2000, variance_percent = -2.2 },
+                    new { category = "Utilities", allocated = 30000, actual = 28000, variance = 2000, variance_percent = 6.7 }
                 ];
                 monthlyTrend =
                 [
@@ -145,7 +140,6 @@ public sealed class LegacyDashboardReader
                     actual = 453000,
                     variance = -3000,
                     variance_percent = -0.67,
-                    variancePercent = -0.67,
                     status = "unfavorable"
                 };
                 break;
@@ -153,10 +147,10 @@ public sealed class LegacyDashboardReader
             case "assembly":
                 costBreakdown =
                 [
-                    new { category = "Assembly Labor", allocated = 140000, actual = 135000, variance = 5000, variance_percent = 3.6, variancePercent = 3.6 },
-                    new { category = "Components & Fasteners", allocated = 90000, actual = 88000, variance = 2000, variance_percent = 2.2, variancePercent = 2.2 },
-                    new { category = "Tooling Maintenance", allocated = 45000, actual = 44500, variance = 500, variance_percent = 1.1, variancePercent = 1.1 },
-                    new { category = "Assembly Line Power", allocated = 25000, actual = 24500, variance = 500, variance_percent = 2.0, variancePercent = 2.0 }
+                    new { category = "Assembly Labor", allocated = 140000, actual = 135000, variance = 5000, variance_percent = 3.6 },
+                    new { category = "Components & Fasteners", allocated = 90000, actual = 88000, variance = 2000, variance_percent = 2.2 },
+                    new { category = "Tooling Maintenance", allocated = 45000, actual = 44500, variance = 500, variance_percent = 1.1 },
+                    new { category = "Assembly Line Power", allocated = 25000, actual = 24500, variance = 500, variance_percent = 2.0 }
                 ];
                 monthlyTrend =
                 [
@@ -173,7 +167,6 @@ public sealed class LegacyDashboardReader
                     actual = 292000,
                     variance = 8000,
                     variance_percent = 2.67,
-                    variancePercent = 2.67,
                     status = "favorable"
                 };
                 break;
@@ -181,10 +174,10 @@ public sealed class LegacyDashboardReader
             case "qa":
                 costBreakdown =
                 [
-                    new { category = "Quality Inspection Labor", allocated = 75000, actual = 73500, variance = 1500, variance_percent = 2.0, variancePercent = 2.0 },
-                    new { category = "Testing Equipment & Reagents", allocated = 40000, actual = 39800, variance = 200, variance_percent = 0.5, variancePercent = 0.5 },
-                    new { category = "Calibration & Standards", allocated = 20000, actual = 19700, variance = 300, variance_percent = 1.5, variancePercent = 1.5 },
-                    new { category = "Compliance & Certifications", allocated = 15000, actual = 15000, variance = 0, variance_percent = 0.0, variancePercent = 0.0 }
+                    new { category = "Quality Inspection Labor", allocated = 75000, actual = 73500, variance = 1500, variance_percent = 2.0 },
+                    new { category = "Testing Equipment & Reagents", allocated = 40000, actual = 39800, variance = 200, variance_percent = 0.5 },
+                    new { category = "Calibration & Standards", allocated = 20000, actual = 19700, variance = 300, variance_percent = 1.5 },
+                    new { category = "Compliance & Certifications", allocated = 15000, actual = 15000, variance = 0, variance_percent = 0.0 }
                 ];
                 monthlyTrend =
                 [
@@ -201,7 +194,6 @@ public sealed class LegacyDashboardReader
                     actual = 148000,
                     variance = 2000,
                     variance_percent = 1.33,
-                    variancePercent = 1.33,
                     status = "favorable"
                 };
                 break;
@@ -209,10 +201,10 @@ public sealed class LegacyDashboardReader
             case "logistics":
                 costBreakdown =
                 [
-                    new { category = "Freight & Shipping", allocated = 50000, actual = 51000, variance = -1000, variance_percent = -2.0, variancePercent = -2.0 },
-                    new { category = "Warehousing & Storage", allocated = 25000, actual = 24500, variance = 500, variance_percent = 2.0, variancePercent = 2.0 },
-                    new { category = "Fleet Fuel & Maintenance", allocated = 15000, actual = 14800, variance = 200, variance_percent = 1.3, variancePercent = 1.3 },
-                    new { category = "Packaging Supplies", allocated = 10000, actual = 9700, variance = 300, variance_percent = 3.0, variancePercent = 3.0 }
+                    new { category = "Freight & Shipping", allocated = 50000, actual = 51000, variance = -1000, variance_percent = -2.0 },
+                    new { category = "Warehousing & Storage", allocated = 25000, actual = 24500, variance = 500, variance_percent = 2.0 },
+                    new { category = "Fleet Fuel & Maintenance", allocated = 15000, actual = 14800, variance = 200, variance_percent = 1.3 },
+                    new { category = "Packaging Supplies", allocated = 10000, actual = 9700, variance = 300, variance_percent = 3.0 }
                 ];
                 monthlyTrend =
                 [
@@ -229,7 +221,6 @@ public sealed class LegacyDashboardReader
                     actual = 100000,
                     variance = 0,
                     variance_percent = 0.0,
-                    variancePercent = 0.0,
                     status = "neutral"
                 };
                 break;
@@ -246,8 +237,8 @@ public sealed class LegacyDashboardReader
                 double dVarPct = dept.BudgetLimitMinor > 0 ? Math.Round(((double)dept.VarianceMinor / dept.BudgetLimitMinor) * 100.0, 2) : 0;
                 costBreakdown =
                 [
-                    new { category = "Direct Operations", allocated = dAllocated * 0.65, actual = dept.DirectCostMinor / 100.0, variance = (dAllocated * 0.65) - (dept.DirectCostMinor / 100.0), variance_percent = 0.0, variancePercent = 0.0 },
-                    new { category = "Overhead Allocation", allocated = dAllocated * 0.35, actual = dept.AllocatedOverheadMinor / 100.0, variance = (dAllocated * 0.35) - (dept.AllocatedOverheadMinor / 100.0), variance_percent = 0.0, variancePercent = 0.0 }
+                    new { category = "Direct Operations", allocated = dAllocated * 0.65, actual = dept.DirectCostMinor / 100.0, variance = (dAllocated * 0.65) - (dept.DirectCostMinor / 100.0), variance_percent = 0.0 },
+                    new { category = "Overhead Allocation", allocated = dAllocated * 0.35, actual = dept.AllocatedOverheadMinor / 100.0, variance = (dAllocated * 0.35) - (dept.AllocatedOverheadMinor / 100.0), variance_percent = 0.0 }
                 ];
                 monthlyTrend =
                 [
@@ -264,7 +255,6 @@ public sealed class LegacyDashboardReader
                     actual = dActual,
                     variance = dVariance,
                     variance_percent = dVarPct,
-                    variancePercent = dVarPct,
                     status = dStatus
                 };
                 break;
@@ -272,11 +262,8 @@ public sealed class LegacyDashboardReader
 
         return new
         {
-            costBreakdown,
             cost_breakdown = costBreakdown,
-            monthlyTrend,
             monthly_trend = monthlyTrend,
-            departmentStats,
             department_stats = departmentStats,
             id = dept?.Id ?? $"dept_{slug}",
             name = dept?.Name ?? slug,
