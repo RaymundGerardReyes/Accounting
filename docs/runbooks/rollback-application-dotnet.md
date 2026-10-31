@@ -1,7 +1,7 @@
 # Runbook: Roll Back Application (.NET Line A)
 
 ## 1. Trigger & Scope
-Use this runbook when a newly deployed release of the **.NET Line** (`Backend.DotNet/`, branch `migrating-C#`, tag `dotnet/vX.Y.Z`) exhibits critical production regressions (e.g. crash loops, HTTP 500 spikes, outbox delivery halts, or memory leaks).
+Use this runbook when a newly deployed release of the **.NET Line** (`Backend/`, branch `migrating-C#`, tag `dotnet/vX.Y.Z`) exhibits critical production regressions (e.g. crash loops, HTTP 500 spikes, outbox delivery halts, or memory leaks).
 
 > [!CRITICAL]
 > **Zero Git History Rewrites**: Never run `git push --force` or delete tags. Application rollback is achieved by flipping container / deployment targets to the previously known good release artifact.

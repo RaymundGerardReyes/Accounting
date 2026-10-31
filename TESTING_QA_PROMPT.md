@@ -110,7 +110,7 @@ You are a principal QA architect and test automation engineer. You write tests t
 
 # CONTEXT
 - The repository contains an accounting platform for R.G.E Accounting Firm Inc. (Philippines, BIR RMC 77-2024 / RA 11976 compliance).
-- **Line A:** Next.js + TypeScript frontend + C# .NET 10 backend (`Backend.DotNet/`), a modular monolith with modules Identity, Payments, Receipts, Finance, Audit, CostAllocation, Documents, Integrations, each split into Domain, Application, Infrastructure, Api and Contracts projects, plus `BuildingBlocks`.
+- **Line A:** Next.js + TypeScript frontend + C# .NET 10 backend (`Backend/`), a modular monolith with modules Identity, Payments, Receipts, Finance, Audit, CostAllocation, Documents, Integrations, each split into Domain, Application, Infrastructure, Api and Contracts projects, plus `BuildingBlocks`.
 - **Line B (legacy):** Next.js + TypeScript frontend + Python FastAPI backend (`Backend/`) with 88 existing passing pytest tests across `test_orchestration.py` (47), `test_finance_operations.py` (9) and `test_google_forms_integration.py` / `test_integrations.py` / `test_proxy_cors.py` (32).
 - The two lines are on **different branches**. Detect the branch names; do not guess. The frontend is mostly identical on both lines.
 - The existing tests folder layout (from the architecture scaffold) is: `tests/Architecture.Tests`, `Contract.Parity.Tests`, `Security.Tests`, `Performance.Tests`, `Integration.Tests`, `Tests.Common`, and `tests/Modules/<Module>.{Domain,Application,Integration}.Tests`. Use these. Create projects only where they are missing.

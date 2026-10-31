@@ -3,7 +3,16 @@
         "method":  "GET",
         "path":  "/version",
         "module":  "platform",
-        "handler_ref":  "Backend.DotNet\\src\\Host\\Rge.Accounting.Host\\Composition\\EndpointRouteBuilderExtensions.cs:35",
+        "handler_ref":  "Backend\\src\\Host\\Rge.Accounting.Host\\Composition\\EndpointRouteBuilderExtensions.cs:34",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/version",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Host\\Rge.Accounting.Host\\Composition\\EndpointRouteBuilderExtensions.cs:37",
         "summary":  "",
         "requires_auth":  false,
         "runtime":  "dotnet"
@@ -12,7 +21,7 @@
         "method":  "GET",
         "path":  "/health",
         "module":  "platform",
-        "handler_ref":  "Backend.DotNet\\src\\Host\\Rge.Accounting.Host\\Composition\\EndpointRouteBuilderExtensions.cs:43",
+        "handler_ref":  "Backend\\src\\Host\\Rge.Accounting.Host\\Composition\\EndpointRouteBuilderExtensions.cs:44",
         "summary":  "",
         "requires_auth":  false,
         "runtime":  "dotnet"
@@ -21,7 +30,934 @@
         "method":  "GET",
         "path":  "/api/health",
         "module":  "platform",
-        "handler_ref":  "Backend.DotNet\\src\\Host\\Rge.Accounting.Host\\Composition\\EndpointRouteBuilderExtensions.cs:47",
+        "handler_ref":  "Backend\\src\\Host\\Rge.Accounting.Host\\Composition\\EndpointRouteBuilderExtensions.cs:48",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/audit-events",
+        "module":  "audit",
+        "handler_ref":  "Backend\\src\\Modules\\Audit\\Rge.Audit.Api\\AuditEndpoints.cs:23",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/cost-allocation",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\src\\Modules\\CostAllocation\\Rge.CostAllocation.Api\\CostAllocationEndpoints.cs:22",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/cost-allocation/department",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\src\\Modules\\CostAllocation\\Rge.CostAllocation.Api\\CostAllocationEndpoints.cs:32",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/dashboard",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\src\\Modules\\CostAllocation\\Rge.CostAllocation.Api\\CostAllocationEndpoints.cs:43",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/department/{name}",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\src\\Modules\\CostAllocation\\Rge.CostAllocation.Api\\CostAllocationEndpoints.cs:46",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/products",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\src\\Modules\\CostAllocation\\Rge.CostAllocation.Api\\CostAllocationEndpoints.cs:59",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/variance",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\src\\Modules\\CostAllocation\\Rge.CostAllocation.Api\\CostAllocationEndpoints.cs:62",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/configuration",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\src\\Modules\\CostAllocation\\Rge.CostAllocation.Api\\CostAllocationEndpoints.cs:66",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "PUT",
+        "path":  "/api/configuration",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\src\\Modules\\CostAllocation\\Rge.CostAllocation.Api\\CostAllocationEndpoints.cs:69",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/configuration/departments",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\src\\Modules\\CostAllocation\\Rge.CostAllocation.Api\\CostAllocationEndpoints.cs:85",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/configuration/users",
+        "module":  "costalloc",
+        "handler_ref":  "Backend\\src\\Modules\\CostAllocation\\Rge.CostAllocation.Api\\CostAllocationEndpoints.cs:95",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/documents",
+        "module":  "documents",
+        "handler_ref":  "Backend\\src\\Modules\\Documents\\Rge.Documents.Api\\DocumentEndpoints.cs:21",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/documents",
+        "module":  "documents",
+        "handler_ref":  "Backend\\src\\Modules\\Documents\\Rge.Documents.Api\\DocumentEndpoints.cs:51",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/documents/{doc_id}/download",
+        "module":  "documents",
+        "handler_ref":  "Backend\\src\\Modules\\Documents\\Rge.Documents.Api\\DocumentEndpoints.cs:61",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\CashAdvances\\CashAdvanceEndpoints.cs:34",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\CashAdvances\\CashAdvanceEndpoints.cs:48",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/{advance_id}",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\CashAdvances\\CashAdvanceEndpoints.cs:77",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{advance_id}/cash-return",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\CashAdvances\\CashAdvanceEndpoints.cs:89",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{advance_id}/close",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\CashAdvances\\CashAdvanceEndpoints.cs:110",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{advance_id}/decide",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\CashAdvances\\CashAdvanceEndpoints.cs:129",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{advance_id}/disbursements",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\CashAdvances\\CashAdvanceEndpoints.cs:150",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{advance_id}/reimbursement-settle",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\CashAdvances\\CashAdvanceEndpoints.cs:171",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{advance_id}/submit",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\CashAdvances\\CashAdvanceEndpoints.cs:192",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{disbursement_id}/bank-approve",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Disbursements\\DisbursementEndpoints.cs:30",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{disbursement_id}/exception-state",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Disbursements\\DisbursementEndpoints.cs:47",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{disbursement_id}/execute",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Disbursements\\DisbursementEndpoints.cs:66",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{disbursement_id}/verify",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Disbursements\\DisbursementEndpoints.cs:86",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{disbursement_id}/verify-evidence",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Disbursements\\DisbursementEndpoints.cs:102",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Exceptions\\ExceptionEndpoints.cs:30",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{register_id}/resolve",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Exceptions\\ExceptionEndpoints.cs:43",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Exceptions\\ExceptionEndpoints.cs:61",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Exceptions\\ExceptionEndpoints.cs:75",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{exception_id}/decide",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Exceptions\\ExceptionEndpoints.cs:101",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\ExpenseReports\\ExpenseReportEndpoints.cs:33",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\ExpenseReports\\ExpenseReportEndpoints.cs:47",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/{report_id}",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\ExpenseReports\\ExpenseReportEndpoints.cs:72",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "PATCH",
+        "path":  "/{report_id}",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\ExpenseReports\\ExpenseReportEndpoints.cs:84",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{report_id}/evaluate",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\ExpenseReports\\ExpenseReportEndpoints.cs:103",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{report_id}/lines",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\ExpenseReports\\ExpenseReportEndpoints.cs:115",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{report_id}/review",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\ExpenseReports\\ExpenseReportEndpoints.cs:142",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{report_id}/submit",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\ExpenseReports\\ExpenseReportEndpoints.cs:162",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Payables\\PayableEndpoints.cs:33",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Payables\\PayableEndpoints.cs:47",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{payable_id}/payments",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Payables\\PayableEndpoints.cs:76",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{payment_id}/bank-approve",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Payables\\PayableEndpoints.cs:97",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{payment_id}/exception-state",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Payables\\PayableEndpoints.cs:113",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{payment_id}/execute",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Payables\\PayableEndpoints.cs:130",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{payment_id}/reconcile",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Payables\\PayableEndpoints.cs:151",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{payment_id}/verify",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Payables\\PayableEndpoints.cs:169",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Policies\\PolicyEndpoints.cs:30",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{policy_code}/versions",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Policies\\PolicyEndpoints.cs:41",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/versions/{version_id}/approve",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Policies\\PolicyEndpoints.cs:75",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/versions/{version_id}/retire",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Policies\\PolicyEndpoints.cs:93",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/versions/{version_id}/submit",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Policies\\PolicyEndpoints.cs:111",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Procurement\\ProcurementEndpoints.cs:30",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Procurement\\ProcurementEndpoints.cs:44",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/{pr_id}",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Procurement\\ProcurementEndpoints.cs:73",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{pr_id}/decide",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Procurement\\ProcurementEndpoints.cs:85",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{pr_id}/submit",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Procurement\\ProcurementEndpoints.cs:105",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/approval-matrix",
+        "module":  "finance",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Reporting\\ReportingEndpoints.cs:27",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/business-confirmations",
+        "module":  "finance",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Reporting\\ReportingEndpoints.cs:34",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/dashboard/summary",
+        "module":  "finance",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Reporting\\ReportingEndpoints.cs:45",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/kpi-definitions",
+        "module":  "finance",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Reporting\\ReportingEndpoints.cs:60",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/tracker",
+        "module":  "finance",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Reporting\\ReportingEndpoints.cs:71",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/tracker/export.csv",
+        "module":  "finance",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Reporting\\ReportingEndpoints.cs:87",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Vendors\\VendorEndpoints.cs:34",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Vendors\\VendorEndpoints.cs:45",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{change_id}/decide",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Vendors\\VendorEndpoints.cs:66",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Vendors\\VendorEndpoints.cs:84",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Vendors\\VendorEndpoints.cs:97",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{vendor_id}/bank-changes",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Vendors\\VendorEndpoints.cs:123",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/{vendor_id}/verify",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Finance\\Rge.Finance.Api\\Vendors\\VendorEndpoints.cs:145",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/auth/callback/{provider}",
+        "module":  "identity",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:61",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/auth/csrf",
+        "module":  "identity",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:90",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/auth/login",
+        "module":  "identity",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:118",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/auth/logout",
+        "module":  "identity",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:166",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/auth/oauth/{provider}",
+        "module":  "identity",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:186",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/auth/session",
+        "module":  "identity",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:213",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/auth/switch-user",
+        "module":  "identity",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:257",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/finance/auth/act-as",
+        "module":  "identity",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\FinanceIdentityEndpoints.cs:38",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/auth/me",
+        "module":  "identity",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\FinanceIdentityEndpoints.cs:74",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/finance/users",
+        "module":  "identity",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\FinanceIdentityEndpoints.cs:132",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/integrations/google-forms/status",
+        "module":  "integrations",
+        "handler_ref":  "Backend\\src\\Modules\\Integrations\\Rge.Integrations.Api\\GoogleFormsEndpoints.cs:22",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/integrations/google-forms/submit",
+        "module":  "integrations",
+        "handler_ref":  "Backend\\src\\Modules\\Integrations\\Rge.Integrations.Api\\GoogleFormsEndpoints.cs:33",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/integrations/configure",
+        "module":  "integrations",
+        "handler_ref":  "Backend\\src\\Modules\\Integrations\\Rge.Integrations.Api\\IntegrationEndpoints.cs:24",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/integrations/email/test",
+        "module":  "integrations",
+        "handler_ref":  "Backend\\src\\Modules\\Integrations\\Rge.Integrations.Api\\IntegrationEndpoints.cs:36",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/integrations/paymongo/test",
+        "module":  "integrations",
+        "handler_ref":  "Backend\\src\\Modules\\Integrations\\Rge.Integrations.Api\\IntegrationEndpoints.cs:48",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/integrations/status",
+        "module":  "integrations",
+        "handler_ref":  "Backend\\src\\Modules\\Integrations\\Rge.Integrations.Api\\IntegrationEndpoints.cs:60",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/admin/fulfillment-outbox",
+        "module":  "payments",
+        "handler_ref":  "Backend\\src\\Modules\\Payments\\Rge.Payments.Api\\Admin\\OutboxEndpoints.cs:17",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/admin/fulfillment-outbox/process",
+        "module":  "payments",
+        "handler_ref":  "Backend\\src\\Modules\\Payments\\Rge.Payments.Api\\Admin\\OutboxEndpoints.cs:21",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/admin/payments/{payment_id}/reconcile",
+        "module":  "payments",
+        "handler_ref":  "Backend\\src\\Modules\\Payments\\Rge.Payments.Api\\Admin\\ReconcileEndpoints.cs:17",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/admin/payments/reconcile-all",
+        "module":  "payments",
+        "handler_ref":  "Backend\\src\\Modules\\Payments\\Rge.Payments.Api\\Admin\\ReconcileEndpoints.cs:21",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/admin/webhook-events",
+        "module":  "payments",
+        "handler_ref":  "Backend\\src\\Modules\\Payments\\Rge.Payments.Api\\Admin\\WebhookEventsEndpoint.cs:17",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/payments/{payment_id}/expire",
+        "module":  "payments",
+        "handler_ref":  "Backend\\src\\Modules\\Payments\\Rge.Payments.Api\\Attempts\\ExpireEndpoint.cs:17",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/payments/{payment_id}/fail",
+        "module":  "payments",
+        "handler_ref":  "Backend\\src\\Modules\\Payments\\Rge.Payments.Api\\Attempts\\FailEndpoint.cs:17",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/payments/{payment_id}",
+        "module":  "payments",
+        "handler_ref":  "Backend\\src\\Modules\\Payments\\Rge.Payments.Api\\Attempts\\GetPaymentEndpoint.cs:16",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/orders/{order_id}/payment-attempts",
+        "module":  "payments",
+        "handler_ref":  "Backend\\src\\Modules\\Payments\\Rge.Payments.Api\\Attempts\\InitiateAttemptEndpoint.cs:17",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/orders",
+        "module":  "payments",
+        "handler_ref":  "Backend\\src\\Modules\\Payments\\Rge.Payments.Api\\Orders\\CreateOrderEndpoint.cs:18",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/orders/{order_id}",
+        "module":  "payments",
+        "handler_ref":  "Backend\\src\\Modules\\Payments\\Rge.Payments.Api\\Orders\\GetOrderEndpoint.cs:16",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/orders",
+        "module":  "payments",
+        "handler_ref":  "Backend\\src\\Modules\\Payments\\Rge.Payments.Api\\Orders\\ListOrdersEndpoint.cs:16",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/payments/attempts/{attempt_id}/simulate",
+        "module":  "payments",
+        "handler_ref":  "Backend\\src\\Modules\\Payments\\Rge.Payments.Api\\Sandbox\\SandboxEndpoints.cs:18",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/sandbox/create-and-expire-test",
+        "module":  "payments",
+        "handler_ref":  "Backend\\src\\Modules\\Payments\\Rge.Payments.Api\\Sandbox\\SandboxEndpoints.cs:22",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/sandbox/simulate-webhook",
+        "module":  "payments",
+        "handler_ref":  "Backend\\src\\Modules\\Payments\\Rge.Payments.Api\\Sandbox\\SandboxEndpoints.cs:26",
         "summary":  "",
         "requires_auth":  false,
         "runtime":  "dotnet"
@@ -30,7 +966,52 @@
         "method":  "POST",
         "path":  "/api/v1/webhooks/paymongo",
         "module":  "payments",
-        "handler_ref":  "Backend.DotNet\\src\\Modules\\Payments\\Rge.Payments.Api\\Webhooks\\PayMongoWebhookEndpoint.cs:26",
+        "handler_ref":  "Backend\\src\\Modules\\Payments\\Rge.Payments.Api\\Webhooks\\PayMongoWebhookEndpoint.cs:26",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/payments/{payment_id}/receipt",
+        "module":  "receipts",
+        "handler_ref":  "Backend\\src\\Modules\\Receipts\\Rge.Receipts.Api\\ReceiptEndpoints.cs:32",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/payments/{payment_id}/receipt/pdf",
+        "module":  "receipts",
+        "handler_ref":  "Backend\\src\\Modules\\Receipts\\Rge.Receipts.Api\\ReceiptEndpoints.cs:43",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "POST",
+        "path":  "/api/v1/payments/{payment_id}/receipt/email",
+        "module":  "receipts",
+        "handler_ref":  "Backend\\src\\Modules\\Receipts\\Rge.Receipts.Api\\ReceiptEndpoints.cs:57",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/orders/{order_id}/receipt",
+        "module":  "receipts",
+        "handler_ref":  "Backend\\src\\Modules\\Receipts\\Rge.Receipts.Api\\ReceiptEndpoints.cs:70",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/api/v1/orders/{order_id}/receipt/pdf",
+        "module":  "receipts",
+        "handler_ref":  "Backend\\src\\Modules\\Receipts\\Rge.Receipts.Api\\ReceiptEndpoints.cs:81",
         "summary":  "",
         "requires_auth":  false,
         "runtime":  "dotnet"

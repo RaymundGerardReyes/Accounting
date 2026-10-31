@@ -3,7 +3,7 @@
 ## 1. Overview & Dual-Line Architecture
 
 The **R.G.E Accounting Platform** operates two concurrent, production-grade release lines sharing an identical Next.js 15.2.4 frontend:
-- **Line A (.NET 10)**: `Backend.DotNet/` hosted on branch `migrating-C#`.
+- **Line A (.NET 10)**: `Backend/` hosted on branch `migrating-C#`.
 - **Line B (FastAPI Legacy)**: `Backend/` hosted on branch `legacy-python`.
 
 Because the UI codebase is ~95–100% identical across both lines, maintaining parity without duplicating UI development effort requires strict **drift control** and **asymmetric cherry-picking**.
@@ -18,7 +18,7 @@ Because the UI codebase is ~95–100% identical across both lines, maintaining p
                  ▼                                       ▼
     ┌─────────────────────────┐             ┌─────────────────────────┐
     │  Line A: migrating-C#   │             │ Line B: legacy-python   │
-    │  Backend.DotNet (.NET)  │             │ Backend (FastAPI)       │
+    │  Backend (.NET)         │             │ Backend (FastAPI)       │
     │  Tag: dotnet/vX.Y.Z     │             │ Tag: python/vX.Y.Z      │
     └─────────────────────────┘             └─────────────────────────┘
 ```
@@ -38,7 +38,7 @@ Synchronization MUST be performed under any of the following triggers:
 ## 3. Ground Rules & Invariants
 
 > [!IMPORTANT]
-> **Single-Scope Rule**: A commit touching `Frontend/` MUST NEVER modify backend files (`Backend/`, `Backend.DotNet/`, `db/`). If a commit mixes scopes, it cannot be cleanly cherry-picked and must be split before merging.
+> **Single-Scope Rule**: A commit touching `Frontend/` MUST NEVER modify backend files (`Backend/`, `db/`). If a commit mixes scopes, it cannot be cleanly cherry-picked and must be split before merging.
 
 > [!WARNING]
 > **No Direct Merges Between Long-Lived Branches**: Never run `git merge legacy-python` into `migrating-C#` or vice versa. Doing so merges the backend implementations into each other, destroying line isolation. Always use `git cherry-pick -x` via synchronization branches (`sync/frontend-*`).

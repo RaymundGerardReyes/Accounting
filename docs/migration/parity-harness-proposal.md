@@ -1,7 +1,7 @@
 # Automated Contract & Parity Verification Harness Proposal
 
 **Author**: Senior Release Engineer & Migration Auditor  
-**Scope**: Behavioral Parity Verification between Python FastAPI (`Backend/`) and C# ASP.NET Core (.NET 10, `Backend.DotNet/`)
+**Scope**: Behavioral Parity Verification between Python FastAPI (`Backend/`) and C# ASP.NET Core (.NET 10, `Backend/`)
 
 ---
 

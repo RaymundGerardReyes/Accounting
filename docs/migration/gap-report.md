@@ -46,7 +46,7 @@ Milestone v0.5.0 (Integrations & Alloc): 0 / 19 routes implemented (0.0%)
 
 ## 3. Routes Missing in .NET (The 110-Route Gap List)
 
-The following 110 endpoints exist in the legacy Python runtime but have no active Minimal API route registration in `Backend.DotNet/`:
+The following 110 endpoints exist in the legacy Python runtime but have no active Minimal API route registration in `Backend/`:
 
 ### Platform (2 endpoints missing)
 1. `GET /api/health` (`PLT-001`, `Backend/app.py:186`)
@@ -185,5 +185,5 @@ The following 110 endpoints exist in the legacy Python runtime but have no activ
    - Calling preview work "releases" misled human auditors regarding the state of migration parity.
 2. **Path Forward**:
    - Work module by module following the milestone plan: `v0.1.0` (Foundation), `v0.2.0` (Identity/Audit), `v0.3.0` (Payments/Receipts), `v0.4.0` (Finance), `v0.5.0` (Integrations/Alloc/Docs).
-   - Implement handlers in `Backend.DotNet/src/Modules/*/Api/`, wire integration tests, record parity artifacts under `docs/migration/evidence/<id>/`, and only propose milestone tags when 100% of that module's rows are verified.
+   - Implement handlers in `Backend/src/Modules/*/Api/`, wire integration tests, record parity artifacts under `docs/migration/evidence/<id>/`, and only propose milestone tags when 100% of that module's rows are verified.
 

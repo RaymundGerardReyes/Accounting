@@ -358,11 +358,11 @@ public sealed class ChallengerVerificationTests
         string sqlPath = Path.Combine(AppContext.BaseDirectory, "../../../../../db/seed/user_credentials.sql");
         if (!File.Exists(sqlPath))
         {
-            sqlPath = Path.Combine(Directory.GetCurrentDirectory(), "Backend.DotNet/db/seed/user_credentials.sql");
+            sqlPath = Path.Combine(Directory.GetCurrentDirectory(), "Backend/db/seed/user_credentials.sql");
         }
         if (!File.Exists(sqlPath))
         {
-            sqlPath = @"E:\Accounting\Backend.DotNet\db\seed\user_credentials.sql";
+            sqlPath = @"E:\Accounting\Backend\db\seed\user_credentials.sql";
         }
 
         Assert.True(File.Exists(sqlPath), $"Seed SQL file not found at {sqlPath}");

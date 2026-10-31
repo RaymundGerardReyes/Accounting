@@ -8,7 +8,7 @@ on:
       - main
     paths:
       - "db/**"
-      - "Backend.DotNet/db/**"
+      - "Backend/db/**"
       - "Backend/models.py"
       - "Backend/finance_models.py"
   workflow_dispatch:
@@ -27,7 +27,7 @@ jobs:
       - name: Run Migration Compatibility Gate (.NET Migrations)
         shell: pwsh
         run: |
-          ./tools/versioning/check-migration-compat.ps1 -TargetPath "Backend.DotNet/db"
+          ./tools/versioning/check-migration-compat.ps1 -TargetPath "Backend/db"
 
       - name: Run Migration Compatibility Gate (Root/Legacy DB)
         shell: pwsh

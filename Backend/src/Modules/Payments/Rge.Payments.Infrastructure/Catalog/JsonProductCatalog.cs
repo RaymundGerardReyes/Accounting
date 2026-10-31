@@ -63,12 +63,12 @@ public sealed class JsonProductCatalog : IProductCatalog
         string[] candidates =
         [
             Path.Combine(AppContext.BaseDirectory, "data", "product_data.json"),
-            Path.Combine(AppContext.BaseDirectory, "Backend.DotNet", "data", "product_data.json"),
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "Backend.DotNet", "data", "product_data.json"),
+            Path.Combine(AppContext.BaseDirectory, "Backend", "data", "product_data.json"),
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "Backend", "data", "product_data.json"),
             Path.Combine(Directory.GetCurrentDirectory(), "data", "product_data.json"),
-            Path.Combine(Directory.GetCurrentDirectory(), "Backend.DotNet", "data", "product_data.json"),
-            Path.Combine(Directory.GetCurrentDirectory(), "..", "Backend.DotNet", "data", "product_data.json"),
-            Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "Backend.DotNet", "data", "product_data.json")
+            Path.Combine(Directory.GetCurrentDirectory(), "Backend", "data", "product_data.json"),
+            Path.Combine(Directory.GetCurrentDirectory(), "..", "Backend", "data", "product_data.json"),
+            Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "Backend", "data", "product_data.json")
         ];
 
         foreach (string candidate in candidates)
@@ -90,10 +90,10 @@ public sealed class JsonProductCatalog : IProductCatalog
         DirectoryInfo? current = new DirectoryInfo(Directory.GetCurrentDirectory());
         while (current is not null)
         {
-            string checkDotNet = Path.Combine(current.FullName, "Backend.DotNet", "data", "product_data.json");
-            if (File.Exists(checkDotNet))
+            string checkBackend = Path.Combine(current.FullName, "Backend", "data", "product_data.json");
+            if (File.Exists(checkBackend))
             {
-                return checkDotNet;
+                return checkBackend;
             }
 
             string checkDirect = Path.Combine(current.FullName, "data", "product_data.json");

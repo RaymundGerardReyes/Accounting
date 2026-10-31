@@ -3,7 +3,7 @@
     Verifies that Git commits respect the strict Separation of Commit Scopes.
 .DESCRIPTION
     Fails if:
-    1. A commit touches BOTH Frontend/ and any backend folder (Backend/, Backend.DotNet/, db/),
+    1. A commit touches BOTH Frontend/ and any backend folder (Backend/, db/),
        except for 'chore(release)', 'chore(deps)', 'build(release)', or 'build(deps)'.
     2. A commit with scope 'web' touches any file outside Frontend/.
 .PARAMETER CommitRef
@@ -58,7 +58,7 @@ foreach ($sha in $commitList) {
             $outsideFrontend += $f
         }
 
-        if ($f -like "Backend/*" -or $f -like "Backend.DotNet/*" -or $f -like "db/*") {
+        if ($f -like "Backend/*" -or $f -like "db/*") {
             $touchesBackend = $true
         }
     }

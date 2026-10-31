@@ -101,12 +101,12 @@ foreach ($mod in $moduleOrder) {
             # Check specific test status
             if ($r.path -eq "/version" -or $r.path -eq "/health") {
                 $status = "tested"
-                $parityTest = "Backend.DotNet/tests/Integration.Tests"
+                $parityTest = "Backend/tests/Integration.Tests"
                 $notes = "Verified in Host Program.cs"
             }
             elseif ($r.path -eq "/api/v1/webhooks/paymongo") {
                 $status = "tested"
-                $parityTest = "Backend.DotNet/tools/ParityRunner/Program.cs"
+                $parityTest = "Backend/tools/ParityRunner/Program.cs"
                 $notes = "HMAC verification and ReceivePayMongoWebhookHandler covered in ParityRunner"
             }
             else {

@@ -83,7 +83,7 @@ If the hotfix modified `Frontend/`:
 ### Step 3.5: Run Pre-Flight Validation
 ```powershell
 # For .NET line:
-dotnet test Backend.DotNet/Rge.Accounting.slnx --configuration Release
+dotnet test Backend/Rge.Accounting.slnx --configuration Release
 
 # For Python line:
 cd Backend && pytest

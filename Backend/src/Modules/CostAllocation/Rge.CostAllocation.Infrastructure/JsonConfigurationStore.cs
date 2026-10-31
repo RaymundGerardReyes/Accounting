@@ -43,12 +43,12 @@ public sealed class JsonConfigurationStore : ICostAllocationStore
         string[] candidates =
         [
             Path.Combine(AppContext.BaseDirectory, "data", "configuration.json"),
-            Path.Combine(AppContext.BaseDirectory, "Backend.DotNet", "data", "configuration.json"),
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "Backend.DotNet", "data", "configuration.json"),
+            Path.Combine(AppContext.BaseDirectory, "Backend", "data", "configuration.json"),
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "Backend", "data", "configuration.json"),
             Path.Combine(Directory.GetCurrentDirectory(), "data", "configuration.json"),
-            Path.Combine(Directory.GetCurrentDirectory(), "Backend.DotNet", "data", "configuration.json"),
-            Path.Combine(Directory.GetCurrentDirectory(), "..", "Backend.DotNet", "data", "configuration.json"),
-            Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "Backend.DotNet", "data", "configuration.json")
+            Path.Combine(Directory.GetCurrentDirectory(), "Backend", "data", "configuration.json"),
+            Path.Combine(Directory.GetCurrentDirectory(), "..", "Backend", "data", "configuration.json"),
+            Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "Backend", "data", "configuration.json")
         ];
 
         foreach (string candidate in candidates)
@@ -70,10 +70,10 @@ public sealed class JsonConfigurationStore : ICostAllocationStore
         DirectoryInfo? current = new DirectoryInfo(Directory.GetCurrentDirectory());
         while (current is not null)
         {
-            string checkDotNet = Path.Combine(current.FullName, "Backend.DotNet", "data", "configuration.json");
-            if (File.Exists(checkDotNet))
+            string checkBackend = Path.Combine(current.FullName, "Backend", "data", "configuration.json");
+            if (File.Exists(checkBackend))
             {
-                return checkDotNet;
+                return checkBackend;
             }
 
             string checkDirect = Path.Combine(current.FullName, "data", "configuration.json");

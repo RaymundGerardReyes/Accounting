@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-The platform is undergoing a strangler-fig migration from Python FastAPI (`Backend/`) to a C# .NET 10 Modular Monolith (`Backend.DotNet/`). Both backends serve a single shared Next.js frontend (`Frontend/`).
+The platform is undergoing a strangler-fig migration from legacy Python FastAPI to a C# .NET 10 Modular Monolith (`Backend/`). Both backends serve a single shared Next.js frontend (`Frontend/`).
 Using a single monolithic Git tag (e.g. `v1.0.0`) presents major flaws:
 1. **Version Collisions**: A tag `v1.0.0` cannot distinguish between an update to the Python production runtime vs. the .NET migration candidate.
 2. **Frontend Drift**: If `package.json` maintained the version string, identical frontend commits across both branches would diverge due to package version differences.

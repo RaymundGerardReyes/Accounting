@@ -20,7 +20,7 @@
 ```bash
 git checkout migrating-C#  # or legacy-python
 git pull origin migrating-C#
-git log -n 5 --oneline -- Backend.DotNet/
+git log -n 5 --oneline -- Backend/
 ```
 Example target commit: `a1b2c3d` (`fix(payments): alter webhook retry backoff`)
 

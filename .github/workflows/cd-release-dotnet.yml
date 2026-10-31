@@ -65,11 +65,11 @@ jobs:
 
       - name: Restore .NET Modular Monolith
         run: |
-          dotnet restore Backend.DotNet/Rge.Accounting.slnx
+          dotnet restore Backend/Rge.Accounting.slnx
 
       - name: Build & Run .NET Automated Test Suite
         run: |
-          dotnet test Backend.DotNet/Rge.Accounting.slnx --no-restore --configuration Release --verbosity normal
+          dotnet test Backend/Rge.Accounting.slnx --no-restore --configuration Release --verbosity normal
 
       - name: Build Next.js 15 Frontend
         working-directory: Frontend

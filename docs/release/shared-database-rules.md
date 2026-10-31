@@ -3,7 +3,7 @@
 ## 1. Dual-Line Database Reality
 
 During the migration period from Python (Line B) to .NET 10 (Line A), both application backends connect to the **same PostgreSQL 16 database**.
-- **Line A (.NET 10)**: Uses DbUp forward-only SQL migrations located in `Backend.DotNet/db/migrations/`.
+- **Line A (.NET 10)**: Uses DbUp forward-only SQL migrations located in `Backend/db/migrations/`.
 - **Line B (Python)**: Uses Alembic / raw SQLAlchemy models located in `Backend/models.py`.
 
 ```

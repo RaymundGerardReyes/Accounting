@@ -5,7 +5,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$TargetDir = "e:\Accounting\Backend.DotNet"
+    [string]$TargetDir = "e:\Accounting\Backend"
 )
 
 $ErrorActionPreference = "Stop"

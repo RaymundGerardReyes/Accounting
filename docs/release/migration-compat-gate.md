@@ -8,7 +8,7 @@ The **Migration Compatibility Gate** guarantees that schema changes introduced o
 
 ## 2. Gate Verification Triggers
 
-1. **Pull Requests**: Any PR touching `db/`, `Backend.DotNet/**/Migrations/**`, or `Backend/models.py`.
+1. **Pull Requests**: Any PR touching `db/`, `Backend/**/Migrations/**`, or `Backend/models.py`.
 2. **Release Pipelines**: Pre-deployment validation step in `cd-release-dotnet.yml` and `cd-release-python.yml`.
 
 ---

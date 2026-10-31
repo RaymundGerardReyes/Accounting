@@ -10,8 +10,8 @@ set -euo pipefail
 # Configurable Parameters
 # ------------------------------------------------------------------------------
 # Default target directory. Override by passing a path as the first argument:
-#   ./scaffold.sh "/e/Accounting/Backend.DotNet"
-TARGET_DIR="${1:-./Backend.DotNet}"
+#   ./scaffold.sh "/e/Accounting/Backend"
+TARGET_DIR="${1:-./Backend}"
 DOTNET_SDK_VERSION="10.0.301"
 TARGET_FRAMEWORK="net10.0"
 SOLUTION_NAME="Rge.Accounting"

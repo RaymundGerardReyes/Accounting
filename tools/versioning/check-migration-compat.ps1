@@ -13,16 +13,16 @@
     Exits 0 if clean, exits 1 if destructive statements are detected.
 
 .PARAMETER TargetPath
-    Path to directory or file to inspect. Default: 'Backend.DotNet/db/migrations'.
+    Path to directory or file to inspect. Default: 'Backend/db/migrations'.
 
 .EXAMPLE
     ./tools/versioning/check-migration-compat.ps1
-    ./tools/versioning/check-migration-compat.ps1 -TargetPath "Backend.DotNet/db/migrations"
+    ./tools/versioning/check-migration-compat.ps1 -TargetPath "Backend/db/migrations"
 #>
 
 [CmdletBinding()]
 param(
-    [string]$TargetPath = "Backend.DotNet/db/migrations"
+    [string]$TargetPath = "Backend/db/migrations"
 )
 
 $ErrorActionPreference = 'Stop'

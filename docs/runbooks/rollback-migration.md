@@ -3,7 +3,7 @@
 ## 1. Cardinal Rule: Forward-Fix Is Preferred
 
 The **R.G.E Accounting Platform** employs **forward-only database migrations**:
-- **.NET 10**: Managed by DbUp (`Backend.DotNet/db/migrations/V000X__description.sql`).
+- **.NET 10**: Managed by DbUp (`Backend/db/migrations/V000X__description.sql`).
 - **Python**: Managed by Alembic / custom live migration tracker (`schema_migrations`).
 
 Because PostgreSQL state cannot be simply "checked out" to an earlier git commit without risking data loss on live production transactions, **forward-fix migrations (`V000X+1`) are the standard and preferred remediation mechanism**.
@@ -24,12 +24,12 @@ If a migration executed successfully but introduced a non-destructive logic erro
 
 ### Step 1: Create the Next Sequential Migration Script
 ```bash
-# Locate latest migration in Backend.DotNet/db/migrations
-ls -1 Backend.DotNet/db/migrations
+# Locate latest migration in Backend/db/migrations
+ls -1 Backend/db/migrations
 # Example latest: V0004__create_audit_trail.sql
 
 # Create sequential fix script:
-cat << 'EOF' > Backend.DotNet/db/migrations/V0005__fix_audit_index.sql
+cat << 'EOF' > Backend/db/migrations/V0005__fix_audit_index.sql
 -- Forward-fix for V0004 index performance
 DROP INDEX IF EXISTS ix_audit_trail_created_at_old;
 CREATE INDEX IF NOT EXISTS ix_audit_trail_created_at ON audit_trail (created_at DESC);
@@ -38,18 +38,18 @@ EOF
 
 ### Step 2: Validate via Migration Compatibility Gate
 ```powershell
-./tools/versioning/check-migration-compat.ps1 -TargetPath "Backend.DotNet/db/migrations"
+./tools/versioning/check-migration-compat.ps1 -TargetPath "Backend/db/migrations"
 ```
 
 ### Step 3: Test Locally Against Clean Database
 ```powershell
 # Run DbUp migrator locally
-dotnet run --project Backend.DotNet/tools/Rge.DbMigrator/Rge.DbMigrator.csproj
+dotnet run --project Backend/tools/Rge.DbMigrator/Rge.DbMigrator.csproj
 ```
 
 ### Step 4: Commit & Deploy
 ```bash
-git add Backend.DotNet/db/migrations/V0005__fix_audit_index.sql
+git add Backend/db/migrations/V0005__fix_audit_index.sql
 git commit -m "fix(db): add V0005 forward-fix for audit trail index"
 git push origin migrating-C#
 ```

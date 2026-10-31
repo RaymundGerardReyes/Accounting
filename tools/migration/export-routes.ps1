@@ -2,7 +2,7 @@
 .SYNOPSIS
     Exports normalized HTTP route catalogs from both Python FastAPI and C# .NET 10.
 .DESCRIPTION
-    Scans Backend/ (*.py) and Backend.DotNet/ (*.cs) for route definitions, normalizes
+    Scans legacy Python (*.py) and Backend/ (*.cs) for route definitions, normalizes
     path parameters to standard {param} format, maps module ownership, and outputs
     machine-readable JSON catalogs to docs/migration/generated/.
 #>
@@ -180,10 +180,10 @@ Write-Host "Extracted $($PythonRoutes.Count) Python route definitions." -Foregro
 # -------------------------------------------------------------
 # 3. Extract .NET Routes (Minimal API)
 # -------------------------------------------------------------
-Write-Host "`n[2/3] Scanning C# .NET 10 Minimal API routes in Backend.DotNet/..." -ForegroundColor Yellow
+Write-Host "`n[2/3] Scanning C# .NET 10 Minimal API routes in Backend/..." -ForegroundColor Yellow
 
 $DotNetRoutes = [System.Collections.Generic.List[PSObject]]::new()
-$DotNetFiles = Get-ChildItem -Path (Join-Path $RepoRoot "Backend.DotNet") -Recurse -Filter "*.cs"
+$DotNetFiles = Get-ChildItem -Path (Join-Path $RepoRoot "Backend") -Recurse -Filter "*.cs"
 
 foreach ($file in $DotNetFiles) {
     $relPath = $file.FullName.Substring($RepoRoot.Length).TrimStart('\', '/')
@@ -223,7 +223,11 @@ Write-Host "`n[3/3] Saving generated route catalogs..." -ForegroundColor Yellow
 $PythonJsonPath = Join-Path $GeneratedDir "routes-python.json"
 $DotNetJsonPath = Join-Path $GeneratedDir "routes-dotnet.json"
 
-$PythonRoutes | ConvertTo-Json -Depth 5 | Set-Content -Path $PythonJsonPath -Encoding utf8
+if ($PythonRoutes.Count -gt 0) {
+    $PythonRoutes | ConvertTo-Json -Depth 5 | Set-Content -Path $PythonJsonPath -Encoding utf8
+} elseif (Test-Path $PythonJsonPath) {
+    $PythonRoutes = Get-Content $PythonJsonPath -Raw | ConvertFrom-Json
+}
 $DotNetRoutes | ConvertTo-Json -Depth 5 | Set-Content -Path $DotNetJsonPath -Encoding utf8
 
 Write-Host "Saved: $PythonJsonPath" -ForegroundColor Cyan

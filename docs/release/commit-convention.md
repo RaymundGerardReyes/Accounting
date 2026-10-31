@@ -62,7 +62,7 @@ All commits in the R.G.E Accounting Platform must strictly adhere to the Convent
 ## 4. Strict Scope Isolation Invariant
 
 > [!IMPORTANT]
-> A commit must **NEVER mix `Frontend/` and backend (`Backend/`, `Backend.DotNet/`, `db/`) paths in a single commit**, except when bumping monorepo version numbers under `chore(release)` or `build(deps)`.
+> A commit must **NEVER mix `Frontend/` and backend (`Backend/`, `db/`) paths in a single commit**, except when bumping monorepo version numbers under `chore(release)` or `build(deps)`.
 >
 > Commits with scope `web` must only touch files within `Frontend/`.
 

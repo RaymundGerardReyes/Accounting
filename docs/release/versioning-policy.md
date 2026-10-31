@@ -5,7 +5,7 @@
 The R.G.E Accounting Platform operates across two distinct, long-lived technology lines:
 
 ```
-Line A (New):     Next.js + TypeScript  +  C# .NET 10        (Backend.DotNet/)
+Line A (New):     Next.js + TypeScript  +  C# .NET 10        (Backend/)
 Line B (Legacy):  Next.js + TypeScript  +  Python FastAPI    (Backend/)
 ```
 
@@ -84,7 +84,7 @@ Tags are derived **strictly from evidence recorded in the Migration Ledger**, ne
 ```
 not-started  -->  implemented  -->  tested  -->  parity-verified  -->  accepted-difference
 ```
-- `implemented`: Handler exists in `Backend.DotNet/` and compiles cleanly.
+- `implemented`: Handler exists in `Backend/` and compiles cleanly.
 - `tested`: Module unit or integration tests pass.
 - `parity-verified`: Dual-run comparison proves equivalent HTTP status, payload schema, error codes, and DB side effects (audit append).
 - `accepted-difference`: Deliberate improvement or difference reviewed and approved by CPA/system owner.
