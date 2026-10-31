@@ -64,4 +64,32 @@ description: .NET 10 Modular Monolith architectural rules, Roslyn compiler guard
       SessionAndBearerAuthHandler.SchemeName, _ => { });
   ```
 
+## 11. Dual-Casing Request Model Binding Invariant (camelCase & snake_case)
+- **Invariant**: Any Minimal API endpoint consuming JSON request bodies from web clients or polyglot services MUST support both camelCase and snake_case property keys.
+- **Rationale**: Minimal APIs with `JsonNamingPolicy.SnakeCaseLower` ignore camelCase properties (e.g. `targetUserId`) by default when binding to C# records, causing null values and unexpected `validation_error` rejections.
+- **Pattern**:
+  ```csharp
+  public sealed class SwitchUserApiRequest
+  {
+      [JsonPropertyName("target_user_id")]
+      public string? TargetUserIdSnake { get; set; }
+
+      [JsonPropertyName("targetUserId")]
+      public string? TargetUserIdCamel { get; set; }
+
+      [JsonIgnore]
+      public string? TargetUserId => !string.IsNullOrWhiteSpace(TargetUserIdCamel)
+          ? TargetUserIdCamel
+          : TargetUserIdSnake;
+
+      public SwitchUserApiRequest() { }
+      public SwitchUserApiRequest(string? targetUserId)
+      {
+          TargetUserIdCamel = targetUserId;
+          TargetUserIdSnake = targetUserId;
+      }
+  }
+  ```
+
+
 

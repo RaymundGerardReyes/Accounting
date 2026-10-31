@@ -31,3 +31,9 @@ description: Frontend defensive aggregation invariants, collection reducers, API
 - **Invariant**: When an analytical or reporting dataset has 0 items, components must render an informative empty state placeholder rather than empty, broken charts or tables with `0` or `NaN` metrics.
 - **Standard Pattern**: Provide a distinct card or banner (e.g. `EmptyState`, alert callout, or "No product performance data available for this reporting period") to provide clear feedback to the operator.
 
+## 4. Symmetric Dual-Key Request Mutation & Context Exception Safety
+- **Invariant**: Mutation actions in client context providers (e.g. `switchPersona`, `loginWithCredentials`) MUST send both camelCase and snake_case keys in request bodies when calling polyglot endpoints (`body: { targetUserId, target_user_id: targetUserId }`).
+- **Exception Safety**: All context provider methods exposed to UI components MUST wrap asynchronous API invocations in `try ... catch` and handle errors gracefully (e.g., logging warnings or setting error states) rather than letting rejections bubble up as unhandled runtime errors.
+- **Profile Merging**: When a mutation endpoint returns a partial profile object (e.g. `{ id, full_name, department_id, roles }`), merge it with existing cached user data (`allUsers.find(...)`) to preserve optional profile properties (`email`, `employee_code`, `cost_center_id`).
+
+
