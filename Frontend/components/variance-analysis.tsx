@@ -19,21 +19,35 @@ import {
 
 interface VarianceAnalysisProps {
   onBack: () => void
+  initialData?: any
 }
 
 interface VarianceData {
-  varianceData: any[]
-  monthlyVariance: any[]
-  varianceReasons: any[]
-  departmentVariance: any[]
+  varianceData?: any[]
+  variance_data?: any[]
+  monthlyVariance?: any[]
+  monthly_variance?: any[]
+  varianceReasons?: any[]
+  variance_reasons?: any[]
+  departmentVariance?: any[]
+  department_variance?: any[]
+  variances?: any[]
+  [key: string]: any
 }
 
-export function VarianceAnalysis({ onBack }: VarianceAnalysisProps) {
-  const [data, setData] = useState<VarianceData | null>(null)
-  const [loading, setLoading] = useState(true)
+export function VarianceAnalysis({ onBack, initialData }: VarianceAnalysisProps) {
+  const [data, setData] = useState<VarianceData | null>(initialData ?? null)
+  const [loading, setLoading] = useState(initialData === undefined)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (initialData !== undefined) {
+      setData(initialData)
+      setLoading(false)
+      return
+    }
+
+    let isMounted = true
     const fetchVarianceData = async () => {
       try {
         const response = await fetch("/api/variance")
@@ -41,16 +55,25 @@ export function VarianceAnalysis({ onBack }: VarianceAnalysisProps) {
           throw new Error(`HTTP error! status: ${response.status}`)
         }
         const result = await response.json()
-        setData(result)
+        if (isMounted) {
+          setData(result)
+        }
       } catch (e: any) {
-        setError(e.message)
+        if (isMounted) {
+          setError(e.message)
+        }
       } finally {
-        setLoading(false)
+        if (isMounted) {
+          setLoading(false)
+        }
       }
     }
 
     fetchVarianceData()
-  }, [])
+    return () => {
+      isMounted = false
+    }
+  }, [initialData])
 
   if (loading) {
     return <div className="p-8 text-center text-sm text-muted-foreground">Loading variance analysis...</div>
@@ -67,14 +90,111 @@ export function VarianceAnalysis({ onBack }: VarianceAnalysisProps) {
     )
   }
 
-  if (!data) {
-    return <div className="p-8 text-center text-sm text-muted-foreground">No variance data available.</div>
+  // Defensive normalization across camelCase, snake_case, and .NET snapshot schemas
+  const rawVarianceData = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.varianceData)
+      ? data.varianceData
+      : Array.isArray(data?.variance_data)
+        ? data.variance_data
+        : Array.isArray(data?.variances)
+          ? data.variances
+          : []
+
+  const rawMonthlyVariance = Array.isArray(data?.monthlyVariance)
+    ? data.monthlyVariance
+    : Array.isArray(data?.monthly_variance)
+      ? data.monthly_variance
+      : []
+
+  const rawVarianceReasons = Array.isArray(data?.varianceReasons)
+    ? data.varianceReasons
+    : Array.isArray(data?.variance_reasons)
+      ? data.variance_reasons
+      : []
+
+  const varianceData = rawVarianceData.map((item: any, idx: number) => {
+    const category = String(item?.category ?? item?.department ?? `Category ${idx + 1}`)
+    const budget = typeof item?.budget === "number"
+      ? item.budget
+      : typeof item?.budget_limit_minor === "number"
+        ? item.budget_limit_minor / 100
+        : 0
+    const actual = typeof item?.actual === "number"
+      ? item.actual
+      : typeof item?.actual_total_minor === "number"
+        ? item.actual_total_minor / 100
+        : 0
+    const variance = typeof item?.variance === "number"
+      ? item.variance
+      : typeof item?.variance_minor === "number"
+        ? item.variance_minor / 100
+        : budget - actual
+    const rawPct = item?.variancePercent ?? item?.variance_percent
+    const variancePercent = typeof rawPct === "number"
+      ? rawPct
+      : budget > 0
+        ? (variance / budget) * 100
+        : 0
+
+    return {
+      category,
+      budget,
+      actual,
+      variance,
+      variancePercent: Number.isFinite(variancePercent) ? variancePercent : 0,
+    }
+  })
+
+  const monthlyVariance = rawMonthlyVariance.map((item: any, idx: number) => ({
+    month: String(item?.month ?? `M${idx + 1}`),
+    variance: typeof item?.variance === "number" ? item.variance : 0,
+    percentage: typeof item?.percentage === "number" ? item.percentage : 0,
+    favorable: typeof item?.favorable === "number" ? item.favorable : 0,
+    unfavorable: typeof item?.unfavorable === "number" ? item.unfavorable : 0,
+  }))
+
+  const varianceReasons = rawVarianceReasons.map((item: any, idx: number) => ({
+    reason: String(item?.reason ?? `Variance Reason ${idx + 1}`),
+    amount: typeof item?.amount === "number" ? item.amount : 0,
+    type: String(item?.type ?? (item?.amount >= 0 ? "favorable" : "unfavorable")).toLowerCase(),
+    impact: String(item?.impact ?? "Medium"),
+  }))
+
+  if (varianceData.length === 0 && monthlyVariance.length === 0 && varianceReasons.length === 0) {
+    return (
+      <div className="p-8 space-y-8 max-w-7xl mx-auto">
+        <div className="flex items-center gap-4 border-b border-border pb-6">
+          <Button variant="outline" size="icon-sm" onClick={onBack} className="border-border">
+            <ArrowLeft className="w-4 h-4" />
+          </Button>
+          <div>
+            <p className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
+              Budget Auditing
+            </p>
+            <h1 className="text-3xl font-bold tracking-tight text-foreground mt-0.5">
+              Variance Analysis & Reports
+            </h1>
+          </div>
+        </div>
+        <Card className="shadow-none border-border/90 border-dashed text-center p-12">
+          <CardContent className="space-y-4 pt-6">
+            <AlertCircle className="w-10 h-10 text-muted-foreground mx-auto" />
+            <h3 className="text-lg font-medium text-foreground">No Variance Data Available</h3>
+            <p className="text-sm text-muted-foreground max-w-md mx-auto">
+              No budget variance metrics have been populated for the active financial period.
+            </p>
+            <Button variant="outline" size="sm" onClick={onBack} className="mt-2">
+              Return to Dashboard
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
-  const { varianceData, monthlyVariance, varianceReasons, departmentVariance } = data
-
-  const totalBudget = varianceData.reduce((sum, item) => sum + item.budget, 0)
-  const totalActual = varianceData.reduce((sum, item) => sum + item.actual, 0)
+  const totalBudget = varianceData.reduce((sum, item) => sum + (item.budget || 0), 0)
+  const totalActual = varianceData.reduce((sum, item) => sum + (item.actual || 0), 0)
   const totalVariance = totalBudget - totalActual
   const variancePercent = totalBudget > 0 ? (totalVariance / totalBudget) * 100 : 0
   const isUnfavorable = totalVariance < 0
@@ -83,7 +203,7 @@ export function VarianceAnalysis({ onBack }: VarianceAnalysisProps) {
 
   const handleExportReport = () => {
     const escapeCsv = (val: string | number) => {
-      const str = String(val)
+      const str = String(val ?? "")
       return str.includes(",") || str.includes('"') || str.includes("\n")
         ? `"${str.replace(/"/g, '""')}"`
         : str
@@ -303,46 +423,51 @@ export function VarianceAnalysis({ onBack }: VarianceAnalysisProps) {
         </CardHeader>
         <CardContent className="p-0">
           <div className="divide-y divide-border/70">
-            {varianceReasons.map((item) => {
-              const isUnfavorable = item.type === "unfavorable"
-              return (
-                <div
-                  key={item.reason}
-                  className="flex items-center justify-between px-6 py-4 hover:bg-muted/30 transition-colors"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2.5">
-                      <span className="font-semibold text-sm text-foreground">{item.reason}</span>
-                      {item.impact === "High" && (
-                        <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/20 font-medium">
-                          High Impact
+            {varianceReasons.length === 0 ? (
+              <div className="px-6 py-8 text-center text-sm text-muted-foreground">
+                No specific variance driver exceptions identified for this period.
+              </div>
+            ) : (
+              varianceReasons.map((item) => {
+                const isItemUnfavorable = item.type === "unfavorable"
+                return (
+                  <div
+                    key={item.reason}
+                    className="flex items-center justify-between px-6 py-4 hover:bg-muted/30 transition-colors"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2.5">
+                        <span className="font-semibold text-sm text-foreground">{item.reason}</span>
+                        {item.impact === "High" && (
+                          <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/20 font-medium">
+                            High Impact
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex gap-4 text-xs">
+                        <span className={isItemUnfavorable ? "text-accent font-medium" : "text-foreground font-medium"}>
+                          {isItemUnfavorable ? "Unfavorable" : "Favorable"}
                         </span>
+                        <span className="text-muted-foreground">· Severity: {item.impact}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 font-mono tabular-nums">
+                      {isItemUnfavorable ? (
+                        <TrendingDown className="w-4 h-4 text-accent" />
+                      ) : (
+                        <TrendingUp className="w-4 h-4 text-foreground" />
                       )}
-                    </div>
-                    <div className="flex gap-4 text-xs">
-                      <span className={isUnfavorable ? "text-accent font-medium" : "text-foreground font-medium"}>
-                        {isUnfavorable ? "Unfavorable" : "Favorable"}
+                      <span className={`text-lg font-bold ${isItemUnfavorable ? "text-accent" : "text-foreground"}`}>
+                        ₱{Math.abs(item.amount / 1000).toFixed(1)}K
                       </span>
-                      <span className="text-muted-foreground">· Severity: {item.impact}</span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 font-mono tabular-nums">
-                    {isUnfavorable ? (
-                      <TrendingDown className="w-4 h-4 text-accent" />
-                    ) : (
-                      <TrendingUp className="w-4 h-4 text-foreground" />
-                    )}
-                    <span className={`text-lg font-bold ${isUnfavorable ? "text-accent" : "text-foreground"}`}>
-                      ₱{Math.abs(item.amount / 1000).toFixed(1)}K
-                    </span>
-                  </div>
-                </div>
-              )
-            })}
+                )
+              })
+            )}
           </div>
         </CardContent>
       </Card>
     </div>
   )
 }
-

@@ -1,5 +1,8 @@
 import path from "path"
 import fs from "fs"
+import { fileURLToPath } from "url"
+
+const frontendDir = path.dirname(fileURLToPath(import.meta.url))
 
 // Windows Node v24 EPERM workaround for Next.js async realpath resolution
 if (fs.promises && fs.promises.realpath) {
@@ -43,6 +46,7 @@ if (rootEnvPath) {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  outputFileTracing: false,
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -55,7 +59,7 @@ const nextConfig = {
   webpack: (config) => {
     config.resolve.alias = {
       ...config.resolve.alias,
-      "@": path.resolve(process.cwd()),
+      "@": frontendDir,
     }
     return config
   },
