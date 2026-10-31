@@ -93,3 +93,8 @@ description: Repository rules for Conventional Commits, scoped staging, secret p
         ```
       - Never execute PowerShell `$env:` syntax inside Bash, as Bash treats `$env` as a variable and throws `:ALLOW_TAG_PUSH: command not found`.
 
+11. **Legacy Directory Decommissioning & Standalone Seed Preservation Invariant**:
+    - When retiring a legacy runtime directory (such as `Backend/`) on a migration branch (`migrating-C#`), all authoritative seed data (`configuration.json`, `product_data.json`) must be relocated into the active platform tree (`Backend.DotNet/data/`) and configured for build output preservation (`CopyToOutputDirectory=PreserveNewest`).
+    - In-memory and infrastructure store loaders (`JsonConfigurationStore.cs`, `JsonProductCatalog.cs`) must resolve seed files from `AppContext.BaseDirectory/data/` or active directories rather than legacy paths.
+    - **Folder Moniker Stability**: Avoid premature renaming of the active platform directory (e.g., `Backend.DotNet/` -> `Backend/`) within the same decommissioning step. Maintain the established directory moniker to preserve CI/CD workflows (`ci-build-test.yml`, `cd-release-dotnet.yml`), build scripts, and git diff traceability until an explicit, dedicated cutover milestone.
+

@@ -6,7 +6,7 @@ description: Authoritative testing and QA invariants, scope boundaries, and veri
 
 ## 1. Scope Boundary: Strict Line Isolation
 - All testing, quality assurance, verification, and test harness execution must strictly target **`E:\Accounting\Backend.DotNet`** (`src/`, `tests/`, `tools/`).
-- **Forbidden Scope**: Never touch, execute against, or modify files in `E:\Accounting\Backend/` (the legacy Python implementation is strictly a read-only historical baseline and must never be altered or targeted during .NET test automation).
+- **Legacy Python Decommissioning**: The legacy Python implementation (`Backend/`) has been officially retired on branch `migrating-C#` (preserved on branch `legacy-python`). All backend testing, build validation, and QA must exclusively target `Backend.DotNet/`.
 - Commits must strictly maintain scope isolation: use Conventional Commits with `test(dotnet)` or `test(<module>)` and never mix changes with frontend or legacy directories.
 
 ## 2. Core Gate Rule: Traceability & Coverage Mandatory
