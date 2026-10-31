@@ -229,8 +229,9 @@ def resolve_backend_command(internal_port: int, env: dict) -> tuple[list[str], P
         "Ensure the heroku/dotnet buildpack is configured with:\n"
         "  project.toml in the repo root with:\n"
         "    [com.heroku.buildpacks.dotnet]\n"
-        "    solution_file = \"Backend/src/Host/Rge.Accounting.Host/Rge.Accounting.Host.csproj\"\n"
-        "Or set: heroku config:set SOLUTION_FILE=Backend/src/Host/Rge.Accounting.Host/Rge.Accounting.Host.csproj\n"
+        "    solution_file = \"Rge.Accounting.Host.slnx\"\n"
+        "Or set: heroku config:set SOLUTION_FILE=Rge.Accounting.Host.slnx\n"
+        "Or unset: heroku config:unset SOLUTION_FILE\n"
         "================================================================="
     )
     log(error_msg)
