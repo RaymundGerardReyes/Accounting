@@ -61,6 +61,15 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
         DateTimeOffset nowUtc = _clock.UtcNow;
 
         bool alreadyExists = await _webhookStore.ExistsAsync(command.ProviderEventId, cancellationToken).ConfigureAwait(false);
+        if (alreadyExists)
+        {
+            return Result.Success(new ProcessWebhookEventResponse(
+                Success: true,
+                ProviderEventId: command.ProviderEventId,
+                ProcessingStatus: WebhookProcessingStatus.Ignored,
+                Message: $"Duplicate webhook event '{command.ProviderEventId}' already processed."));
+        }
+
         var webhookEvent = WebhookEvent.Create(
             providerEventId: command.ProviderEventId,
             eventType: command.EventType,
@@ -68,10 +77,7 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
             processingStatus: WebhookProcessingStatus.Received,
             nowUtc: nowUtc);
 
-        if (!alreadyExists)
-        {
-            await _webhookStore.SaveAsync(webhookEvent, cancellationToken).ConfigureAwait(false);
-        }
+        await _webhookStore.SaveAsync(webhookEvent, cancellationToken).ConfigureAwait(false);
 
         string? providerPaymentId = null;
         string? failureCode = null;
