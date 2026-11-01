@@ -30,4 +30,11 @@ description: Strict architectural guardrails for E:\Accounting legacy compatibil
    - **Internal Reverse Proxy**: `scripts/start_production.py` injects `BACKEND_INTERNAL_URL` so Next.js App Router reverse-proxies all `/api/*` traffic locally with zero hop latency.
    - **Postgres Dialect Compatibility**: Always normalize `postgres://` to `postgresql://` in `database.py` for SQLAlchemy 2.0 when running against Heroku Postgres.
 
+5. **SignalR Real-Time Synchronization & Server-Authoritative Expiration Guardrails**:
+   - **Backend as Authoritative Payment Authority**: The .NET backend is the sole authority on payment state machine transitions (`Pending -> RequiresAction -> Succeeded / Expired / Failed / Cancelled`). Next.js must never independently mark an attempt as expired or paid; client timer reaching zero triggers an authoritative reconciliation query (`GET /api/v1/payments/{id}?auto_reconcile=true`), not self-mutation.
+   - **Remote Gateway Expiration API & Background Worker**: Implement a `BackgroundService` (`PaymentExpirationWorker`) running on a 15-second bounded loop. Query overdue non-terminal attempts (`WHERE status = 'Pending' AND expires_at <= NOW()`, bounded to 50 items/cycle). Inspect PayMongo status first (`Reconcile-Before-Expire`); preserve paid sessions, defer in-flight sessions, and explicitly invoke `POST https://api.paymongo.com/v1/checkout_sessions/{id}/expire` using Basic Auth (`<secret_key>:`) to invalidate the hosted PayMongo link (`pm.link/...`). Handle HTTP 400 (`already_paid` / `session_already_paid`) gracefully by enforcing terminal state immutability.
+   - **SignalR Real-Time Status Notification**: Host a `PaymentHub` at `/hubs/payment` mapping callers to group `payment:{transactionId}`. Inject `IPaymentStatusNotifier` into both the PayMongo webhook processor (`ProcessWebhookEventHandler`) and background expiration worker (`PaymentExpirationWorker`). Broadcast `PaymentStatusChanged` with `{ transactionId, status, occurredAt }` immediately upon terminal transition to stop client countdowns instantly with 0ms latency.
+   - **Graceful Polling Fallback**: Frontend SignalR hooks (`usePaymentSignalR`) must configure automatic reconnect (`[0, 2000, 5000, 10000, 30000]`) and fall back to periodic polling (12s interval) whenever disconnected.
+
+
 

@@ -47,3 +47,9 @@ description: Frontend defensive aggregation invariants, collection reducers, API
 - **In-Flight Error Preservation**: Forms MUST NOT clear active error states synchronously at the start of submission (`setError(null)`). Synchronous clearing causes dynamic alerts to unmount and remount within 10-20ms upon rapid 401 responses, producing violent visual bouncing and flickering. Errors should only be cleared when user inputs change (`onChange`) or after authentication succeeds.
 - **CSRF Token Caching**: Authentication context providers MUST check client cookies (`acme_fin_csrf`) and in-memory references (`csrfTokenRef`) prior to requesting a new CSRF token, eliminating redundant network round-trips (`GET /api/auth/csrf`) preceding failed login attempts.
 - **Static Seed Fallbacks for Persona Panels**: Auxiliary components dependent on asynchronous account fetching (such as Quick Persona Fill buttons) MUST supply static default fallbacks (`DEFAULT_PERSONAS`) to ensure stable initial render dimensions and prevent late DOM pop-in shifts.
+
+## 7. Dynamic Payment Countdown & Server-Authoritative Expiry Invariant
+- **Server-Derived Expiration**: Countdown timers (`PaymentCountdown.tsx`) must derive remaining duration strictly from the server-supplied `expires_at` timestamp (`new Date(expiresAt).getTime() - Date.now()`). Never use hardcoded client deadlines.
+- **Zero-Trigger Reconciliation Guard**: When the visual countdown reaches `00:00`, the component must invoke a stable callback (`useCallback` / ref-guarded) that triggers a single backend reconciliation request. It must NEVER set local status to `Expired` or `Paid` without backend confirmation.
+- **Immediate State Halting**: Upon receiving a SignalR `PaymentStatusChanged` push for `Succeeded`, `Paid`, `Expired`, `Failed`, or `Cancelled`, the countdown must immediately unmount/halt, transitioning to the corresponding terminal status badge.
+
