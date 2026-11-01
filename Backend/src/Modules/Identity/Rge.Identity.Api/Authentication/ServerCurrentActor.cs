@@ -42,6 +42,23 @@ public sealed class ServerCurrentActor : ICurrentActor
             return;
         }
 
+        // Check for authenticated User claims (Cookie or Bearer session)
+        if (context.User?.Identity?.IsAuthenticated == true)
+        {
+            ActorId = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                ?? context.User.Identity.Name
+                ?? "anonymous";
+            EmployeeCode = context.User.FindFirst("employee_code")?.Value ?? $"EMP-{ActorId}";
+            DepartmentId = context.User.FindFirst("department_id")?.Value ?? "finance";
+            CostCenterId = context.User.FindFirst("cost_center_id")?.Value ?? "CC-001";
+            DepartmentScope = context.User.FindFirst("department_scope")?.Value ?? "*";
+            _roles = context.User.FindAll(System.Security.Claims.ClaimTypes.Role)
+                .Select(c => c.Value)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            IsAuthenticated = true;
+            return;
+        }
+
         // Check for dev-only act-as / x-user-id header
         string? headerUserId = context.Request.Headers["X-User-ID"].FirstOrDefault();
         string? actAsUserId = context.Request.Headers["X-Act-As-User-ID"].FirstOrDefault();

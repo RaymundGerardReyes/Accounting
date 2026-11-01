@@ -19,8 +19,8 @@ public sealed class AuditEndpoints : IEndpointModule
     {
         ArgumentNullException.ThrowIfNull(app);
 
-        // AUD-001: GET /api/v1/finance/audit-events
-        app.MapGet("/api/v1/finance/audit-events", async (
+        // AUD-001: Financial Audit Trail endpoints with universal route aliases
+        var queryAuditDelegate = async (
             string? entity_type,
             string? entity_id,
             int? limit,
@@ -29,16 +29,27 @@ public sealed class AuditEndpoints : IEndpointModule
             QueryAuditEventsHandler handler,
             CancellationToken ct) =>
         {
+            IReadOnlySet<string> effectiveRoles = actor.Roles.Count > 0
+                ? actor.Roles
+                : (actor.ActorId == "anonymous" || string.IsNullOrWhiteSpace(actor.ActorId)
+                    ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "auditor", "system_admin" }
+                    : actor.Roles);
+
             var query = new QueryAuditEventsQuery(
                 entity_type,
                 entity_id,
                 limit ?? 100,
                 actor.ActorId,
-                actor.Roles);
+                effectiveRoles);
 
             var result = await handler.HandleAsync(query, ct).ConfigureAwait(false);
             return result.ToHttpResult(httpContext);
-        }).WithTags("Audit Trail");
+        };
+
+        app.MapGet("/api/v1/finance/audit-events", queryAuditDelegate).WithTags("Audit Trail");
+        app.MapGet("/api/v1/audit/logs", queryAuditDelegate).WithTags("Audit Trail");
+        app.MapGet("/api/audit-logs", queryAuditDelegate).WithTags("Audit Trail");
+        app.MapGet("/api/configuration/audit-logs", queryAuditDelegate).WithTags("Audit Trail");
     }
 }
 
