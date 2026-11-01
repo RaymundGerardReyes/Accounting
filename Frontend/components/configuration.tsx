@@ -277,7 +277,34 @@ export function Configuration({ onBack }: ConfigurationProps) {
         setData(result || { config: configObj, departments: [], users: [], auditLogs: [], integrations: [] })
         setConfig(configObj)
         setDepartments(result?.departments || [])
-        setUsers(result?.users || [])
+        const cfgUsers: User[] = result?.users || []
+        try {
+          const finUsersResp = await fetch("/api/v1/finance/users")
+          if (finUsersResp.ok) {
+            const finUsers = await finUsersResp.json()
+            if (Array.isArray(finUsers) && finUsers.length > 0) {
+              const mergedUsers: User[] = [...cfgUsers]
+              for (const fu of finUsers) {
+                if (!mergedUsers.some((u) => u.email?.toLowerCase() === fu.email?.toLowerCase())) {
+                  mergedUsers.push({
+                    id: fu.id || `usr_${fu.employee_code || Date.now()}`,
+                    name: fu.full_name || fu.name || fu.email,
+                    email: fu.email,
+                    role: fu.roles?.[0] || fu.role || "Employee",
+                    status: (fu.status === "active" || fu.status === "Active") ? "Active" : "Inactive",
+                  })
+                }
+              }
+              setUsers(mergedUsers)
+            } else {
+              setUsers(cfgUsers)
+            }
+          } else {
+            setUsers(cfgUsers)
+          }
+        } catch {
+          setUsers(cfgUsers)
+        }
       } catch (e: any) {
         setError(e.message)
       } finally {
@@ -376,10 +403,25 @@ export function Configuration({ onBack }: ConfigurationProps) {
     }
   }
 
+  function mapRoleToRbac(roleName: string): string {
+    if (!roleName) return "employee";
+    const normalized = roleName.trim().toLowerCase();
+    if (normalized.includes("admin")) return "system_admin";
+    if (normalized.includes("controller")) return "finance_controller";
+    if (normalized.includes("reviewer")) return "finance_reviewer";
+    if (normalized.includes("supervisor")) return "supervisor";
+    if (normalized.includes("maker")) return "maker";
+    if (normalized.includes("verifier") && !normalized.includes("evidence")) return "verifier";
+    if (normalized.includes("evidence")) return "evidence_verifier";
+    if (normalized.includes("bank")) return "bank_approver";
+    if (normalized.includes("auditor")) return "auditor";
+    return "employee";
+  }
+
   const handleAddUser = async () => {
     if (userForm.name && userForm.email) {
       const newUser: User = {
-        id: users.length > 0 ? Math.max(...users.map((u) => u.id)) + 1 : 1,
+        id: users.length > 0 ? Math.max(...users.map((u) => typeof u.id === 'number' ? u.id : 0)) + 1 : 1,
         name: userForm.name,
         email: userForm.email,
         role: userForm.role,
@@ -390,11 +432,33 @@ export function Configuration({ onBack }: ConfigurationProps) {
       setUserForm({ name: "", email: "", role: "Cost Analyst", status: "Active" })
       setShowAddUserModal(false)
       try {
-        await fetch("/api/configuration/users", {
-          method: "POST",
+        const configResp = await fetch("/api/configuration/users", {
+          method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ users: updated }),
         })
+        if (!configResp.ok && configResp.status === 405) {
+          await fetch("/api/configuration/users", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ users: updated }),
+          })
+        }
+
+        await fetch("/api/v1/users/credentials", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: `usr_${String(newUser.id).replace(/\s+/g, "_")}`,
+            full_name: newUser.name,
+            email: newUser.email,
+            roles: [mapRoleToRbac(newUser.role)],
+            department_id: "finance",
+            employee_group: "management",
+            is_active: newUser.status === "Active",
+          }),
+        })
+
         if (refreshSession) {
           await refreshSession()
         }
@@ -422,11 +486,33 @@ export function Configuration({ onBack }: ConfigurationProps) {
       setShowEditUserModal(false)
       setSelectedUser(null)
       try {
-        await fetch("/api/configuration/users", {
-          method: "POST",
+        const configResp = await fetch("/api/configuration/users", {
+          method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ users: updated }),
         })
+        if (!configResp.ok && configResp.status === 405) {
+          await fetch("/api/configuration/users", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ users: updated }),
+          })
+        }
+
+        await fetch("/api/v1/users/credentials", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: `usr_${String(selectedUser.id).replace(/\s+/g, "_")}`,
+            full_name: userForm.name,
+            email: userForm.email,
+            roles: [mapRoleToRbac(userForm.role)],
+            department_id: "finance",
+            employee_group: "management",
+            is_active: userForm.status === "Active",
+          }),
+        })
+
         if (refreshSession) {
           await refreshSession()
         }
@@ -443,11 +529,31 @@ export function Configuration({ onBack }: ConfigurationProps) {
       setShowDeleteUserConfirm(false)
       setSelectedUser(null)
       try {
-        await fetch("/api/configuration/users", {
-          method: "POST",
+        const configResp = await fetch("/api/configuration/users", {
+          method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ users: updated }),
         })
+        if (!configResp.ok && configResp.status === 405) {
+          await fetch("/api/configuration/users", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ users: updated }),
+          })
+        }
+
+        await fetch("/api/v1/users/credentials", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: `usr_${String(selectedUser.id).replace(/\s+/g, "_")}`,
+            full_name: selectedUser.name,
+            email: selectedUser.email,
+            roles: [mapRoleToRbac(selectedUser.role)],
+            is_active: false,
+          }),
+        })
+
         if (refreshSession) {
           await refreshSession()
         }
