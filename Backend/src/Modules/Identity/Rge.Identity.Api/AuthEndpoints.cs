@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Configuration;
 using Rge.BuildingBlocks.Api.Endpoints;
 using Rge.BuildingBlocks.Api.Http;
 using Rge.Identity.Application.CreateCsrfToken;
@@ -62,28 +63,35 @@ public sealed class AuthEndpoints : IEndpointModule
             string provider,
             string? code,
             string? state,
+            string? error,
             HttpContext httpContext,
             OAuthCallbackHandler handler,
             CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(state))
+            if (!string.IsNullOrWhiteSpace(error))
             {
-                return Results.BadRequest(new { error = "invalid_request", error_description = "code and state are required." });
+                return Results.Redirect($"/login?error={Uri.EscapeDataString(error)}");
             }
 
-            var cmd = new OAuthCallbackCommand(provider, state, code);
+            if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(state))
+            {
+                return Results.Redirect("/login?error=invalid_request");
+            }
+
+            string? ip = httpContext.Connection.RemoteIpAddress?.ToString();
+            string? userAgent = httpContext.Request.Headers.UserAgent.ToString();
+
+            var cmd = new OAuthCallbackCommand(provider, state, code, ip, userAgent);
             var result = await handler.HandleAsync(cmd, ct).ConfigureAwait(false);
 
             if (result.IsFailure)
             {
-                return result.ToHttpResult(httpContext);
+                return Results.Redirect($"/login?error={Uri.EscapeDataString(result.Error.Code)}");
             }
 
-            string rawSessionToken = $"sess_{provider}_{RandomNumberGenerator.GetHexString(16).ToLowerInvariant()}";
-            string rawCsrfToken = RandomNumberGenerator.GetHexString(24).ToLowerInvariant();
-
-            SetAuthCookies(httpContext.Response, rawSessionToken, rawCsrfToken);
-            return Results.Redirect(result.Value.RedirectUri ?? "/");
+            var callbackData = result.Value;
+            SetAuthCookies(httpContext.Response, callbackData.RawSessionToken, callbackData.CsrfToken);
+            return Results.Redirect(string.IsNullOrWhiteSpace(callbackData.RedirectUri) ? "/" : callbackData.RedirectUri);
         }).WithTags("Authentication & Session");
 
         // IDN-002: GET /api/auth/csrf
@@ -185,11 +193,14 @@ public sealed class AuthEndpoints : IEndpointModule
         // IDN-005: GET /api/auth/oauth/{provider}
         app.MapGet("/api/auth/oauth/{provider}", async (
             string provider,
+            string? login_hint,
             HttpContext httpContext,
             OAuthBeginHandler handler,
+            IConfiguration configuration,
             CancellationToken ct) =>
         {
-            string redirectUri = $"{httpContext.Request.Scheme}://{httpContext.Request.Host}/api/auth/callback/{provider}";
+            string publicBaseUrl = ResolvePublicBaseUrl(httpContext, configuration);
+            string redirectUri = $"{publicBaseUrl}/api/auth/callback/{provider}";
             var cmd = new OAuthBeginCommand(provider, redirectUri);
             var result = await handler.HandleAsync(cmd, ct).ConfigureAwait(false);
 
@@ -199,14 +210,34 @@ public sealed class AuthEndpoints : IEndpointModule
             }
 
             var oauth = result.Value;
-            string authUrl = $"https://accounts.google.com/o/oauth2/v2/auth?client_id=dev_client_id&response_type=code&scope=openid%20email%20profile&redirect_uri={Uri.EscapeDataString(oauth.RedirectUri)}&state={Uri.EscapeDataString(oauth.State)}&code_challenge={Uri.EscapeDataString(oauth.CodeChallenge)}&code_challenge_method={Uri.EscapeDataString(oauth.CodeChallengeMethod)}";
+            string clientId = configuration["Authentication:Google:ClientId"]
+                ?? configuration["GOOGLE_CLIENT_ID"]
+                ?? Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID")
+                ?? Environment.GetEnvironmentVariable("GOOGLE CLIENT ID")
+                ?? "dev_client_id";
 
-            return Results.Ok(new
+            string authUrl = $"https://accounts.google.com/o/oauth2/v2/auth?client_id={Uri.EscapeDataString(clientId)}&response_type=code&scope=openid%20email%20profile&redirect_uri={Uri.EscapeDataString(oauth.RedirectUri)}&state={Uri.EscapeDataString(oauth.State)}&code_challenge={Uri.EscapeDataString(oauth.CodeChallenge)}&code_challenge_method={Uri.EscapeDataString(oauth.CodeChallengeMethod)}&access_type=offline&prompt=select_account";
+
+            if (!string.IsNullOrWhiteSpace(login_hint))
             {
-                url = authUrl,
-                state = oauth.State,
-                provider = oauth.Provider
-            });
+                authUrl += $"&login_hint={Uri.EscapeDataString(login_hint)}";
+            }
+
+            string acceptHeader = httpContext.Request.Headers.Accept.ToString();
+            bool wantsJson = acceptHeader.Contains("application/json", StringComparison.OrdinalIgnoreCase) &&
+                             !acceptHeader.Contains("text/html", StringComparison.OrdinalIgnoreCase);
+
+            if (wantsJson)
+            {
+                return Results.Ok(new
+                {
+                    url = authUrl,
+                    state = oauth.State,
+                    provider = oauth.Provider
+                });
+            }
+
+            return Results.Redirect(authUrl);
         }).WithTags("Authentication & Session");
 
         // IDN-006: GET /api/auth/session
@@ -339,6 +370,39 @@ public sealed class AuthEndpoints : IEndpointModule
         }
 
         return null;
+    }
+
+    private static string ResolvePublicBaseUrl(HttpContext httpContext, IConfiguration? config = null)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+
+        string? configUrl = config?["Authentication:PublicAppUrl"]
+            ?? config?["NEXT_PUBLIC_APP_URL"]
+            ?? config?["APP_URL"]
+            ?? Environment.GetEnvironmentVariable("NEXT_PUBLIC_APP_URL")
+            ?? Environment.GetEnvironmentVariable("APP_URL");
+
+        if (!string.IsNullOrWhiteSpace(configUrl) && Uri.TryCreate(configUrl.TrimEnd('/'), UriKind.Absolute, out var uri))
+        {
+            return $"{uri.Scheme}://{uri.Authority}";
+        }
+
+        string scheme = httpContext.Request.Headers["X-Forwarded-Proto"].FirstOrDefault()
+            ?? httpContext.Request.Scheme
+            ?? "https";
+
+        string host = httpContext.Request.Headers["X-Forwarded-Host"].FirstOrDefault()
+            ?? httpContext.Request.Host.Value
+            ?? "localhost";
+
+        if (string.Equals(scheme, "http", StringComparison.OrdinalIgnoreCase) &&
+            !host.StartsWith("localhost", StringComparison.OrdinalIgnoreCase) &&
+            !host.StartsWith("127.0.0.1", StringComparison.OrdinalIgnoreCase))
+        {
+            scheme = "https";
+        }
+
+        return $"{scheme}://{host}";
     }
 
     private static string HashSessionToken(string token)

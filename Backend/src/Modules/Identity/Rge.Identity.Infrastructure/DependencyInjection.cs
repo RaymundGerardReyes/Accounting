@@ -112,7 +112,7 @@ public sealed class IdentityModuleServices
 
         OAuthBeginHandler = new OAuthBeginHandler(oauthStateStore);
 
-        OAuthCallbackHandler = new OAuthCallbackHandler(oauthStateStore);
+        OAuthCallbackHandler = new OAuthCallbackHandler(oauthStateStore, null, authenticator, roleStore, csrfTokenService, clock);
 
         ResolveActorHandler = new ResolveActorHandler(roleStore, actorCache);
 

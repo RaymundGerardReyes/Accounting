@@ -231,6 +231,11 @@ public sealed class ChallengerVerificationTests
         public Task<Actor?> GetActorByEmailOrUsernameAsync(string identifier, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<RoleAssignment>> GetActiveRolesForUserAsync(string userId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Actor>> ListFinanceUsersAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Actor> FindOrProvisionActorAsync(string email, string fullName, CancellationToken cancellationToken = default)
+        {
+            var actor = new Actor("usr_stub_01", "EMP-STUB", fullName, email, "finance", "CC-FIN", "management", "active", []);
+            return Task.FromResult(actor);
+        }
     }
 
     private sealed class PassThroughActorCache : IActorCache

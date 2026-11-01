@@ -116,6 +116,40 @@ public interface IRoleStore
 
     Task<IReadOnlyList<Actor>> ListFinanceUsersAsync(CancellationToken cancellationToken = default);
 
+    Task<Actor> FindOrProvisionActorAsync(string email, string fullName, CancellationToken cancellationToken = default);
+
+}
+
+
+
+public sealed record OAuthUserInfo(
+
+    string Subject,
+
+    string Email,
+
+    string Name,
+
+    string? Picture);
+
+
+
+public interface IOAuthTokenExchangeService
+
+{
+
+    Task<OAuthUserInfo?> ExchangeCodeForUserInfoAsync(
+
+        string provider,
+
+        string authorizationCode,
+
+        string codeVerifier,
+
+        string redirectUri,
+
+        CancellationToken cancellationToken = default);
+
 }
 
 

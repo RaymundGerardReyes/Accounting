@@ -130,6 +130,39 @@ def remediate_production_secrets(env: dict) -> None:
         env["FIELD_ENCRYPTION_KEY_BASE64"] = derived_key
         log("[Security] Missing or invalid FIELD_ENCRYPTION_KEY_BASE64 detected. Auto-remediated with deterministically derived 32-byte Base64 key.")
 
+    # 5. Google OAuth client credentials mapping & normalization
+    google_client_id = (
+        env.get("GOOGLE_CLIENT_ID")
+        or env.get("GOOGLE CLIENT ID")
+        or env.get("Authentication__Google__ClientId")
+        or ""
+    ).strip()
+    if google_client_id:
+        env["GOOGLE_CLIENT_ID"] = google_client_id
+        env["Authentication__Google__ClientId"] = google_client_id
+
+    google_client_secret = (
+        env.get("GOOGLE_CLIENT_SECRET")
+        or env.get("GOOGLE CLIENT SECRET")
+        or env.get("Authentication__Google__ClientSecret")
+        or ""
+    ).strip()
+    if google_client_secret:
+        env["GOOGLE_CLIENT_SECRET"] = google_client_secret
+        env["Authentication__Google__ClientSecret"] = google_client_secret
+
+    # 6. Public App URL & Domain mapping
+    public_app_url = (
+        env.get("NEXT_PUBLIC_APP_URL")
+        or env.get("APP_URL")
+        or (f"https://{env['NEXT_PUBLIC_APP_DOMAIN']}" if env.get("NEXT_PUBLIC_APP_DOMAIN") else "")
+        or env.get("Authentication__PublicAppUrl")
+        or ""
+    ).strip()
+    if public_app_url:
+        env["NEXT_PUBLIC_APP_URL"] = public_app_url
+        env["Authentication__PublicAppUrl"] = public_app_url
+
 
 def cleanup(signum=None, frame=None):
     global is_shutting_down, backend_proc, frontend_proc

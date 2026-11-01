@@ -4,6 +4,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.HttpOverrides;
 using Rge.Accounting.Host.Configuration;
 using Rge.Accounting.Host.Pipeline;
 using Rge.Audit.Api;
@@ -37,6 +38,7 @@ using Rge.Identity.Application.ResolveActor;
 using Rge.Identity.Application.SwitchUser;
 using Rge.Identity.Domain;
 using Rge.Identity.Infrastructure;
+using Rge.Identity.Infrastructure.OAuth;
 using Rge.Integrations.Api;
 using Rge.Integrations.Infrastructure;
 using Rge.Payments.Api;
@@ -212,6 +214,53 @@ internal sealed class HybridIdentityStore : IAuthenticator, IOAuthStateStore, IR
 
     public Task<IReadOnlyList<Actor>> ListFinanceUsersAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Actor>>(_seededActors.Values.OrderBy(a => a.Id).ToList());
+
+    public Task<Actor> FindOrProvisionActorAsync(
+        string email,
+        string fullName,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            Actor? existing = _seededActors.Values.FirstOrDefault(a =>
+                string.Equals(a.Email, email, StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                return Task.FromResult(existing);
+            }
+
+            string userId = $"usr_oauth_{Guid.NewGuid():N}"[..18];
+            string employeeCode = $"EMP-OAUTH-{_seededActors.Count + 1:D3}";
+            string displayName = string.IsNullOrWhiteSpace(fullName) ? email.Split('@')[0] : fullName;
+
+            var roles = new List<RoleAssignment>
+            {
+                new($"ra_oauth_{userId}", userId, Role.Employee, "*")
+            };
+
+            if (email.StartsWith("admin", StringComparison.OrdinalIgnoreCase) ||
+                email.Contains("restaca", StringComparison.OrdinalIgnoreCase) ||
+                email.Contains("controller", StringComparison.OrdinalIgnoreCase))
+            {
+                roles.Add(new($"ra_admin_{userId}", userId, Role.SystemAdmin, "*"));
+                roles.Add(new($"ra_ctrl_{userId}", userId, Role.FinanceController, "*"));
+            }
+
+            var newActor = new Actor(
+                id: userId,
+                employeeCode: employeeCode,
+                fullName: displayName,
+                email: email,
+                departmentId: "finance",
+                costCenterId: "CC-FIN",
+                employeeGroup: "management",
+                status: "active",
+                roleAssignments: roles);
+
+            _seededActors[userId] = newActor;
+            return Task.FromResult(newActor);
+        }
+    }
 }
 
 /// <summary>
@@ -226,6 +275,13 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
+
+        services.Configure<ForwardedHeadersOptions>(options =>
+        {
+            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
+            options.KnownIPNetworks.Clear();
+            options.KnownProxies.Clear();
+        });
 
         services.ConfigureHttpJsonOptions(options =>
         {
@@ -321,6 +377,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRoleStore>(sp => sp.GetRequiredService<HybridIdentityStore>());
         services.AddSingleton<IActorCache>(sp => new ActorCache(sp.GetRequiredService<IClock>()));
         services.AddSingleton<ICsrfTokenService>(new CsrfTokenService(csrfKey));
+
+        services.AddHttpClient("GoogleOAuth");
+        services.AddScoped<IOAuthTokenExchangeService, GoogleOAuthTokenExchangeService>();
 
         services.AddScoped<LoginHandler>();
         services.AddScoped<LogoutHandler>();

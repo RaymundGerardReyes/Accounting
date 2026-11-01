@@ -49,6 +49,8 @@ var cachedVersionPayload = new
 
 // 5. Ordered Zero-Trust Request Pipeline
 
+app.UseForwardedHeaders();
+
 app.UseMiddleware<CorrelationIdMiddleware>();
 
 app.UseMiddleware<SecurityHeadersMiddleware>();

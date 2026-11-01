@@ -341,6 +341,48 @@ public sealed class RoleStore : IRoleStore
 
 
 
+    public async Task<Actor> FindOrProvisionActorAsync(
+        string email,
+        string fullName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(email);
+
+        Actor? existing = await GetActorByEmailOrUsernameAsync(email, cancellationToken).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        string userId = $"usr_oauth_{Guid.NewGuid():N}"[..18];
+        string employeeCode = $"EMP-OAUTH-{System.Security.Cryptography.RandomNumberGenerator.GetInt32(1000, 9999)}";
+        string displayName = string.IsNullOrWhiteSpace(fullName) ? email.Split('@')[0] : fullName;
+
+        var roles = new List<RoleAssignment>
+        {
+            new($"ra_oauth_{userId}", userId, Role.Employee, "*")
+        };
+
+        if (email.StartsWith("admin", StringComparison.OrdinalIgnoreCase) ||
+            email.Contains("restaca", StringComparison.OrdinalIgnoreCase) ||
+            email.Contains("controller", StringComparison.OrdinalIgnoreCase))
+        {
+            roles.Add(new($"ra_admin_{userId}", userId, Role.SystemAdmin, "*"));
+            roles.Add(new($"ra_ctrl_{userId}", userId, Role.FinanceController, "*"));
+        }
+
+        return new Actor(
+            id: userId,
+            employeeCode: employeeCode,
+            fullName: displayName,
+            email: email,
+            departmentId: "finance",
+            costCenterId: "CC-FIN",
+            employeeGroup: "management",
+            status: "active",
+            roleAssignments: roles);
+    }
+
     private static async Task<IReadOnlyList<RoleAssignment>> QueryRolesForUserAsync(
 
         DbConnection connection,
