@@ -23,5 +23,6 @@
     <ProjectReference Include="..\..\tests\Security.Tests\Rge.Security.Tests.csproj" />
     <ProjectReference Include="..\..\tests\Contract.Parity.Tests\Rge.Contract.Parity.Tests.csproj" />
     <ProjectReference Include="..\..\tests\Performance.Tests\Rge.Performance.Tests.csproj" />
+    <ProjectReference Include="..\..\tests\Modules\Payments.Integration.Tests\Rge.Payments.Integration.Tests.csproj" />
   </ItemGroup>
 </Project>

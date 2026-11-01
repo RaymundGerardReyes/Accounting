@@ -533,7 +533,26 @@ var perfTests = new Rge.Performance.Tests.LatencyBudgetGateTests();
 await perfTests.P99_Latency_Budgets_Are_Satisfied_For_Webhooks_Orders_And_Reads().ConfigureAwait(false);
 Assert("LatencyBudgetGateTests.P99_Latency_Budgets_Are_Satisfied_For_Webhooks_Orders_And_Reads", true);
 
+// 20. Execute PayMongo Lifecycle & Real-Time Sync Verification Suite (tests/Modules/Payments.Integration.Tests)
+Console.WriteLine("\n--- Executing PayMongo Lifecycle & SignalR Verification Suite (Rge.Payments.Integration.Tests) ---");
+var paymentsTests = new Rge.Payments.Integration.Tests.PayMongoLifecycleVerificationTests();
+await paymentsTests.Scenario01_OverdueEligibleSession_CallsPayMongoExpire_UpdatesDb_And_PushesSignalR().ConfigureAwait(false);
+Assert("PayMongoLifecycleVerificationTests.Scenario01_OverdueEligibleSession_CallsPayMongoExpire_UpdatesDb_And_PushesSignalR", true);
+
+await paymentsTests.Scenario02_MissedWebhook_AlreadyPaidOnPayMongo_PreservesPaid_IssuesReceipt_And_NeverExpires().ConfigureAwait(false);
+Assert("PayMongoLifecycleVerificationTests.Scenario02_MissedWebhook_AlreadyPaidOnPayMongo_PreservesPaid_IssuesReceipt_And_NeverExpires", true);
+
+await paymentsTests.Scenario03_ProcessingPaymentAtDeadline_DefersExpiration_And_KeepsSessionActive().ConfigureAwait(false);
+Assert("PayMongoLifecycleVerificationTests.Scenario03_ProcessingPaymentAtDeadline_DefersExpiration_And_KeepsSessionActive", true);
+
+await paymentsTests.Scenario04_LateWebhookAfterExpiration_CannotReviveExpiredPayment().ConfigureAwait(false);
+Assert("PayMongoLifecycleVerificationTests.Scenario04_LateWebhookAfterExpiration_CannotReviveExpiredPayment", true);
+
+await paymentsTests.Scenario05_DuplicatePaidWebhook_ProcessesOnce_And_PreventsDuplicateFulfillment().ConfigureAwait(false);
+Assert("PayMongoLifecycleVerificationTests.Scenario05_DuplicatePaidWebhook_ProcessesOnce_And_PreventsDuplicateFulfillment", true);
+
 Console.WriteLine("\n==============================================================");
+
 Console.WriteLine($" RESULTS: {passed} PASSED, {failed} FAILED");
 Console.WriteLine("==============================================================");
 

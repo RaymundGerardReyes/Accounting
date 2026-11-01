@@ -13,7 +13,7 @@ using Rge.Payments.Application.Webhooks.ReceivePayMongoWebhook;
 using Rge.Payments.Domain.Orders;
 using Rge.Payments.Domain.PaymentAttempts;
 using Rge.Payments.Infrastructure.Workers;
-using Rge.Receipts.Application.GetReceiptByOrder;
+using Rge.Receipts.Contracts;
 using Rge.Tests.Common;
 using Rge.Tests.Common.Webhooks;
 using Xunit;
@@ -211,7 +211,7 @@ public sealed class PayMongoLifecycleVerificationTests
         var orderRepo = scope.ServiceProvider.GetRequiredService<IOrderRepository>();
         var worker = scope.ServiceProvider.GetRequiredService<PaymentExpirationWorker>();
         var outboxWorker = scope.ServiceProvider.GetRequiredService<OutboxWorker>();
-        var getReceipt = scope.ServiceProvider.GetRequiredService<GetReceiptByOrderHandler>();
+        var receiptLookup = scope.ServiceProvider.GetRequiredService<IReceiptLookup>();
 
         // 1. Create Order & Checkout Session
         var ordRes = await createOrder.HandleAsync(new CreateOrderCommand("COST-ACC-TEXT-2026", Quantity: 1));
@@ -238,8 +238,8 @@ public sealed class PayMongoLifecycleVerificationTests
 
         // 5. Outbox processes the reconciled payment and issues the BIR Official Receipt
         await outboxWorker.ProcessNextBatchOnceAsync();
-        var receiptRes = await getReceipt.HandleAsync(new GetReceiptByOrderQuery(ordRes.Value.Id));
-        Assert.True(receiptRes.IsSuccess);
+        ReceiptSummaryContract? receipt = await receiptLookup.FindByOrderIdAsync(ordRes.Value.Id);
+        Assert.NotNull(receipt);
     }
 
     // =========================================================================
@@ -311,6 +311,11 @@ public sealed class PayMongoLifecycleVerificationTests
         var initiateAttempt = scope.ServiceProvider.GetRequiredService<InitiateAttemptHandler>();
         var receiveWebhook = scope.ServiceProvider.GetRequiredService<ReceivePayMongoWebhookHandler>();
         var outboxWorker = scope.ServiceProvider.GetRequiredService<OutboxWorker>();
+
+        // Drain any un-processed messages from earlier test suites running in the same process
+        while (await outboxWorker.ProcessNextBatchOnceAsync() > 0)
+        {
+        }
 
         var ordRes = await createOrder.HandleAsync(new CreateOrderCommand("COST-ACC-TEXT-2026", Quantity: 1));
         var attRes = await initiateAttempt.HandleAsync(new InitiateAttemptCommand(ordRes.Value.Id, "qrph", "idem-dup-wh"));
