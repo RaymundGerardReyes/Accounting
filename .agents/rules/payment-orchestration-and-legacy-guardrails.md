@@ -36,5 +36,10 @@ description: Strict architectural guardrails for E:\Accounting legacy compatibil
    - **SignalR Real-Time Status Notification**: Host a `PaymentHub` at `/hubs/payment` mapping callers to group `payment:{transactionId}`. Inject `IPaymentStatusNotifier` into both the PayMongo webhook processor (`ProcessWebhookEventHandler`) and background expiration worker (`PaymentExpirationWorker`). Broadcast `PaymentStatusChanged` with `{ transactionId, status, occurredAt }` immediately upon terminal transition to stop client countdowns instantly with 0ms latency.
    - **Graceful Polling Fallback**: Frontend SignalR hooks (`usePaymentSignalR`) must configure automatic reconnect (`[0, 2000, 5000, 10000, 30000]`) and fall back to periodic polling (12s interval) whenever disconnected.
 
+6. **Remote Gateway Reconciliation Cooldown & SignalR Event Notification**:
+   - **Per-Attempt Gateway Cooldown Guard**: `PollAndReconcileHandler` must maintain an in-memory sliding cooldown (e.g. 3 to 4 seconds) per `ProviderPaymentId`. If an incoming query with `auto_reconcile=true` arrives within the cooldown window of a prior gateway check, the handler must return the current persisted database record in sub-millisecond time rather than dispatching a redundant remote HTTP request to PayMongo.
+   - **Terminal State Fast-Path**: If `PaymentAttemptStateMachine.IsTerminal(attempt.Status)` is true, remote reconciliation must be completely bypassed, returning database state in <1ms.
+   - **Real-Time Push on Reconciliation**: When manual or background polling reconciliation transitions an attempt to `Succeeded` or `Expired`, the handler must notify `IPaymentStatusNotifier` to immediately synchronize all open browser sessions and unmount client countdowns.
+
 
 

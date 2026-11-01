@@ -53,3 +53,9 @@ description: Frontend defensive aggregation invariants, collection reducers, API
 - **Zero-Trigger Reconciliation Guard**: When the visual countdown reaches `00:00`, the component must invoke a stable callback (`useCallback` / ref-guarded) that triggers a single backend reconciliation request. It must NEVER set local status to `Expired` or `Paid` without backend confirmation.
 - **Immediate State Halting**: Upon receiving a SignalR `PaymentStatusChanged` push for `Succeeded`, `Paid`, `Expired`, `Failed`, or `Cancelled`, the countdown must immediately unmount/halt, transitioning to the corresponding terminal status badge.
 
+## 8. Fast-Path Payment Result Initialization & Non-Blocking Reconciliation
+- **Local-First Initial Load (Sub-10ms Render)**: Payment outcome and result views (`PaymentResultPage`) must NEVER block the initial component render on a remote third-party gateway query. The initial mount must query the local backend with `auto_reconcile=false`. This drops initial screen render latency from >1,100ms to <10ms, presenting the order reference, amount, and payment status immediately.
+- **Non-Blocking Background Sync**: If the payment attempt returned by the local-first fetch is non-terminal (`Pending` / `RequiresAction`), the component may trigger asynchronous background reconciliation (`auto_reconcile=true`) without reverting the UI to a full-screen blocking loader (`loading = false` remains preserved; only a local button/card spinner `isReconciling = true` is displayed).
+- **SignalR-First Coordination**: When SignalR is connected (`isSignalRConnected === true`), disable aggressive multi-second polling loops. The real-time hub pushes `PaymentStatusChanged` within milliseconds of webhook arrival or background worker reconciliation. When disconnected, fallback polling must default to `auto_reconcile=false` with a relaxed cadence (>= 6s) to avoid gateway rate-limit saturation.
+
+
