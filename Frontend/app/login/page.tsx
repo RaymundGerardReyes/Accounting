@@ -42,13 +42,6 @@ function MicrosoftIcon({ className }: { className?: string }) {
   )
 }
 
-const DEFAULT_PERSONAS = [
-  { id: "usr_mgmt_01", full_name: "Juan Dela Cruz", email: "juan@rge.ph" },
-  { id: "usr_mgmt_02", full_name: "Roberto Lim", email: "roberto@rge.ph" },
-  { id: "usr_mgmt_03", full_name: "Victorino Bautista", email: "victorino@rge.ph" },
-  { id: "usr_mgmt_04", full_name: "Patricia Tan", email: "patricia@rge.ph" },
-]
-
 export default function LoginPage() {
   const { loginWithCredentials, loginWithOAuth, allUsers, loading } = useAuth()
   const [identifier, setIdentifier] = useState("")
@@ -56,8 +49,6 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [oauthProvider, setOauthProvider] = useState<"google" | "microsoft" | null>(null)
-
-  const activePersonas = allUsers && allUsers.length > 0 ? allUsers.slice(0, 4) : DEFAULT_PERSONAS
 
   const handleOAuthClick = (provider: "google" | "microsoft") => {
     setOauthProvider(provider)
@@ -230,16 +221,26 @@ export default function LoginPage() {
               <Lock className="w-3 h-3" /> Quick Persona Fill
             </span>
             <div className="flex flex-wrap gap-1.5 w-full">
-              {activePersonas.map((u) => (
-                <button
-                  key={u.id}
-                  type="button"
-                  onClick={() => handleQuickSelect(u.email || u.id)}
-                  className="text-[10px] font-mono px-2 py-1 rounded bg-secondary hover:bg-secondary/80 text-secondary-foreground border border-border"
-                >
-                  {u.full_name || u.id}
-                </button>
-              ))}
+              {loading ? (
+                <span className="text-[11px] text-muted-foreground flex items-center gap-1.5 py-1">
+                  <Loader2 className="w-3 h-3 animate-spin text-primary" /> Loading personas...
+                </span>
+              ) : allUsers && allUsers.length > 0 ? (
+                allUsers.map((u) => (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => handleQuickSelect(u.email || u.id)}
+                    className="text-[10px] font-mono px-2 py-1 rounded bg-secondary hover:bg-secondary/80 text-secondary-foreground border border-border"
+                  >
+                    {u.full_name || u.id}
+                  </button>
+                ))
+              ) : (
+                <span className="text-[11px] text-muted-foreground italic py-1">
+                  No personas available
+                </span>
+              )}
             </div>
           </CardFooter>
         </Card>

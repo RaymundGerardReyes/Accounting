@@ -2,16 +2,18 @@
 
 export interface FinanceUser {
   id: string
-  employee_code: string
+  employee_code?: string
   full_name: string
   email: string
-  department_id: string
-  cost_center_id: string
-  staff_type: "field" | "non_field"
-  employment_status: string
-  base_location: string
-  is_active: boolean
-  roles: string[]
+  department_id?: string
+  cost_center_id?: string
+  staff_type?: "field" | "non_field" | string
+  employee_group?: string
+  status?: string
+  employment_status?: string
+  base_location?: string
+  is_active?: boolean
+  roles?: string[]
 }
 
 export interface PolicyRuleRecord {
@@ -392,9 +394,10 @@ export function formatPhpMinor(minor: number | null | undefined): string {
   }).format(val)
 }
 
-function buildHeaders(actorUserId: string, isJson = true): HeadersInit {
-  const headers: Record<string, string> = {
-    "X-User-Id": actorUserId,
+function buildHeaders(actorUserId?: string, isJson = true): HeadersInit {
+  const headers: Record<string, string> = {}
+  if (actorUserId) {
+    headers["X-User-Id"] = actorUserId
   }
   if (isJson) {
     headers["Content-Type"] = "application/json"
@@ -424,6 +427,14 @@ export async function fetchFinanceMe(actorUserId: string): Promise<{
     cache: "no-store",
   })
   return handleResponse(res)
+}
+
+export async function fetchFinanceUsers(actorUserId?: string): Promise<FinanceUser[]> {
+  const res = await fetch(`${API_BASE}/api/v1/finance/users`, {
+    headers: buildHeaders(actorUserId, false),
+    cache: "no-store",
+  })
+  return handleResponse<FinanceUser[]>(res)
 }
 
 export async function switchDevActor(currentActorId: string, targetUserId: string, reason: string) {

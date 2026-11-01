@@ -51,6 +51,7 @@ import {
   AccountPayableRecord,
   CentralizedTrackerRow,
   fetchFinanceMe,
+  fetchFinanceUsers,
   switchDevActor,
   fetchFinanceDashboard,
   fetchPolicies,
@@ -224,6 +225,7 @@ export function FinanceOperationsHub() {
     try {
       const [
         meRes,
+        usersRes,
         dashRes,
         advRes,
         expRes,
@@ -238,6 +240,7 @@ export function FinanceOperationsHub() {
         auditRes,
       ] = await Promise.all([
         fetchFinanceMe(actorId).catch(() => null),
+        fetchFinanceUsers(actorId).catch(() => []),
         fetchFinanceDashboard(actorId).catch(() => null),
         fetchCashAdvances(actorId).catch(() => []),
         fetchExpenseReports(actorId).catch(() => []),
@@ -253,10 +256,12 @@ export function FinanceOperationsHub() {
       ])
 
       if (meRes) {
-        setActorProfile(meRes.actor)
-        if (meRes.users && meRes.users.length > 0) {
-          setAvailableUsers(meRes.users)
-        }
+        setActorProfile(meRes.actor || meRes)
+      }
+      if (usersRes && usersRes.length > 0) {
+        setAvailableUsers(usersRes)
+      } else if (meRes?.users && meRes.users.length > 0) {
+        setAvailableUsers(meRes.users)
       }
       setDashboardData(dashRes)
       setAdvances(advRes)
@@ -841,17 +846,24 @@ export function FinanceOperationsHub() {
                 disabled={actionLoading}
                 className="h-8 text-xs rounded-md border border-input bg-background px-2.5 py-1 font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
-                <option value="emp_field_01">Juan dela Cruz (Field Staff - Mfg)</option>
-                <option value="emp_field_02">Maria Clara Santos (Field Staff - Log)</option>
-                <option value="sup_approver_01">Roberto Reyes (Supervisor)</option>
-                <option value="fin_reviewer_01">Elena Gomez (Finance Reviewer)</option>
-                <option value="fin_maker_01">Carlos Mendoza (Disbursement Maker)</option>
-                <option value="fin_verifier_01">Diana Lim (Disbursement Verifier)</option>
-                <option value="bank_approver_01">Arthur Tan (Bank Approver)</option>
-                <option value="evidence_verifier_01">Arthur Tan 2 (Evidence Verifier)</option>
-                <option value="fin_controller_01">Victoria Sy, CPA (Finance Controller)</option>
-                <option value="auditor_01">Gabriel Ramos, CIA (Auditor)</option>
-                <option value="sys_admin_01">System Admin</option>
+                {availableUsers.length === 0 ? (
+                  <option value={currentActorId}>
+                    {actorProfile?.full_name ? `${actorProfile.full_name} (${actorProfile.roles?.[0] || actorProfile.staff_type || "User"})` : currentActorId}
+                  </option>
+                ) : (
+                  <>
+                    {!availableUsers.some((u) => u.id === currentActorId) && (
+                      <option value={currentActorId}>
+                        {actorProfile?.full_name ? `${actorProfile.full_name} (${actorProfile.roles?.[0] || actorProfile.staff_type || "User"})` : currentActorId}
+                      </option>
+                    )}
+                    {availableUsers.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.full_name} ({u.roles?.[0] || u.staff_type || "User"})
+                      </option>
+                    ))}
+                  </>
+                )}
               </select>
 
               <Button
