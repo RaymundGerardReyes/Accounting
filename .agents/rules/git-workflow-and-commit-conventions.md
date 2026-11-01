@@ -131,4 +131,20 @@ description: Repository rules for Conventional Commits, scoped staging, secret p
     - **Explicit Override Configuration**:
       The runtime MUST support `GOOGLE_REDIRECT_URI` (or `Authentication:Google:RedirectUri`) to allow zero-code overrides matching pre-existing Google Cloud Console credentials. When unspecified, it defaults to `/api/auth/{provider}/callback`.
 
+16. **Automated Dual-Line Versioning & Migration Ledger Invariant**:
+    - **Mandatory Build Environment Injection**:
+      - Before building the frontend or releasing, the agent or supervisor MUST execute `tools/versioning/compute-build-env.ps1 -Format DotEnv -WriteToFrontend` (or its platform supervisor equivalent) to populate `Frontend/.env.production.local`.
+      - `package.json` and `Frontend/package.json` version fields MUST strictly remain `"0.0.0-managed"`. Autonomous tools and developers must never overwrite them with raw version strings.
+    - **Namespaced SemVer 2.0.0 Line Awareness**:
+      - Version inspections, bumps, and tagging MUST respect `.release-line`:
+        - Line A (`dotnet`): tag pattern `dotnet/vX.Y.Z[-preview.N]`
+        - Line B (`python`): tag pattern `python/vX.Y.Z[-beta.N]`
+      - `scripts/git_workflow.py` and related tooling must inspect `.release-line` and only calculate increments relative to that line's authoritative tag history.
+    - **Migration Ledger State Promotion Invariant**:
+      - Whenever an endpoint or handler is added or verified with passing automated tests (e.g. `OAuthFlowTests.cs`), the corresponding row in `docs/migration/route-ledger.csv` MUST be promoted from `implemented` to `tested` or `parity-verified` with the specific test path recorded in `parity_test`.
+      - Milestone tag proposals require 100% of the ledger rows for that milestone to be in `parity-verified` or `accepted-difference` status as audited by `tools/migration/ledger-check.ps1`.
+    - **Conventional Commit Scope Harmonization**:
+      - All commit validation tools (`.githooks/commit-msg`, `commitlint.config.js`, `scripts/git_workflow.py`, `check-commit-scope.ps1`) must accept both functional monorepo scopes (`repo`, `backend`, `dotnet`, `frontend`, `test`, `docs`, `agents`, `versioning`, `migration`, `content-pack`) and domain-module scopes (`web`, `identity`, `finance`, `payments`, `receipts`, `audit`, `costalloc`, `documents`, `integrations`, `db`, `deploy`, `release`, `deps`).
+
+
 
