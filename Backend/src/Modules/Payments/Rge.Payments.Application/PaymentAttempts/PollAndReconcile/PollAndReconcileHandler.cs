@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Rge.BuildingBlocks.Application.Abstractions;
 using Rge.BuildingBlocks.Application.Messaging;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
@@ -13,11 +14,15 @@ namespace Rge.Payments.Application.PaymentAttempts.PollAndReconcile;
 
 public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuery, PaymentAttemptDto>
 {
+    private static readonly ConcurrentDictionary<string, DateTimeOffset> GatewayCheckCooldown = new(StringComparer.OrdinalIgnoreCase);
+    public static readonly TimeSpan CooldownWindow = TimeSpan.FromSeconds(3);
+
     private readonly IPaymentAttemptRepository _attemptRepository;
     private readonly IOrderRepository _orderRepository;
     private readonly IPaymentGateway _paymentGateway;
     private readonly IOutboxWriter _outboxWriter;
     private readonly IClock _clock;
+    private readonly IPaymentStatusNotifier? _notifier;
 
     public PollAndReconcileHandler(
         IPaymentAttemptRepository attemptRepository,
@@ -25,6 +30,17 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
         IPaymentGateway paymentGateway,
         IOutboxWriter outboxWriter,
         IClock clock)
+        : this(attemptRepository, orderRepository, paymentGateway, outboxWriter, clock, notifier: null)
+    {
+    }
+
+    public PollAndReconcileHandler(
+        IPaymentAttemptRepository attemptRepository,
+        IOrderRepository orderRepository,
+        IPaymentGateway paymentGateway,
+        IOutboxWriter outboxWriter,
+        IClock clock,
+        IPaymentStatusNotifier? notifier)
     {
         ArgumentNullException.ThrowIfNull(attemptRepository);
         ArgumentNullException.ThrowIfNull(orderRepository);
@@ -37,7 +53,10 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
         _paymentGateway = paymentGateway;
         _outboxWriter = outboxWriter;
         _clock = clock;
+        _notifier = notifier;
     }
+
+    public static void ResetCooldowns() => GatewayCheckCooldown.Clear();
 
     public async Task<Result<PaymentAttemptDto>> HandleAsync(
         PollAndReconcileQuery query,
@@ -80,10 +99,21 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
 
         DateTimeOffset nowUtc = _clock.UtcNow;
 
+        bool isWithinCooldown = false;
+        if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId) &&
+            GatewayCheckCooldown.TryGetValue(attempt.ProviderPaymentId, out DateTimeOffset lastCheck) &&
+            (nowUtc - lastCheck) < CooldownWindow)
+        {
+            isWithinCooldown = true;
+        }
+
         if (query.AutoReconcile &&
+            !isWithinCooldown &&
             !string.IsNullOrWhiteSpace(attempt.ProviderPaymentId) &&
             !PaymentAttemptStateMachine.IsTerminal(attempt.Status))
         {
+            GatewayCheckCooldown[attempt.ProviderPaymentId] = nowUtc;
+
             Result<GatewayPaymentStatusResult> statusResult = await _paymentGateway
                 .GetCheckoutSessionStatusAsync(attempt.ProviderPaymentId, cancellationToken)
                 .ConfigureAwait(false);
@@ -92,6 +122,7 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
             {
                 var gw = statusResult.Value;
                 string gwStatus = gw.Status.ToLowerInvariant();
+                PaymentAttemptStatus priorStatus = attempt.Status;
 
                 if (gwStatus is "paid" or "succeeded")
                 {
@@ -127,6 +158,26 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
                 }
 
                 await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
+
+                if (priorStatus != attempt.Status && _notifier is not null)
+                {
+                    string statusStr = attempt.Status.ToString().ToLowerInvariant();
+                    await _notifier.NotifyPaymentStatusChangedAsync(
+                        attempt.Id,
+                        statusStr,
+                        nowUtc,
+                        cancellationToken).ConfigureAwait(false);
+
+                    if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId) &&
+                        !string.Equals(attempt.ProviderPaymentId, attempt.Id, StringComparison.OrdinalIgnoreCase))
+                    {
+                        await _notifier.NotifyPaymentStatusChangedAsync(
+                            attempt.ProviderPaymentId,
+                            statusStr,
+                            nowUtc,
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                }
             }
         }
 
@@ -134,6 +185,15 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
         {
             attempt.MarkSucceeded(order.UpdatedAt, attempt.PaymentMethod);
             await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
+
+            if (_notifier is not null)
+            {
+                await _notifier.NotifyPaymentStatusChangedAsync(
+                    attempt.Id,
+                    "succeeded",
+                    nowUtc,
+                    cancellationToken).ConfigureAwait(false);
+            }
         }
 
         return Result.Success(attempt.ToDto());

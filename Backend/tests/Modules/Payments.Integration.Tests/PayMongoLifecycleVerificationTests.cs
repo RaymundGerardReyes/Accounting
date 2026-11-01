@@ -8,6 +8,7 @@ using Rge.BuildingBlocks.SharedKernel.Primitives;
 using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Payments.Application.Orders.CreateOrder;
 using Rge.Payments.Application.PaymentAttempts.InitiateAttempt;
+using Rge.Payments.Application.PaymentAttempts.PollAndReconcile;
 using Rge.Payments.Application.Ports;
 using Rge.Payments.Application.Webhooks.ReceivePayMongoWebhook;
 using Rge.Payments.Domain.Orders;
@@ -36,6 +37,7 @@ public sealed class PayMongoLifecycleVerificationTests
     {
         private readonly ConcurrentDictionary<string, GatewayPaymentStatusResult> _sessions = new(StringComparer.OrdinalIgnoreCase);
         public ConcurrentBag<string> ExpiredSessionCalls { get; } = [];
+        public ConcurrentBag<string> StatusCalls { get; } = [];
         public bool RejectNextExpireCallWith400 { get; set; }
 
         public void SetRemoteSessionStatus(
@@ -79,6 +81,7 @@ public sealed class PayMongoLifecycleVerificationTests
             string providerPaymentId,
             CancellationToken cancellationToken = default)
         {
+            StatusCalls.Add(providerPaymentId);
             if (_sessions.TryGetValue(providerPaymentId, out GatewayPaymentStatusResult? status))
             {
                 return Task.FromResult(Result.Success(status));
@@ -352,6 +355,46 @@ public sealed class PayMongoLifecycleVerificationTests
         // Only 1 outbox message should have been enqueued
         int outboxCount = await outboxWorker.ProcessNextBatchOnceAsync();
         Assert.Equal(1, outboxCount);
+    }
+
+    // =========================================================================
+    // Scenario 6: Fast-Path Reconciliation Cooldown & SignalR Event Notification
+    // =========================================================================
+    [Fact]
+    public async Task Scenario06_PollAndReconcile_EnforcesCooldown_And_NotifiesSignalR()
+    {
+        PollAndReconcileHandler.ResetCooldowns();
+        var (sp, clock, gateway, notifier) = BuildTestHarness();
+        await using var _ = sp;
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var createOrder = scope.ServiceProvider.GetRequiredService<CreateOrderHandler>();
+        var initiateAttempt = scope.ServiceProvider.GetRequiredService<InitiateAttemptHandler>();
+        var pollHandler = scope.ServiceProvider.GetRequiredService<PollAndReconcileHandler>();
+
+        var ordRes = await createOrder.HandleAsync(new CreateOrderCommand("COST-ACC-TEXT-2026", Quantity: 1));
+        var attRes = await initiateAttempt.HandleAsync(new InitiateAttemptCommand(ordRes.Value.Id, "qrph", "idem-poll-cd"));
+        string csId = attRes.Value.ProviderPaymentId!;
+
+        // 1. Initial fast-path query with auto_reconcile = false: MUST NOT call gateway
+        var localResult = await pollHandler.HandleAsync(new PollAndReconcileQuery(attRes.Value.Id, AutoReconcile: false));
+        Assert.True(localResult.IsSuccess);
+        Assert.Equal("requiresaction", localResult.Value.Status.ToLowerInvariant());
+        Assert.Empty(gateway.StatusCalls);
+
+        // 2. First query with auto_reconcile = true: Calls gateway, transitions to succeeded, publishes SignalR event
+        gateway.SetRemoteSessionStatus(csId, "paid", "qrph", clock.UtcNow);
+        var reconciledResult = await pollHandler.HandleAsync(new PollAndReconcileQuery(attRes.Value.Id, AutoReconcile: true));
+        Assert.True(reconciledResult.IsSuccess);
+        Assert.Equal("succeeded", reconciledResult.Value.Status);
+        Assert.Single(gateway.StatusCalls);
+        Assert.Contains(notifier.PublishedEvents, e => e.AttemptId == attRes.Value.Id && e.Status == "succeeded");
+
+        // 3. Immediate repeat query within 3-second cooldown window: MUST NOT call gateway again
+        var cachedResult = await pollHandler.HandleAsync(new PollAndReconcileQuery(attRes.Value.Id, AutoReconcile: true));
+        Assert.True(cachedResult.IsSuccess);
+        Assert.Equal("succeeded", cachedResult.Value.Status);
+        Assert.Single(gateway.StatusCalls); // Still 1, not 2! Cooldown prevented redundant call
     }
 }
 

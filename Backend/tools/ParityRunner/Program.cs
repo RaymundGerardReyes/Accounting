@@ -551,6 +551,9 @@ Assert("PayMongoLifecycleVerificationTests.Scenario04_LateWebhookAfterExpiration
 await paymentsTests.Scenario05_DuplicatePaidWebhook_ProcessesOnce_And_PreventsDuplicateFulfillment().ConfigureAwait(false);
 Assert("PayMongoLifecycleVerificationTests.Scenario05_DuplicatePaidWebhook_ProcessesOnce_And_PreventsDuplicateFulfillment", true);
 
+await paymentsTests.Scenario06_PollAndReconcile_EnforcesCooldown_And_NotifiesSignalR().ConfigureAwait(false);
+Assert("PayMongoLifecycleVerificationTests.Scenario06_PollAndReconcile_EnforcesCooldown_And_NotifiesSignalR", true);
+
 Console.WriteLine("\n==============================================================");
 
 Console.WriteLine($" RESULTS: {passed} PASSED, {failed} FAILED");
