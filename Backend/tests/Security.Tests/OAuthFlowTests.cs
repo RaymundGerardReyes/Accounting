@@ -82,6 +82,41 @@ public sealed class OAuthFlowTests
         public Task<IReadOnlyList<Actor>> ListFinanceUsersAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<Actor>>(_actors.Values.ToList());
 
+        public void SeedUser(Actor actor) => _actors[actor.Id] = actor;
+
+        public Task UpsertUserCredentialsAndRolesAsync(
+            string userId,
+            string employeeCode,
+            string fullName,
+            string email,
+            string username,
+            string? password,
+            string departmentId,
+            string costCenterId,
+            string employeeGroup,
+            IReadOnlyCollection<string> roles,
+            string departmentScope,
+            bool isActive,
+            CancellationToken cancellationToken = default)
+        {
+            var roleAssignments = roles.Select((r, i) =>
+                new RoleAssignment($"ra_{userId}_{r}_{i}", userId, r, departmentScope)).ToList();
+
+            var actor = new Actor(
+                id: userId,
+                employeeCode: employeeCode,
+                fullName: fullName,
+                email: email,
+                departmentId: departmentId,
+                costCenterId: costCenterId,
+                employeeGroup: employeeGroup,
+                status: isActive ? "active" : "suspended",
+                roleAssignments: roleAssignments);
+
+            _actors[userId] = actor;
+            return Task.CompletedTask;
+        }
+
         public Task<Actor> FindOrProvisionActorAsync(string email, string fullName, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(email);
@@ -96,12 +131,6 @@ public sealed class OAuthFlowTests
             {
                 new($"ra_oauth_{userId}", userId, Role.Employee, "*")
             };
-
-            if (email.Contains("restaca", StringComparison.OrdinalIgnoreCase) || email.StartsWith("admin", StringComparison.OrdinalIgnoreCase))
-            {
-                roles.Add(new($"ra_admin_{userId}", userId, Role.SystemAdmin, "*"));
-                roles.Add(new($"ra_ctrl_{userId}", userId, Role.FinanceController, "*"));
-            }
 
             var newActor = new Actor(
                 id: userId,
@@ -163,6 +192,20 @@ public sealed class OAuthFlowTests
     public async Task OAuthCallback_ConsumesState_ExchangesCode_ProvisionsUser_SavesSession_And_RedirectsToHome()
     {
         var store = new InMemoryOAuthStore();
+        store.SeedUser(new Actor(
+            id: "usr_restaca_01",
+            employeeCode: "EMP-RESTACA-01",
+            fullName: "Raymund Gerard Restaca",
+            email: "raymundgerardrestaca@gmail.com",
+            departmentId: "finance",
+            costCenterId: "CC-FIN",
+            employeeGroup: "management",
+            status: "active",
+            roleAssignments: [
+                new RoleAssignment("ra_01", "usr_restaca_01", Role.SystemAdmin, "*"),
+                new RoleAssignment("ra_02", "usr_restaca_01", Role.FinanceController, "*")
+            ]));
+
         var exchange = new StubTokenExchangeService();
         var clock = new DeterministicClock();
         var beginHandler = new OAuthBeginHandler(store);
@@ -281,6 +324,19 @@ public sealed class OAuthFlowTests
     public async Task OAuthCallback_Supports_Dual_Path_Google_Callback_Convention()
     {
         var store = new InMemoryOAuthStore();
+        store.SeedUser(new Actor(
+            id: "usr_restaca_01",
+            employeeCode: "EMP-RESTACA-01",
+            fullName: "Raymund Gerard Restaca",
+            email: "raymundgerardrestaca@gmail.com",
+            departmentId: "finance",
+            costCenterId: "CC-FIN",
+            employeeGroup: "management",
+            status: "active",
+            roleAssignments: [
+                new RoleAssignment("ra_01", "usr_restaca_01", Role.SystemAdmin, "*")
+            ]));
+
         var exchange = new StubTokenExchangeService();
         var clock = new DeterministicClock();
         var beginHandler = new OAuthBeginHandler(store);
@@ -295,5 +351,25 @@ public sealed class OAuthFlowTests
         Assert.True(callbackResult.IsSuccess);
         Assert.Equal("google", callbackResult.Value.Provider);
         Assert.Equal("raymundgerardrestaca@gmail.com", callbackResult.Value.Email);
+    }
+
+    [Fact]
+    public async Task OAuthCallback_Rejects_Unregistered_OAuth_User_With_Unauthorized_Error()
+    {
+        var store = new InMemoryOAuthStore();
+        // Do NOT seed the user in store: user is unregistered!
+        var exchange = new StubTokenExchangeService();
+        var clock = new DeterministicClock();
+        var beginHandler = new OAuthBeginHandler(store);
+        var callbackHandler = new OAuthCallbackHandler(store, exchange, store, store, store, clock);
+
+        var beginResult = await beginHandler.HandleAsync(new OAuthBeginCommand("google", "https://preview-app-123.ev/api/auth/google/callback"));
+        Assert.True(beginResult.IsSuccess);
+        string state = beginResult.Value.State;
+
+        var callbackResult = await callbackHandler.HandleAsync(new OAuthCallbackCommand("google", state, "auth_code_live_789"));
+        Assert.True(callbackResult.IsFailure);
+        Assert.Equal("Identity.OAuth.UnregisteredUser", callbackResult.Error.Code);
+        Assert.Equal(Rge.BuildingBlocks.SharedKernel.Results.ErrorType.Unauthorized, callbackResult.Error.Type);
     }
 }

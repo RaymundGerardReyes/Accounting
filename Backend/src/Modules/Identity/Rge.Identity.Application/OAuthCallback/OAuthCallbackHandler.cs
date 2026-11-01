@@ -95,29 +95,28 @@ public sealed class OAuthCallbackHandler : ICommandHandler<OAuthCallbackCommand,
                 cancellationToken).ConfigureAwait(false);
         }
 
-        userInfo ??= new OAuthUserInfo(
-            Subject: $"usr_oauth_{RandomNumberGenerator.GetHexString(8).ToLowerInvariant()}",
-            Email: "juan.delacruz@rge.com.ph",
-            Name: "Juan Dela Cruz",
-            Picture: null);
+        if (userInfo is null || string.IsNullOrWhiteSpace(userInfo.Email))
+        {
+            return Result.Failure<OAuthCallbackResponse>(
+                Error.Unauthorized(
+                    "Identity.OAuth.TokenExchangeFailed",
+                    "Failed to exchange OAuth authorization code for user profile."));
+        }
 
-        // 2. Resolve or provision Actor in RoleStore
+        // 2. Dynamically resolve Actor against stored user credentials in RoleStore
         Actor? actor = null;
         if (_roleStore is not null)
         {
-            actor = await _roleStore.FindOrProvisionActorAsync(userInfo.Email, userInfo.Name, cancellationToken).ConfigureAwait(false);
+            actor = await _roleStore.GetActorByEmailOrUsernameAsync(userInfo.Email, cancellationToken).ConfigureAwait(false);
         }
 
-        actor ??= new Actor(
-            id: "emp_field_01",
-            employeeCode: "EMP-2026-001",
-            fullName: userInfo.Name,
-            email: userInfo.Email,
-            departmentId: "manufacturing",
-            costCenterId: "CC-001",
-            employeeGroup: "field_staff",
-            status: "active",
-            roleAssignments: [new RoleAssignment("ra_oauth", "emp_field_01", Role.Employee, "manufacturing")]);
+        if (actor is null)
+        {
+            return Result.Failure<OAuthCallbackResponse>(
+                Error.Unauthorized(
+                    "Identity.OAuth.UnregisteredUser",
+                    $"OAuth user '{userInfo.Email}' is not pre-registered in user credentials."));
+        }
 
         if (!actor.IsActive)
         {

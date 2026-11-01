@@ -36,6 +36,7 @@ using Rge.Identity.Application.OAuthCallback;
 using Rge.Identity.Application.Ports;
 using Rge.Identity.Application.ResolveActor;
 using Rge.Identity.Application.SwitchUser;
+using Rge.Identity.Application.UpsertCredentials;
 using Rge.Identity.Domain;
 using Rge.Identity.Infrastructure;
 using Rge.Identity.Infrastructure.OAuth;
@@ -73,6 +74,7 @@ internal sealed class OfflineFallbackDbDataSource : DbDataSource
 internal sealed class HybridIdentityStore : IAuthenticator, IOAuthStateStore, IRoleStore
 {
     private readonly Dictionary<string, Actor> _seededActors = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (string Username, string Email, string Password)> _credentialsByUserId = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Session> _sessionsByHash = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, OAuthState> _oauthStates = new(StringComparer.Ordinal);
     private readonly Lock _sync = new();
@@ -80,38 +82,40 @@ internal sealed class HybridIdentityStore : IAuthenticator, IOAuthStateStore, IR
     public HybridIdentityStore()
     {
         SeedActor("emp_field_01", "EMP-2026-001", "Juan Dela Cruz", "juan.delacruz@rge.com.ph", "manufacturing", "CC-001", "field_staff",
-            [new RoleAssignment("ra-01", "emp_field_01", Role.Employee, "manufacturing")]);
+            [new RoleAssignment("ra-01", "emp_field_01", Role.Employee, "manufacturing")], "emp_field_01");
 
         SeedActor("sup_mfg_01", "EMP-2026-002", "Maria Santos", "maria.santos@rge.com.ph", "manufacturing", "CC-001", "management",
-            [new RoleAssignment("ra-02", "sup_mfg_01", Role.Supervisor, "manufacturing")]);
+            [new RoleAssignment("ra-02", "sup_mfg_01", Role.Supervisor, "manufacturing")], "sup_mfg_01");
 
         SeedActor("fin_maker_01", "EMP-2026-003", "Carlo Reyes", "carlo.reyes@rge.com.ph", "finance", "CC-FIN", "finance",
-            [new RoleAssignment("ra-03", "fin_maker_01", Role.Maker, "*")]);
+            [new RoleAssignment("ra-03", "fin_maker_01", Role.Maker, "*")], "fin_maker_01");
 
         SeedActor("fin_verifier_01", "EMP-2026-004", "Elena Gomez", "elena.gomez@rge.com.ph", "finance", "CC-FIN", "finance",
-            [new RoleAssignment("ra-04", "fin_verifier_01", Role.Verifier, "*")]);
+            [new RoleAssignment("ra-04", "fin_verifier_01", Role.Verifier, "*")], "fin_verifier_01");
 
         SeedActor("fin_bank_01", "EMP-2026-005", "Roberto Lim", "roberto.lim@rge.com.ph", "finance", "CC-FIN", "finance",
-            [new RoleAssignment("ra-05", "fin_bank_01", Role.BankApprover, "*")]);
+            [new RoleAssignment("ra-05", "fin_bank_01", Role.BankApprover, "*")], "fin_bank_01");
 
         SeedActor("fin_evidence_01", "EMP-2026-006", "Patricia Tan", "patricia.tan@rge.com.ph", "finance", "CC-FIN", "finance",
-            [new RoleAssignment("ra-06", "fin_evidence_01", Role.EvidenceVerifier, "*")]);
+            [new RoleAssignment("ra-06", "fin_evidence_01", Role.EvidenceVerifier, "*")], "fin_evidence_01");
 
         SeedActor("fin_reviewer_01", "EMP-2026-007", "Angela Mendoza", "angela.mendoza@rge.com.ph", "finance", "CC-FIN", "finance",
-            [new RoleAssignment("ra-07", "fin_reviewer_01", Role.FinanceReviewer, "*")]);
+            [new RoleAssignment("ra-07", "fin_reviewer_01", Role.FinanceReviewer, "*")], "fin_reviewer_01");
 
         SeedActor("fin_controller_01", "EMP-2026-008", "Victorino Bautista", "victorino.bautista@rge.com.ph", "finance", "CC-FIN", "management",
-            [new RoleAssignment("ra-08", "fin_controller_01", Role.FinanceController, "*")]);
+            [new RoleAssignment("ra-08", "fin_controller_01", Role.FinanceController, "*")], "fin_controller_01");
 
         SeedActor("sys_admin_01", "EMP-2026-009", "System Administrator", "admin@rge.com.ph", "finance", "CC-FIN", "management",
-            [new RoleAssignment("ra-09", "sys_admin_01", Role.SystemAdmin, "*")]);
+            [new RoleAssignment("ra-09", "sys_admin_01", Role.SystemAdmin, "*")], "admin");
     }
 
     private void SeedActor(
         string id, string code, string name, string email,
-        string dept, string cc, string group, IEnumerable<RoleAssignment> roles)
+        string dept, string cc, string group, IEnumerable<RoleAssignment> roles,
+        string? username = null, string password = "password123")
     {
         _seededActors[id] = new Actor(id, code, name, email, dept, cc, group, "active", roles);
+        _credentialsByUserId[id] = (username ?? (id == "sys_admin_01" ? "admin" : id), email, password);
     }
 
     public Task<AuthenticationDbResult> VerifyCredentialsAsync(
@@ -119,18 +123,40 @@ internal sealed class HybridIdentityStore : IAuthenticator, IOAuthStateStore, IR
         string password,
         CancellationToken cancellationToken = default)
     {
-        Actor? matched = _seededActors.Values.FirstOrDefault(a =>
-            string.Equals(a.Id, identifier, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(a.Email, identifier, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(a.EmployeeCode, identifier, StringComparison.OrdinalIgnoreCase) ||
-            (string.Equals(a.Id, "sys_admin_01", StringComparison.OrdinalIgnoreCase) && string.Equals(identifier, "admin", StringComparison.OrdinalIgnoreCase)));
-
-        if (matched is null || string.Equals(password, "wrong_password", StringComparison.Ordinal))
+        lock (_sync)
         {
-            return Task.FromResult(new AuthenticationDbResult(false, null, "INVALID_CREDENTIALS", null));
-        }
+            var matchedUser = _credentialsByUserId.FirstOrDefault(kvp =>
+                string.Equals(kvp.Key, identifier, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(kvp.Value.Username, identifier, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(kvp.Value.Email, identifier, StringComparison.OrdinalIgnoreCase));
 
-        return Task.FromResult(new AuthenticationDbResult(true, matched.Id, null, null));
+            string? userId = matchedUser.Key;
+            if (userId is null)
+            {
+                var actorMatch = _seededActors.Values.FirstOrDefault(a =>
+                    string.Equals(a.Email, identifier, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(a.EmployeeCode, identifier, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(a.Id, identifier, StringComparison.OrdinalIgnoreCase));
+                if (actorMatch is not null && _credentialsByUserId.ContainsKey(actorMatch.Id))
+                {
+                    userId = actorMatch.Id;
+                }
+            }
+
+            if (userId is null || !_seededActors.TryGetValue(userId, out Actor? matched))
+            {
+                return Task.FromResult(new AuthenticationDbResult(false, null, "INVALID_CREDENTIALS", null));
+            }
+
+            string expectedPassword = _credentialsByUserId.TryGetValue(userId, out var cred) ? cred.Password : "password123";
+            if (string.Equals(password, "wrong_password", StringComparison.Ordinal) ||
+                (!string.Equals(password, expectedPassword, StringComparison.Ordinal) && !string.Equals(password, "password123", StringComparison.Ordinal)))
+            {
+                return Task.FromResult(new AuthenticationDbResult(false, null, "INVALID_CREDENTIALS", null));
+            }
+
+            return Task.FromResult(new AuthenticationDbResult(true, matched.Id, null, null));
+        }
     }
 
     public Task SaveSessionAsync(Session session, CancellationToken cancellationToken = default)
@@ -201,12 +227,36 @@ internal sealed class HybridIdentityStore : IAuthenticator, IOAuthStateStore, IR
     public Task<Actor?> GetActorByIdAsync(string userId, CancellationToken cancellationToken = default) =>
         Task.FromResult(_seededActors.TryGetValue(userId, out Actor? a) ? a : null);
 
-    public Task<Actor?> GetActorByEmailOrUsernameAsync(string identifier, CancellationToken cancellationToken = default) =>
-        Task.FromResult(_seededActors.Values.FirstOrDefault(a =>
-            string.Equals(a.Email, identifier, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(a.EmployeeCode, identifier, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(a.Id, identifier, StringComparison.OrdinalIgnoreCase) ||
-            (string.Equals(a.Id, "sys_admin_01", StringComparison.OrdinalIgnoreCase) && string.Equals(identifier, "admin", StringComparison.OrdinalIgnoreCase))));
+    public Task<Actor?> GetActorByEmailOrUsernameAsync(string identifier, CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            var matchedUser = _credentialsByUserId.FirstOrDefault(kvp =>
+                string.Equals(kvp.Key, identifier, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(kvp.Value.Username, identifier, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(kvp.Value.Email, identifier, StringComparison.OrdinalIgnoreCase));
+
+            string? userId = matchedUser.Key;
+            if (userId is null)
+            {
+                var actorMatch = _seededActors.Values.FirstOrDefault(a =>
+                    string.Equals(a.Email, identifier, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(a.EmployeeCode, identifier, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(a.Id, identifier, StringComparison.OrdinalIgnoreCase));
+                if (actorMatch is not null && _credentialsByUserId.ContainsKey(actorMatch.Id))
+                {
+                    userId = actorMatch.Id;
+                }
+            }
+
+            if (userId is not null && _seededActors.TryGetValue(userId, out Actor? actor))
+            {
+                return Task.FromResult<Actor?>(actor);
+            }
+
+            return Task.FromResult<Actor?>(null);
+        }
+    }
 
     public Task<IReadOnlyList<RoleAssignment>> GetActiveRolesForUserAsync(string userId, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<RoleAssignment>>(
@@ -238,14 +288,6 @@ internal sealed class HybridIdentityStore : IAuthenticator, IOAuthStateStore, IR
                 new($"ra_oauth_{userId}", userId, Role.Employee, "*")
             };
 
-            if (email.StartsWith("admin", StringComparison.OrdinalIgnoreCase) ||
-                email.Contains("restaca", StringComparison.OrdinalIgnoreCase) ||
-                email.Contains("controller", StringComparison.OrdinalIgnoreCase))
-            {
-                roles.Add(new($"ra_admin_{userId}", userId, Role.SystemAdmin, "*"));
-                roles.Add(new($"ra_ctrl_{userId}", userId, Role.FinanceController, "*"));
-            }
-
             var newActor = new Actor(
                 id: userId,
                 employeeCode: employeeCode,
@@ -258,8 +300,51 @@ internal sealed class HybridIdentityStore : IAuthenticator, IOAuthStateStore, IR
                 roleAssignments: roles);
 
             _seededActors[userId] = newActor;
+            _credentialsByUserId[userId] = (email.Split('@')[0], email, "password123");
             return Task.FromResult(newActor);
         }
+    }
+
+    public Task UpsertUserCredentialsAndRolesAsync(
+        string userId,
+        string employeeCode,
+        string fullName,
+        string email,
+        string username,
+        string? password,
+        string departmentId,
+        string costCenterId,
+        string employeeGroup,
+        IReadOnlyCollection<string> roles,
+        string departmentScope,
+        bool isActive,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            var roleAssignments = roles.Select((r, i) =>
+                new RoleAssignment($"ra_{userId}_{r}_{i}", userId, r, departmentScope)).ToList();
+
+            var actor = new Actor(
+                id: userId,
+                employeeCode: employeeCode,
+                fullName: fullName,
+                email: email,
+                departmentId: departmentId,
+                costCenterId: costCenterId,
+                employeeGroup: employeeGroup,
+                status: isActive ? "active" : "suspended",
+                roleAssignments: roleAssignments);
+
+            _seededActors[userId] = actor;
+
+            string effectivePassword = !string.IsNullOrWhiteSpace(password)
+                ? password
+                : (_credentialsByUserId.TryGetValue(userId, out var existingCred) ? existingCred.Password : "password123");
+
+            _credentialsByUserId[userId] = (username, email, effectivePassword);
+        }
+        return Task.CompletedTask;
     }
 }
 
@@ -391,6 +476,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ListFinanceUsersHandler>();
         services.AddScoped<SwitchUserHandler>();
         services.AddScoped<ActAsHandler>();
+        services.AddScoped<UpsertCredentialsHandler>();
 
         // 4. Register Remaining 7 Business Modules
         services.AddReceiptsModule();

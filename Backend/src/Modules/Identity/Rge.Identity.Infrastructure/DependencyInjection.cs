@@ -24,6 +24,8 @@ using Rge.Identity.Application.ResolveActor;
 
 using Rge.Identity.Application.SwitchUser;
 
+using Rge.Identity.Application.UpsertCredentials;
+
 
 
 namespace Rge.Identity.Infrastructure;
@@ -71,6 +73,8 @@ public sealed class IdentityModuleServices
     public SwitchUserHandler SwitchUserHandler { get; }
 
     public ActAsHandler ActAsHandler { get; }
+
+    public UpsertCredentialsHandler UpsertCredentialsHandler { get; }
 
 
 
@@ -121,6 +125,8 @@ public sealed class IdentityModuleServices
         SwitchUserHandler = new SwitchUserHandler(authenticator, roleStore, actorCache, clock);
 
         ActAsHandler = new ActAsHandler(authenticator, clock);
+
+        UpsertCredentialsHandler = new UpsertCredentialsHandler(roleStore, actorCache, clock);
 
     }
 
@@ -207,6 +213,7 @@ public static class IdentityServiceCollectionExtensions
         services.AddScoped(sp => sp.GetRequiredService<IdentityModuleServices>().ListFinanceUsersHandler);
         services.AddScoped(sp => sp.GetRequiredService<IdentityModuleServices>().SwitchUserHandler);
         services.AddScoped(sp => sp.GetRequiredService<IdentityModuleServices>().ActAsHandler);
+        services.AddScoped(sp => sp.GetRequiredService<IdentityModuleServices>().UpsertCredentialsHandler);
 
         return services;
     }

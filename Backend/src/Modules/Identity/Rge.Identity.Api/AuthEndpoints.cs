@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Rge.BuildingBlocks.Api.Endpoints;
 using Rge.BuildingBlocks.Api.Http;
+using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Identity.Application.CreateCsrfToken;
 using Rge.Identity.Application.GetSession;
 using Rge.Identity.Application.ListFinanceUsers;
@@ -70,11 +71,23 @@ public sealed class AuthEndpoints : IEndpointModule
         {
             if (!string.IsNullOrWhiteSpace(error))
             {
+                string? accept = httpContext.Request.Headers.Accept.ToString();
+                if (!string.IsNullOrEmpty(accept) && accept.Contains("application/json", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Result.Failure(Error.Unauthorized("Identity.OAuth.Error", error)).ToHttpResult(httpContext);
+                }
+
                 return Results.Redirect($"/login?error={Uri.EscapeDataString(error)}");
             }
 
             if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(state))
             {
+                string? accept = httpContext.Request.Headers.Accept.ToString();
+                if (!string.IsNullOrEmpty(accept) && accept.Contains("application/json", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Result.Failure(Error.Validation("Identity.OAuth.InvalidRequest", "Missing code or state parameter.")).ToHttpResult(httpContext);
+                }
+
                 return Results.Redirect("/login?error=invalid_request");
             }
 
@@ -86,6 +99,14 @@ public sealed class AuthEndpoints : IEndpointModule
 
             if (result.IsFailure)
             {
+                string? accept = httpContext.Request.Headers.Accept.ToString();
+                if (!string.IsNullOrEmpty(accept) &&
+                    (accept.Contains("application/json", StringComparison.OrdinalIgnoreCase) ||
+                     accept.Contains("application/problem+json", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return result.ToHttpResult(httpContext);
+                }
+
                 return Results.Redirect($"/login?error={Uri.EscapeDataString(result.Error.Code)}");
             }
 

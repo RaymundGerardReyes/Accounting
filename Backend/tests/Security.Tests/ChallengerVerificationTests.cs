@@ -236,6 +236,20 @@ public sealed class ChallengerVerificationTests
             var actor = new Actor("usr_stub_01", "EMP-STUB", fullName, email, "finance", "CC-FIN", "management", "active", []);
             return Task.FromResult(actor);
         }
+        public Task UpsertUserCredentialsAndRolesAsync(
+            string userId,
+            string employeeCode,
+            string fullName,
+            string email,
+            string username,
+            string? password,
+            string departmentId,
+            string costCenterId,
+            string employeeGroup,
+            IReadOnlyCollection<string> roles,
+            string departmentScope,
+            bool isActive,
+            CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 
     private sealed class PassThroughActorCache : IActorCache

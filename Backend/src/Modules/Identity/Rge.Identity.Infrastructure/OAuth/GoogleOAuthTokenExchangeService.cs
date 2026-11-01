@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Rge.Identity.Application.Ports;
+using Rge.Identity.Domain;
 
 namespace Rge.Identity.Infrastructure.OAuth;
 
@@ -13,15 +14,18 @@ public sealed class GoogleOAuthTokenExchangeService : IOAuthTokenExchangeService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<GoogleOAuthTokenExchangeService> _logger;
+    private readonly IRoleStore? _roleStore;
 
     public GoogleOAuthTokenExchangeService(
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
-        ILogger<GoogleOAuthTokenExchangeService> logger)
+        ILogger<GoogleOAuthTokenExchangeService> logger,
+        IRoleStore? roleStore = null)
     {
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _roleStore = roleStore;
     }
 
     public async Task<OAuthUserInfo?> ExchangeCodeForUserInfoAsync(
@@ -38,7 +42,8 @@ public sealed class GoogleOAuthTokenExchangeService : IOAuthTokenExchangeService
 
         if (!string.Equals(provider, "google", StringComparison.OrdinalIgnoreCase))
         {
-            return new OAuthUserInfo("mock_sub", "juan.delacruz@rge.com.ph", "Juan Dela Cruz", null);
+            _logger.LogWarning("Unsupported OAuth provider: {Provider}", provider);
+            return null;
         }
 
         string clientId = _configuration["Authentication:Google:ClientId"]
@@ -59,8 +64,8 @@ public sealed class GoogleOAuthTokenExchangeService : IOAuthTokenExchangeService
             authorizationCode.StartsWith("test_", StringComparison.OrdinalIgnoreCase) ||
             string.IsNullOrWhiteSpace(clientSecret))
         {
-            _logger.LogInformation("Using offline development OAuth identity for authorization code.");
-            return new OAuthUserInfo("dev_sub_01", "juan.delacruz@rge.com.ph", "Juan Dela Cruz", null);
+            _logger.LogInformation("Resolving dynamic offline development OAuth identity for authorization code.");
+            return await ResolveDevOAuthUserInfoAsync(authorizationCode, cancellationToken).ConfigureAwait(false);
         }
 
         try
@@ -177,6 +182,55 @@ public sealed class GoogleOAuthTokenExchangeService : IOAuthTokenExchangeService
         catch
         {
             // Ignore format errors and fallback to userinfo HTTP endpoint
+        }
+
+        return null;
+    }
+
+    private async Task<OAuthUserInfo?> ResolveDevOAuthUserInfoAsync(string authorizationCode, CancellationToken cancellationToken)
+    {
+        string? emailCandidate = null;
+        if (authorizationCode.StartsWith("test_code_", StringComparison.OrdinalIgnoreCase))
+        {
+            emailCandidate = authorizationCode["test_code_".Length..].Trim();
+        }
+        else if (authorizationCode.StartsWith("test_", StringComparison.OrdinalIgnoreCase))
+        {
+            string candidate = authorizationCode["test_".Length..].Trim();
+            if (candidate.Contains('@', StringComparison.Ordinal))
+            {
+                emailCandidate = candidate;
+            }
+        }
+        else if (authorizationCode.Contains('@', StringComparison.Ordinal))
+        {
+            emailCandidate = authorizationCode.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(emailCandidate))
+        {
+            if (_roleStore is not null)
+            {
+                Actor? actor = await _roleStore.GetActorByEmailOrUsernameAsync(emailCandidate, cancellationToken).ConfigureAwait(false);
+                if (actor is not null)
+                {
+                    return new OAuthUserInfo($"dev_sub_{actor.Id}", actor.Email, actor.FullName, null);
+                }
+            }
+
+            // Return user info with the candidate email so OAuthCallbackHandler can evaluate against stored credentials and reject if unregistered
+            return new OAuthUserInfo($"dev_sub_{Guid.NewGuid():N}"[..18], emailCandidate, emailCandidate.Split('@')[0], null);
+        }
+
+        // Generic dev code: dynamically query stored finance users
+        if (_roleStore is not null)
+        {
+            IReadOnlyList<Actor> users = await _roleStore.ListFinanceUsersAsync(cancellationToken).ConfigureAwait(false);
+            Actor? firstActive = users.FirstOrDefault(u => u.IsActive) ?? users.FirstOrDefault();
+            if (firstActive is not null)
+            {
+                return new OAuthUserInfo($"dev_sub_{firstActive.Id}", firstActive.Email, firstActive.FullName, null);
+            }
         }
 
         return null;

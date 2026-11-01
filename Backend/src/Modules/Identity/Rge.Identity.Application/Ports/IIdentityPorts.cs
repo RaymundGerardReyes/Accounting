@@ -118,6 +118,20 @@ public interface IRoleStore
 
     Task<Actor> FindOrProvisionActorAsync(string email, string fullName, CancellationToken cancellationToken = default);
 
+    Task UpsertUserCredentialsAndRolesAsync(
+        string userId,
+        string employeeCode,
+        string fullName,
+        string email,
+        string username,
+        string? password,
+        string departmentId,
+        string costCenterId,
+        string employeeGroup,
+        IReadOnlyCollection<string> roles,
+        string departmentScope,
+        bool isActive,
+        CancellationToken cancellationToken = default);
 }
 
 

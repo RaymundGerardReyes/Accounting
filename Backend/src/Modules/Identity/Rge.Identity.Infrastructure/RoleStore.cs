@@ -37,15 +37,58 @@ public sealed class RoleStore : IRoleStore
 
 
     private const string GetUserByIdentifierSql = """
-
-        SELECT id, employee_code, full_name, email, department_id, cost_center_id, employee_group, status
-
-        FROM users_finance
-
-        WHERE LOWER(email) = LOWER(@identifier) OR LOWER(employee_code) = LOWER(@identifier)
-
+        SELECT u.id, u.employee_code, u.full_name, u.email, u.department_id, u.cost_center_id, u.employee_group, u.status
+        FROM users_finance u
+        INNER JOIN user_credentials c ON c.user_id = u.id
+        WHERE LOWER(u.email) = LOWER(@identifier)
+           OR LOWER(c.email) = LOWER(@identifier)
+           OR LOWER(c.username) = LOWER(@identifier)
+           OR LOWER(u.employee_code) = LOWER(@identifier)
+           OR LOWER(u.id) = LOWER(@identifier)
         LIMIT 1;
+        """;
 
+    private const string UpsertUserFinanceSql = """
+        INSERT INTO users_finance (id, employee_code, full_name, email, department_id, cost_center_id, employee_group, status)
+        VALUES (@id, @employee_code, @full_name, @email, @department_id, @cost_center_id, @employee_group, @status)
+        ON CONFLICT (id) DO UPDATE SET
+            employee_code  = EXCLUDED.employee_code,
+            full_name      = EXCLUDED.full_name,
+            email          = EXCLUDED.email,
+            department_id  = EXCLUDED.department_id,
+            cost_center_id = EXCLUDED.cost_center_id,
+            employee_group = EXCLUDED.employee_group,
+            status         = EXCLUDED.status;
+        """;
+
+    private const string UpsertUserCredentialsSql = """
+        INSERT INTO user_credentials (user_id, username, email, password_hash, failed_attempts, locked_until)
+        VALUES (
+            @user_id,
+            @username,
+            @email,
+            public.crypt(@password, public.gen_salt('bf', 10)),
+            0,
+            NULL
+        )
+        ON CONFLICT (user_id) DO UPDATE SET
+            username        = EXCLUDED.username,
+            email           = EXCLUDED.email,
+            password_hash   = CASE WHEN @password IS NOT NULL AND @password <> '' THEN public.crypt(@password, public.gen_salt('bf', 10)) ELSE user_credentials.password_hash END,
+            failed_attempts = 0,
+            locked_until    = NULL;
+        """;
+
+    private const string DeleteRoleAssignmentsForUserSql = """
+        DELETE FROM role_assignments
+        WHERE user_id = @user_id;
+        """;
+
+    private const string InsertRoleAssignmentSql = """
+        INSERT INTO role_assignments (id, user_id, role, department_scope, is_active)
+        VALUES (@id, @user_id, @role, @department_scope, 1)
+        ON CONFLICT (user_id, role, department_scope) DO UPDATE SET
+            is_active = 1;
         """;
 
 
@@ -363,14 +406,6 @@ public sealed class RoleStore : IRoleStore
             new($"ra_oauth_{userId}", userId, Role.Employee, "*")
         };
 
-        if (email.StartsWith("admin", StringComparison.OrdinalIgnoreCase) ||
-            email.Contains("restaca", StringComparison.OrdinalIgnoreCase) ||
-            email.Contains("controller", StringComparison.OrdinalIgnoreCase))
-        {
-            roles.Add(new($"ra_admin_{userId}", userId, Role.SystemAdmin, "*"));
-            roles.Add(new($"ra_ctrl_{userId}", userId, Role.FinanceController, "*"));
-        }
-
         return new Actor(
             id: userId,
             employeeCode: employeeCode,
@@ -381,6 +416,111 @@ public sealed class RoleStore : IRoleStore
             employeeGroup: "management",
             status: "active",
             roleAssignments: roles);
+    }
+
+    public async Task UpsertUserCredentialsAndRolesAsync(
+        string userId,
+        string employeeCode,
+        string fullName,
+        string email,
+        string username,
+        string? password,
+        string departmentId,
+        string costCenterId,
+        string employeeGroup,
+        IReadOnlyCollection<string> roles,
+        string departmentScope,
+        bool isActive,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fullName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        ArgumentNullException.ThrowIfNull(roles);
+
+        await using DbConnection connection = await _connectionFactory
+            .OpenConnectionAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        await using DbTransaction transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // 1. Upsert users_finance
+            await using (DbCommand cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = transaction;
+                cmd.CommandText = UpsertUserFinanceSql;
+                AddParameter(cmd, "@id", userId);
+                AddParameter(cmd, "@employee_code", employeeCode);
+                AddParameter(cmd, "@full_name", fullName);
+                AddParameter(cmd, "@email", email);
+                AddParameter(cmd, "@department_id", departmentId);
+                AddParameter(cmd, "@cost_center_id", costCenterId);
+                AddParameter(cmd, "@employee_group", employeeGroup);
+                AddParameter(cmd, "@status", isActive ? "active" : "suspended");
+                await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            // 2. Upsert user_credentials
+            await using (DbCommand cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = transaction;
+                cmd.CommandText = UpsertUserCredentialsSql;
+                AddParameter(cmd, "@user_id", userId);
+                AddParameter(cmd, "@username", username);
+                AddParameter(cmd, "@email", email);
+                AddParameter(cmd, "@password", string.IsNullOrWhiteSpace(password) ? "password123" : password);
+                await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            // 3. Delete existing role_assignments for user
+            await using (DbCommand cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = transaction;
+                cmd.CommandText = DeleteRoleAssignmentsForUserSql;
+                AddParameter(cmd, "@user_id", userId);
+                await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            // 4. Insert new active role assignments
+            foreach (string roleName in roles)
+            {
+                if (string.IsNullOrWhiteSpace(roleName))
+                {
+                    continue;
+                }
+
+                await using DbCommand cmd = connection.CreateCommand();
+                cmd.Transaction = transaction;
+                cmd.CommandText = InsertRoleAssignmentSql;
+                string roleId = $"ra_{userId}_{roleName}_{Guid.NewGuid():N}";
+                if (roleId.Length > 36)
+                {
+                    roleId = roleId[..36];
+                }
+
+                AddParameter(cmd, "@id", roleId);
+                AddParameter(cmd, "@user_id", userId);
+                AddParameter(cmd, "@role", roleName.Trim().ToLowerInvariant());
+                AddParameter(cmd, "@department_scope", departmentScope);
+                await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static void AddParameter(DbCommand command, string name, object? value)
+    {
+        DbParameter param = command.CreateParameter();
+        param.ParameterName = name;
+        param.Value = value ?? DBNull.Value;
+        command.Parameters.Add(param);
     }
 
     private static async Task<IReadOnlyList<RoleAssignment>> QueryRolesForUserAsync(
