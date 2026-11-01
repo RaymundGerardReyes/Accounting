@@ -685,9 +685,36 @@
     },
     {
         "method":  "GET",
+        "path":  "/api/auth/{provider}/callback",
+        "module":  "identity",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:97",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
         "path":  "/api/auth/callback/{provider}",
         "module":  "identity",
-        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:61",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:98",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/auth/{provider}/callback",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:99",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/auth/callback/{provider}",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:100",
         "summary":  "",
         "requires_auth":  false,
         "runtime":  "dotnet"
@@ -696,7 +723,7 @@
         "method":  "GET",
         "path":  "/api/auth/csrf",
         "module":  "identity",
-        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:90",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:103",
         "summary":  "",
         "requires_auth":  false,
         "runtime":  "dotnet"
@@ -705,7 +732,7 @@
         "method":  "POST",
         "path":  "/api/auth/login",
         "module":  "identity",
-        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:118",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:131",
         "summary":  "",
         "requires_auth":  false,
         "runtime":  "dotnet"
@@ -714,7 +741,7 @@
         "method":  "POST",
         "path":  "/api/auth/logout",
         "module":  "identity",
-        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:166",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:179",
         "summary":  "",
         "requires_auth":  false,
         "runtime":  "dotnet"
@@ -723,7 +750,16 @@
         "method":  "GET",
         "path":  "/api/auth/oauth/{provider}",
         "module":  "identity",
-        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:186",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:248",
+        "summary":  "",
+        "requires_auth":  false,
+        "runtime":  "dotnet"
+    },
+    {
+        "method":  "GET",
+        "path":  "/auth/oauth/{provider}",
+        "module":  "platform",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:249",
         "summary":  "",
         "requires_auth":  false,
         "runtime":  "dotnet"
@@ -732,7 +768,7 @@
         "method":  "GET",
         "path":  "/api/auth/session",
         "module":  "identity",
-        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:213",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:252",
         "summary":  "",
         "requires_auth":  false,
         "runtime":  "dotnet"
@@ -741,7 +777,7 @@
         "method":  "POST",
         "path":  "/api/auth/switch-user",
         "module":  "identity",
-        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:257",
+        "handler_ref":  "Backend\\src\\Modules\\Identity\\Rge.Identity.Api\\AuthEndpoints.cs:296",
         "summary":  "",
         "requires_auth":  false,
         "runtime":  "dotnet"

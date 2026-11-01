@@ -183,6 +183,28 @@ def remediate_production_secrets(env: dict) -> None:
         env["NEXT_PUBLIC_APP_URL"] = public_app_url
         env["Authentication__PublicAppUrl"] = public_app_url
 
+    # 7. Version & Line Environment Metadata Injection
+    line_file = ROOT_DIR / ".release-line"
+    release_line = line_file.read_text(encoding="utf-8").strip() if line_file.exists() else "dotnet"
+    env["NEXT_PUBLIC_APP_LINE"] = release_line
+    env["NEXT_PUBLIC_API_CONTRACT"] = "v1"
+
+    env_local = FRONTEND_DIR / ".env.production.local"
+    if env_local.exists():
+        try:
+            for l in env_local.read_text(encoding="utf-8-sig").splitlines():
+                if "=" in l and not l.strip().startswith("#"):
+                    k, v = l.split("=", 1)
+                    if k.strip() not in env:
+                        env[k.strip()] = v.strip()
+        except Exception:
+            pass
+
+    if "NEXT_PUBLIC_APP_VERSION" not in env:
+        v_file = ROOT_DIR / "VERSION"
+        v_val = v_file.read_text(encoding="utf-8").strip() if v_file.exists() else "0.5.0"
+        env["NEXT_PUBLIC_APP_VERSION"] = v_val
+
 
 def cleanup(signum=None, frame=None):
     global is_shutting_down, backend_proc, frontend_proc

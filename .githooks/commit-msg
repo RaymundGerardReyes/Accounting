@@ -14,9 +14,9 @@ elif [ -x "./Frontend/node_modules/.bin/commitlint" ]; then
 fi
 
 # Fallback regex validation for Conventional Commits: <type>(<scope>): <description>
-# Allowed types: feat|fix|chore|docs|test|refactor|style|perf
-# Allowed scopes: repo|backend|dotnet|frontend|test|docs|agents|versioning|migration|content-pack
-pattern="^(feat|fix|chore|docs|test|refactor|style|perf)\((repo|backend|dotnet|frontend|test|docs|agents|versioning|migration|content-pack)\): .+"
+# Allowed types: feat|fix|chore|docs|test|refactor|style|perf|build|ci
+# Allowed scopes: repo|backend|dotnet|frontend|test|docs|agents|versioning|migration|content-pack|web|identity|finance|payments|receipts|audit|costalloc|documents|integrations|db|deploy|release|deps
+pattern="^(feat|fix|chore|docs|test|refactor|style|perf|build|ci)\((repo|backend|dotnet|frontend|test|docs|agents|versioning|migration|content-pack|web|identity|finance|payments|receipts|audit|costalloc|documents|integrations|db|deploy|release|deps)\): .+"
 
 if echo "$msg" | grep -Eq "$pattern"; then
   exit 0
@@ -25,8 +25,8 @@ else
   echo " [REJECTED] Invalid commit message format." >&2
   echo " Must follow: <type>(<scope>): <description>" >&2
   echo " Got: '$msg'" >&2
-  echo " Allowed types: feat, fix, chore, docs, test, refactor, style, perf" >&2
-  echo " Allowed scopes: repo, backend, dotnet, frontend, test, docs, agents, versioning, migration, content-pack" >&2
+  echo " Allowed types: feat, fix, chore, docs, test, refactor, style, perf, build, ci" >&2
+  echo " Allowed scopes: repo, backend, dotnet, frontend, test, docs, agents, versioning, migration, content-pack, web, identity, finance, payments, receipts, audit, costalloc, documents, integrations, db, deploy, release, deps" >&2
   echo "=================================================================" >&2
   exit 1
 fi

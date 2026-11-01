@@ -29,19 +29,41 @@ SCOPE_PATTERNS = {
         r"^nginx/.*",
     ],
     "backend": [r"^Backend/(?!test_).*", r"^db/.*", r"^scaffold\.(sh|ps1)$"],
+    "dotnet": [r"^Backend/(?!test_).*", r"^Rge\.Accounting\.Host\.slnx$", r"^project\.toml$"],
     "frontend": [r"^Frontend/.*"],
     "test": [r"^Backend/test_.*", r"^tests/.*"],
     "docs": [r"^docs/.*", r"^INSTRUCTIONS\.txt$"],
     "agents": [r"^\.agents/.*"],
-    "versioning": [r"^scripts/.*"],
+    "versioning": [r"^scripts/.*", r"^tools/versioning/.*"],
 }
 
-ALLOWED_TYPES = ["feat", "fix", "chore", "docs", "test", "refactor", "style", "perf"]
-ALLOWED_SCOPES = list(SCOPE_PATTERNS.keys()) + ["content-pack"]
+ALLOWED_TYPES = ["feat", "fix", "chore", "docs", "test", "refactor", "style", "perf", "build", "ci", "revert"]
+ALLOWED_SCOPES = [
+    # Core Monorepo Scopes
+    "repo", "backend", "dotnet", "frontend", "test", "docs", "agents", "versioning", "migration", "content-pack",
+    # Domain Module Scopes
+    "web", "payments", "receipts", "finance", "identity", "audit", "costalloc", "documents", "integrations", "db", "deploy", "release", "deps"
+]
 
 SEMVER_REGEX = re.compile(
-    r"^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
+    r"^(?:(dotnet|python)/)?v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
 )
+
+
+def get_release_line():
+    """Determine the active technology line from .release-line or Git branch."""
+    line_file = ROOT_DIR / ".release-line"
+    if line_file.exists():
+        val = line_file.read_text(encoding="utf-8").strip()
+        if val:
+            return val
+    try:
+        branch = run_git_cmd(["branch", "--show-current"])
+        if "c#" in branch.lower() or "dotnet" in branch.lower() or "migrating" in branch.lower():
+            return "dotnet"
+        return "python"
+    except Exception:
+        return "dotnet"
 
 
 def run_git_cmd(args, capture_output=True, check=True):
@@ -89,49 +111,77 @@ def classify_file(filepath):
 
 
 def parse_semver(tag_str):
-    """Parse tag_str into (major, minor, patch, prerelease, build) or None."""
+    """Parse tag_str into (prefix, major, minor, patch, prerelease, build) or None."""
     m = SEMVER_REGEX.match(tag_str.strip())
     if not m:
         return None
-    major, minor, patch = int(m.group(1)), int(m.group(2)), int(m.group(3))
-    prerelease = m.group(4) or ""
-    build = m.group(5) or ""
-    return (major, minor, patch, prerelease, build)
+    prefix = m.group(1) or ""
+    major, minor, patch = int(m.group(2)), int(m.group(3)), int(m.group(4))
+    prerelease = m.group(5) or ""
+    build = m.group(6) or ""
+    return (prefix, major, minor, patch, prerelease, build)
 
 
-def get_all_semver_tags():
-    """Retrieve and semantically sort all git tags."""
+def get_all_semver_tags(line=None):
+    """Retrieve and semantically sort all git tags for the active release line."""
+    if line is None:
+        line = get_release_line()
     try:
         tags = run_git_cmd(["tag", "-l"]).splitlines()
     except Exception:
         return []
     semver_tags = []
+    target_prefix = f"{line}/v"
     for t in tags:
-        parsed = parse_semver(t)
-        if parsed:
-            semver_tags.append((parsed, t))
-    # Sort strictly by (major, minor, patch)
-    semver_tags.sort(key=lambda x: (x[0][0], x[0][1], x[0][2]))
+        t_clean = t.strip()
+        if t_clean.startswith(target_prefix):
+            parsed = parse_semver(t_clean)
+            if parsed:
+                semver_tags.append((parsed, t_clean))
+        elif not line and "/" not in t_clean:
+            parsed = parse_semver(t_clean)
+            if parsed:
+                semver_tags.append((parsed, t_clean))
+
+    # If no line-specific tags found, fallback to legacy tags
+    if not semver_tags:
+        for t in tags:
+            t_clean = t.strip()
+            if "/" not in t_clean:
+                parsed = parse_semver(t_clean)
+                if parsed:
+                    semver_tags.append((parsed, t_clean))
+
+    # Sort strictly by (major, minor, patch, prerelease)
+    semver_tags.sort(key=lambda x: (x[0][1], x[0][2], x[0][3], x[0][4]))
     return [t[1] for t in semver_tags]
 
 
-def get_latest_semver():
-    """Return the highest SemVer tag in the repository."""
-    sorted_tags = get_all_semver_tags()
+def get_latest_semver(line=None):
+    """Return the highest SemVer tag in the repository for the active line."""
+    if line is None:
+        line = get_release_line()
+    sorted_tags = get_all_semver_tags(line)
     if not sorted_tags:
-        return "v0.1.0"
+        return f"{line}/v0.1.0" if line else "v0.1.0"
     return sorted_tags[-1]
 
 
 def calculate_next_version(current_tag, bump_type="patch"):
     """
     Calculate the next semantic version string given current_tag and bump_type.
-    bump_type must be 'patch', 'minor', or 'major'.
+    Preserves tag prefix (e.g. dotnet/v or python/v).
     """
     parsed = parse_semver(current_tag)
-    if not parsed:
-        parsed = (0, 1, 0, "", "")
-    major, minor, patch = parsed[0], parsed[1], parsed[2]
+    prefix = ""
+    if parsed:
+        prefix = f"{parsed[0]}/v" if parsed[0] else "v"
+        major, minor, patch = parsed[1], parsed[2], parsed[3]
+    else:
+        line = get_release_line()
+        prefix = f"{line}/v"
+        major, minor, patch = 0, 1, 0
+
     if bump_type == "patch":
         patch += 1
     elif bump_type == "minor":
@@ -143,49 +193,58 @@ def calculate_next_version(current_tag, bump_type="patch"):
         patch = 0
     else:
         raise ValueError(f"Unknown bump type '{bump_type}'. Allowed: patch, minor, major")
-    return f"v{major}.{minor}.{patch}"
+    return f"{prefix}{major}.{minor}.{patch}"
 
 
 def sync_version_files(version_str):
     """
-    Synchronize version number (without leading 'v') across:
-    1. Root package.json
-    2. Frontend/package.json
-    3. VERSION file
+    Synchronize version number across:
+    1. VERSION file (raw SemVer e.g. 0.5.1)
+    2. Frontend/.env.production.local (NEXT_PUBLIC_APP_VERSION, NEXT_PUBLIC_APP_LINE, NEXT_PUBLIC_GIT_SHA)
+    Note: package.json and Frontend/package.json STRICTLY remain '0.0.0-managed' per ADR 0011.
     """
-    clean_version = version_str.lstrip("v")
+    clean_version = version_str
+    if "/" in clean_version:
+        clean_version = clean_version.split("/", 1)[1]
+    clean_version = clean_version.lstrip("v")
+
     modified_files = []
 
-    # 1. Root package.json
-    root_pkg = ROOT_DIR / "package.json"
-    if root_pkg.exists():
-        with open(root_pkg, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if data.get("version") != clean_version:
-            data["version"] = clean_version
-            with open(root_pkg, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-                f.write("\n")
-            modified_files.append("package.json")
-
-    # 2. Frontend/package.json
-    front_pkg = ROOT_DIR / "Frontend" / "package.json"
-    if front_pkg.exists():
-        with open(front_pkg, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if data.get("version") != clean_version:
-            data["version"] = clean_version
-            with open(front_pkg, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-                f.write("\n")
-            modified_files.append("Frontend/package.json")
-
-    # 3. VERSION file
+    # 1. VERSION file
     version_file = ROOT_DIR / "VERSION"
     existing_v = version_file.read_text(encoding="utf-8").strip() if version_file.exists() else ""
     if existing_v != clean_version:
         version_file.write_text(f"{clean_version}\n", encoding="utf-8")
         modified_files.append("VERSION")
+
+    # 2. Verify package.json preserves 0.0.0-managed (ADR 0011 invariant)
+    for pkg_path in [ROOT_DIR / "package.json", ROOT_DIR / "Frontend" / "package.json"]:
+        if pkg_path.exists():
+            with open(pkg_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("version") != "0.0.0-managed":
+                data["version"] = "0.0.0-managed"
+                with open(pkg_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                    f.write("\n")
+                modified_files.append(str(pkg_path.relative_to(ROOT_DIR)).replace("\\", "/"))
+
+    # 3. Generate Frontend/.env.production.local
+    try:
+        line = get_release_line()
+        git_sha = run_git_cmd(["rev-parse", "--short", "HEAD"])
+        build_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        env_content = (
+            f"NEXT_PUBLIC_APP_LINE={line}\n"
+            f"NEXT_PUBLIC_APP_VERSION={clean_version}\n"
+            f"NEXT_PUBLIC_GIT_SHA={git_sha}\n"
+            f"NEXT_PUBLIC_API_CONTRACT=v1\n"
+            f"NEXT_PUBLIC_BUILD_TIME={build_time}\n"
+        )
+        env_local = ROOT_DIR / "Frontend" / ".env.production.local"
+        env_local.write_text(env_content, encoding="utf-8")
+    except Exception:
+        pass
 
     return modified_files
 
@@ -308,23 +367,26 @@ def cmd_commit(args):
 
 
 def cmd_version(args):
-    """Display current release version and projected increments."""
-    latest = get_latest_semver()
+    """Display current release version and projected increments for the active technology line."""
+    line = get_release_line()
+    latest = get_latest_semver(line)
     next_patch = calculate_next_version(latest, "patch")
     next_minor = calculate_next_version(latest, "minor")
     next_major = calculate_next_version(latest, "major")
 
-    print("\n=== R.G.E Accounting SemVer Information ===")
+    print(f"\n=== R.G.E Accounting SemVer Information (Line: {line}) ===")
+    print(f"Active Release Line:    {line}")
     print(f"Latest Git Release Tag: {latest}")
     print(f"Next Patch Release:     {next_patch}  (Bug fixes, resilience patches, non-breaking fixes)")
-    print(f"Next Minor Release:     {next_minor}  (New features, backward-compatible enhancements)")
-    print(f"Next Major Release:     {next_major}  (Breaking architectural or schema upgrades)")
+    print(f"Next Minor Release:     {next_minor}  (Milestones, new capabilities, backward-compatible enhancements)")
+    print(f"Next Major Release:     {next_major}  (Production gate, breaking architectural/schema upgrades)")
 
     root_pkg = ROOT_DIR / "package.json"
     front_pkg = ROOT_DIR / "Frontend" / "package.json"
     ver_file = ROOT_DIR / "VERSION"
+    env_local = ROOT_DIR / "Frontend" / ".env.production.local"
 
-    print("\nSynchronized Package Versions:")
+    print("\nSynchronized Package Versions (ADR 0011 Invariant):")
     if root_pkg.exists():
         with open(root_pkg, "r", encoding="utf-8") as f:
             print(f"  package.json:          {json.load(f).get('version')}")
@@ -333,6 +395,11 @@ def cmd_version(args):
             print(f"  Frontend/package.json: {json.load(f).get('version')}")
     if ver_file.exists():
         print(f"  VERSION:               {ver_file.read_text(encoding='utf-8').strip()}")
+    if env_local.exists():
+        print("\nActive Injected Build Environment (.env.production.local):")
+        for line_str in env_local.read_text(encoding="utf-8-sig").splitlines():
+            if line_str.strip():
+                print(f"  {line_str.strip()}")
     print("")
 
 
