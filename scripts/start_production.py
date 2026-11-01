@@ -171,6 +171,10 @@ def remediate_production_secrets(env: dict) -> None:
         env["GOOGLE_REDIRECT_PATH"] = google_redirect_path
         env["Authentication__Google__RedirectPath"] = google_redirect_path
 
+    # 5c. Enable OAuth auto-provisioning fallback in production dynos
+    if "AUTH_ALLOW_OAUTH_AUTOPROVISION" not in env:
+        env["AUTH_ALLOW_OAUTH_AUTOPROVISION"] = "true"
+
     # 6. Public App URL & Domain mapping
     public_app_url = (
         env.get("NEXT_PUBLIC_APP_URL")

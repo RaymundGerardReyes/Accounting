@@ -137,7 +137,7 @@ internal sealed class HybridIdentityStore : IAuthenticator, IOAuthStateStore, IR
                     string.Equals(a.Email, identifier, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(a.EmployeeCode, identifier, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(a.Id, identifier, StringComparison.OrdinalIgnoreCase));
-                if (actorMatch is not null && _credentialsByUserId.ContainsKey(actorMatch.Id))
+                if (actorMatch is not null)
                 {
                     userId = actorMatch.Id;
                 }
@@ -243,7 +243,7 @@ internal sealed class HybridIdentityStore : IAuthenticator, IOAuthStateStore, IR
                     string.Equals(a.Email, identifier, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(a.EmployeeCode, identifier, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(a.Id, identifier, StringComparison.OrdinalIgnoreCase));
-                if (actorMatch is not null && _credentialsByUserId.ContainsKey(actorMatch.Id))
+                if (actorMatch is not null)
                 {
                     userId = actorMatch.Id;
                 }
@@ -462,6 +462,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRoleStore>(sp => sp.GetRequiredService<HybridIdentityStore>());
         services.AddSingleton<IActorCache>(sp => new ActorCache(sp.GetRequiredService<IClock>()));
         services.AddSingleton<ICsrfTokenService>(new CsrfTokenService(csrfKey));
+        services.AddSingleton<Rge.CostAllocation.Contracts.IConfigurationUserSyncHandler, ConfigurationUserSyncHandler>();
 
         services.AddHttpClient("GoogleOAuth");
         services.AddScoped<IOAuthTokenExchangeService, GoogleOAuthTokenExchangeService>();

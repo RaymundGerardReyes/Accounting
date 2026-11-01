@@ -8,6 +8,7 @@ using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.CostAllocation.Application.GetCostAllocation;
 using Rge.CostAllocation.Application.Ports;
 using Rge.CostAllocation.Application.UpdateDepartmentCost;
+using Rge.CostAllocation.Contracts;
 using Rge.CostAllocation.Infrastructure;
 
 namespace Rge.CostAllocation.Api;
@@ -66,7 +67,11 @@ public sealed class CostAllocationEndpoints : IEndpointModule
         app.MapGet("/api/configuration", (ICostAllocationStore store) =>
             Results.Json(store.GetConfiguration(), JsonDefaults.Options)).WithTags("CostAllocation.Configuration");
 
-        app.MapPut("/api/configuration", (Dictionary<string, object> body, ICostAllocationStore store) =>
+        app.MapPut("/api/configuration", async (
+            Dictionary<string, object> body,
+            ICostAllocationStore store,
+            IConfigurationUserSyncHandler? syncHandler = null,
+            CancellationToken ct = default) =>
         {
             if (body.TryGetValue("config", out object? nestedConfig) && nestedConfig is not null)
             {
@@ -79,6 +84,12 @@ public sealed class CostAllocationEndpoints : IEndpointModule
             {
                 store.SaveConfiguration(body);
             }
+
+            if (syncHandler is not null && body.TryGetValue("users", out object? users) && users is not null)
+            {
+                await syncHandler.SyncConfigurationUsersAsync(users, ct).ConfigureAwait(false);
+            }
+
             return Results.Json(store.GetConfiguration(), JsonDefaults.Options);
         }).WithTags("CostAllocation.Configuration");
 
@@ -92,15 +103,28 @@ public sealed class CostAllocationEndpoints : IEndpointModule
             return Results.Json(new { success = true, departments = depts }, JsonDefaults.Options);
         }).WithTags("CostAllocation.Configuration");
 
-        app.MapPost("/api/configuration/users", (Dictionary<string, object> body, ICostAllocationStore store) =>
+        var saveUsersDelegate = async (
+            Dictionary<string, object> body,
+            ICostAllocationStore store,
+            IConfigurationUserSyncHandler? syncHandler = null,
+            CancellationToken ct = default) =>
         {
             if (body.TryGetValue("users", out object? users) && users is not null)
             {
                 store.SaveConfiguration(new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase) { ["users"] = users });
+
+                if (syncHandler is not null)
+                {
+                    await syncHandler.SyncConfigurationUsersAsync(users, ct).ConfigureAwait(false);
+                }
+
                 return Results.Json(new { success = true, users }, JsonDefaults.Options);
             }
             return Results.BadRequest(new { error = "Missing users array." });
-        }).WithTags("CostAllocation.Configuration");
+        };
+
+        app.MapPost("/api/configuration/users", saveUsersDelegate).WithTags("CostAllocation.Configuration");
+        app.MapPut("/api/configuration/users", saveUsersDelegate).WithTags("CostAllocation.Configuration");
     }
 }
 

@@ -107,7 +107,15 @@ public sealed class OAuthCallbackHandler : ICommandHandler<OAuthCallbackCommand,
         Actor? actor = null;
         if (_roleStore is not null)
         {
-            actor = await _roleStore.GetActorByEmailOrUsernameAsync(userInfo.Email, cancellationToken).ConfigureAwait(false);
+            string email = userInfo.Email.Trim();
+            actor = await _roleStore.GetActorByEmailOrUsernameAsync(email, cancellationToken).ConfigureAwait(false);
+
+            if (actor is null && (
+                string.Equals(Environment.GetEnvironmentVariable("AUTH_ALLOW_OAUTH_AUTOPROVISION"), "true", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Environment.GetEnvironmentVariable("AUTH_AUTO_PROVISION_OAUTH"), "true", StringComparison.OrdinalIgnoreCase)))
+            {
+                actor = await _roleStore.FindOrProvisionActorAsync(email, userInfo.Name, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         if (actor is null)

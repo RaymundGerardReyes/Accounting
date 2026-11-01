@@ -39,7 +39,7 @@ public sealed class RoleStore : IRoleStore
     private const string GetUserByIdentifierSql = """
         SELECT u.id, u.employee_code, u.full_name, u.email, u.department_id, u.cost_center_id, u.employee_group, u.status
         FROM users_finance u
-        INNER JOIN user_credentials c ON c.user_id = u.id
+        LEFT JOIN user_credentials c ON c.user_id = u.id
         WHERE LOWER(u.email) = LOWER(@identifier)
            OR LOWER(c.email) = LOWER(@identifier)
            OR LOWER(c.username) = LOWER(@identifier)
