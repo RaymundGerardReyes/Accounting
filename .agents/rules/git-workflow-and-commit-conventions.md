@@ -98,3 +98,24 @@ description: Repository rules for Conventional Commits, scoped staging, secret p
     - Authoritative seed data (`configuration.json`, `product_data.json`) resides in `Backend/data/` and is configured for build output preservation (`CopyToOutputDirectory=PreserveNewest`).
     - All in-memory and infrastructure store loaders (`JsonConfigurationStore.cs`, `JsonProductCatalog.cs`), CI/CD workflows, build scripts, and test harnesses must exclusively target `Backend/`.
 
+12. **Heroku .NET Buildpack Invariants (Bare Filenames & Single PropertyGroup)**:
+    - The official `heroku/dotnet` buildpack strictly prohibits path separators (`/` or `\`) in `SOLUTION_FILE`:
+      1. `SOLUTION_FILE` in Heroku Config Vars or `project.toml` MUST be a bare filename without directory components (e.g. `Rge.Accounting.Host.slnx`).
+      2. The solution file (`Rge.Accounting.Host.slnx`) must reside directly in the root directory of the repository.
+      3. If `SOLUTION_FILE` was previously set to a nested path in Heroku config vars, it must be updated to `Rge.Accounting.Host.slnx` or removed with `heroku config:unset SOLUTION_FILE` so Heroku auto-detects the root solution.
+    - `Directory.Build.props` must have a **single** `<PropertyGroup>` tag: The buildpack's Rust serde XML deserializer expects a single `PropertyGroup` and aborts with `duplicate field PropertyGroup` if multiple groups exist.
+
+13. **Heroku Production Runtime .NET SDK Absence Invariant**:
+    - Heroku production dynos contain ONLY the .NET Runtime layer (`/app/.heroku/cnb/dotnet/layers/runtime/dotnet`), NOT the .NET SDK (`No .NET SDKs were found`).
+    - The CLI command `dotnet run` requires an SDK and is strictly prohibited in production dynos or startup scripts (`scripts/start_production.py`).
+    - The production supervisor MUST launch pre-compiled assets directly:
+      1. Managed assembly: `dotnet <path_to_Host.dll> [args]`
+      2. Native binary: `<path_to_Host> [args]`
+    - Startup scripts must check `dotnet --list-sdks` before ever attempting `dotnet run` fallback, reserving `dotnet run` exclusively for local development environments.
+
+14. **Production Secrets Auto-Remediation & Rotation Invariant**:
+    - In containerized production deployments (e.g. Heroku dynos), missing optional/system secrets (`FIELD_ENCRYPTION_KEY_BASE64`) or legacy placeholder keys (`rge_gforms_live_sec_89f3a21`) must NOT abort process startup.
+    - `scripts/start_production.py` and `SecretsConfiguration.cs` must provide symmetric defense-in-depth:
+      1. Deriving a deterministic 32-byte Base64 key from `DATABASE_URL` or environment seeds when `FIELD_ENCRYPTION_KEY_BASE64` is missing.
+      2. Auto-rotating compromised legacy keys with a logged warning instead of throwing unhandled exceptions in production.
+
