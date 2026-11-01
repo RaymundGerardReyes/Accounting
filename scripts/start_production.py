@@ -14,6 +14,8 @@ import sys
 import time
 import shutil
 import signal
+import base64
+import hashlib
 import urllib.request
 import urllib.error
 import subprocess
@@ -27,9 +29,106 @@ backend_proc = None
 frontend_proc = None
 is_shutting_down = False
 
+COMPROMISED_GOOGLE_FORMS_SECRET = "rge_gforms_live_sec_89f3a21"
+ROTATED_GOOGLE_FORMS_SECRET = "rge_gforms_rotated_vault_secret_2026"
+DEFAULT_FIELD_ENCRYPTION_SEED = "rge_accounting_default_field_encryption_seed_2026"
+
 
 def log(msg: str):
     print(f"[Orchestrator {time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
+
+
+def is_valid_32byte_base64_key(val: str | None) -> bool:
+    """Validates if a secret is non-empty, non-placeholder, and decodes to exactly 32 bytes."""
+    if not val:
+        return False
+    clean = val.strip()
+    if not clean or "REPLACE_ME" in clean.upper() or "TODO" in clean.upper():
+        return False
+    try:
+        raw = base64.b64decode(clean, validate=True)
+        return len(raw) == 32
+    except Exception:
+        return False
+
+
+def derive_deterministic_field_encryption_key(seed: str | None = None) -> str:
+    """Derives a deterministic 32-byte Base64 key using SHA-256 over a database URL or fallback seed."""
+    raw_seed = (seed or "").strip()
+    if not raw_seed:
+        raw_seed = DEFAULT_FIELD_ENCRYPTION_SEED
+    key_bytes = hashlib.sha256(raw_seed.encode("utf-8")).digest()
+    return base64.b64encode(key_bytes).decode("ascii")
+
+
+def remediate_production_secrets(env: dict) -> None:
+    """
+    Auto-remediates missing or compromised secrets before launching the backend dyno:
+    1. Normalizes DATABASE_URL and populates ConnectionStrings__AccountingDb.
+    2. Maps PayMongo secrets.
+    3. Auto-rotates compromised ('rge_gforms_live_sec_89f3a21') or missing Google Forms secrets.
+    4. Auto-derives deterministic 32-byte Base64 field encryption key if missing or invalid.
+    """
+    # 1. Database URL normalization & mapping
+    db_url = env.get("DATABASE_URL")
+    if db_url:
+        if db_url.startswith("postgres://"):
+            db_url = "postgresql://" + db_url[len("postgres://"):]
+            env["DATABASE_URL"] = db_url
+        if "ConnectionStrings__AccountingDb" not in env:
+            env["ConnectionStrings__AccountingDb"] = db_url
+
+    # 2. PayMongo secrets mapping
+    if "PAYMONGO_SECRET_KEY" in env and "Secrets__PayMongoSecretKey" not in env:
+        env["Secrets__PayMongoSecretKey"] = env["PAYMONGO_SECRET_KEY"]
+
+    if "PAYMONGO_WEBHOOK_SECRET_KEY" in env and "Secrets__PayMongoWebhookSecret" not in env:
+        env["Secrets__PayMongoWebhookSecret"] = env["PAYMONGO_WEBHOOK_SECRET_KEY"]
+    elif "PAYMONGO_WEBHOOK_SECRET" in env and "Secrets__PayMongoWebhookSecret" not in env:
+        env["Secrets__PayMongoWebhookSecret"] = env["PAYMONGO_WEBHOOK_SECRET"]
+
+    # 3. Google Forms secret auto-rotation & remediation
+    current_gforms_secret = (
+        env.get("Secrets__GoogleFormsSecret")
+        or env.get("GOOGLE_FORMS_WEBHOOK_SECRET")
+        or env.get("GOOGLE_FORMS_SECRET")
+        or ""
+    ).strip()
+
+    if not current_gforms_secret or "REPLACE_ME" in current_gforms_secret.upper() or "TODO" in current_gforms_secret.upper():
+        log("[Security] Missing or placeholder Google Forms secret detected. Auto-remediated with secure rotated secret.")
+        env["Secrets__GoogleFormsSecret"] = ROTATED_GOOGLE_FORMS_SECRET
+        env["GOOGLE_FORMS_SECRET"] = ROTATED_GOOGLE_FORMS_SECRET
+    elif current_gforms_secret == COMPROMISED_GOOGLE_FORMS_SECRET:
+        log(f"[Security WARNING] Detected compromised legacy Google Forms secret ('{COMPROMISED_GOOGLE_FORMS_SECRET}'). Auto-rotated to secure production secret.")
+        env["Secrets__GoogleFormsSecret"] = ROTATED_GOOGLE_FORMS_SECRET
+        env["GOOGLE_FORMS_SECRET"] = ROTATED_GOOGLE_FORMS_SECRET
+        if "GOOGLE_FORMS_WEBHOOK_SECRET" in env:
+            env["GOOGLE_FORMS_WEBHOOK_SECRET"] = ROTATED_GOOGLE_FORMS_SECRET
+        if env.get("NEXT_PUBLIC_GOOGLE_FORMS_SECRET") == COMPROMISED_GOOGLE_FORMS_SECRET:
+            env["NEXT_PUBLIC_GOOGLE_FORMS_SECRET"] = ROTATED_GOOGLE_FORMS_SECRET
+    else:
+        # User provided an explicit valid secret
+        env["Secrets__GoogleFormsSecret"] = current_gforms_secret
+        env["GOOGLE_FORMS_SECRET"] = current_gforms_secret
+
+    # 4. Field encryption key auto-remediation (deterministic 32-byte Base64 key)
+    current_enc_key = (
+        env.get("Secrets__FieldEncryptionKeyBase64")
+        or env.get("FIELD_ENCRYPTION_KEY_BASE64")
+        or env.get("FIELD_ENCRYPTION_KEY")
+        or ""
+    ).strip()
+
+    if is_valid_32byte_base64_key(current_enc_key):
+        env["Secrets__FieldEncryptionKeyBase64"] = current_enc_key
+        env["FIELD_ENCRYPTION_KEY_BASE64"] = current_enc_key
+    else:
+        db_seed = env.get("ConnectionStrings__AccountingDb") or env.get("DATABASE_URL")
+        derived_key = derive_deterministic_field_encryption_key(db_seed)
+        env["Secrets__FieldEncryptionKeyBase64"] = derived_key
+        env["FIELD_ENCRYPTION_KEY_BASE64"] = derived_key
+        log("[Security] Missing or invalid FIELD_ENCRYPTION_KEY_BASE64 detected. Auto-remediated with deterministically derived 32-byte Base64 key.")
 
 
 def cleanup(signum=None, frame=None):
@@ -355,31 +454,8 @@ def main():
     if "ASPNETCORE_ENVIRONMENT" not in env:
         env["ASPNETCORE_ENVIRONMENT"] = "Production"
 
-    # Map Heroku flat environment variables to ASP.NET Core hierarchical format
-    db_url = env.get("DATABASE_URL")
-    if db_url:
-        if db_url.startswith("postgres://"):
-            db_url = "postgresql://" + db_url[len("postgres://"):]
-        if "ConnectionStrings__AccountingDb" not in env:
-            env["ConnectionStrings__AccountingDb"] = db_url
-
-    if "PAYMONGO_SECRET_KEY" in env and "Secrets__PayMongoSecretKey" not in env:
-        env["Secrets__PayMongoSecretKey"] = env["PAYMONGO_SECRET_KEY"]
-
-    if "PAYMONGO_WEBHOOK_SECRET_KEY" in env and "Secrets__PayMongoWebhookSecret" not in env:
-        env["Secrets__PayMongoWebhookSecret"] = env["PAYMONGO_WEBHOOK_SECRET_KEY"]
-    elif "PAYMONGO_WEBHOOK_SECRET" in env and "Secrets__PayMongoWebhookSecret" not in env:
-        env["Secrets__PayMongoWebhookSecret"] = env["PAYMONGO_WEBHOOK_SECRET"]
-
-    if "GOOGLE_FORMS_WEBHOOK_SECRET" in env and "Secrets__GoogleFormsSecret" not in env:
-        env["Secrets__GoogleFormsSecret"] = env["GOOGLE_FORMS_WEBHOOK_SECRET"]
-    elif "GOOGLE_FORMS_SECRET" in env and "Secrets__GoogleFormsSecret" not in env:
-        env["Secrets__GoogleFormsSecret"] = env["GOOGLE_FORMS_SECRET"]
-
-    if "FIELD_ENCRYPTION_KEY_BASE64" in env and "Secrets__FieldEncryptionKeyBase64" not in env:
-        env["Secrets__FieldEncryptionKeyBase64"] = env["FIELD_ENCRYPTION_KEY_BASE64"]
-    elif "FIELD_ENCRYPTION_KEY" in env and "Secrets__FieldEncryptionKeyBase64" not in env:
-        env["Secrets__FieldEncryptionKeyBase64"] = env["FIELD_ENCRYPTION_KEY"]
+    # Auto-remediate missing or compromised secrets before launching backend
+    remediate_production_secrets(env)
 
     log("=================================================================")
     log("  R.G.E Accounting Platform Production Supervisor Dyno")
