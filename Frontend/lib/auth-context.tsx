@@ -160,13 +160,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const loginWithOAuth = (
+  const loginWithOAuth = async (
     provider: "google" | "microsoft" | "github",
     loginHint?: string
   ) => {
-    const url = new URL(`/api/auth/oauth/${provider}`, window.location.origin)
-    if (loginHint) url.searchParams.set("login_hint", loginHint)
-    window.location.href = url.toString()
+    try {
+      const url = new URL(`/api/auth/oauth/${provider}`, window.location.origin)
+      if (loginHint) url.searchParams.set("login_hint", loginHint)
+      const res = await fetch(url.toString(), {
+        headers: { Accept: "application/json" }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data?.url) {
+          window.location.href = data.url
+          return
+        }
+      }
+    } catch {
+      // Fallback to direct navigation if fetch fails
+    }
+    const navUrl = new URL(`/api/auth/oauth/${provider}`, window.location.origin)
+    if (loginHint) navUrl.searchParams.set("login_hint", loginHint)
+    window.location.href = navUrl.toString()
   }
 
   const switchPersona = async (targetUserId: string) => {
