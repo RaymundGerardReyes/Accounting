@@ -119,3 +119,16 @@ description: Repository rules for Conventional Commits, scoped staging, secret p
       1. Deriving a deterministic 32-byte Base64 key from `DATABASE_URL` or environment seeds when `FIELD_ENCRYPTION_KEY_BASE64` is missing.
       2. Auto-rotating compromised legacy keys with a logged warning instead of throwing unhandled exceptions in production.
 
+15. **OAuth 2.0 Redirect URI Dual-Path Routing and Dynamic Host Resolution**:
+    - **Dual-Path Callback Registration**:
+      Every OAuth callback endpoint MUST bind all standard routing conventions to the same handler:
+      - `/api/auth/{provider}/callback` (e.g. `/api/auth/google/callback`)
+      - `/api/auth/callback/{provider}` (e.g. `/api/auth/callback/google`)
+      - `/auth/{provider}/callback`
+      - `/auth/callback/{provider}`
+    - **Reverse-Proxy Origin Priority**:
+      When constructing authorization `redirect_uri` parameters, the backend MUST inspect the client's actual incoming authority from `X-Forwarded-Host` (enforced as `https://` for all non-loopback hosts) before falling back to static environment variables (`NEXT_PUBLIC_APP_URL`). This guarantees that multi-domain, custom domain, and staging environments dynamically match the origin in the user's browser.
+    - **Explicit Override Configuration**:
+      The runtime MUST support `GOOGLE_REDIRECT_URI` (or `Authentication:Google:RedirectUri`) to allow zero-code overrides matching pre-existing Google Cloud Console credentials. When unspecified, it defaults to `/api/auth/{provider}/callback`.
+
+
