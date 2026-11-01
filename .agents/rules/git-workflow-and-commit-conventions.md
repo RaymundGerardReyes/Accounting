@@ -146,5 +146,19 @@ description: Repository rules for Conventional Commits, scoped staging, secret p
     - **Conventional Commit Scope Harmonization**:
       - All commit validation tools (`.githooks/commit-msg`, `commitlint.config.js`, `scripts/git_workflow.py`, `check-commit-scope.ps1`) must accept both functional monorepo scopes (`repo`, `backend`, `dotnet`, `frontend`, `test`, `docs`, `agents`, `versioning`, `migration`, `content-pack`) and domain-module scopes (`web`, `identity`, `finance`, `payments`, `receipts`, `audit`, `costalloc`, `documents`, `integrations`, `db`, `deploy`, `release`, `deps`).
 
+17. **Dynamic User Credentials, RBAC Persistence, and OAuth Identity Resolution Invariants**:
+    - **Dynamic Credential & RBAC Role Mutations via PUT**:
+      - All user credential and RBAC role modifications MUST be executed through transactional endpoints (`PUT /api/v1/users/credentials`), persisting changes to both the relational persistence layer (`users_finance`, `user_credentials`, `role_assignments`) and in-memory caches.
+      - Any mutation MUST trigger immediate cache invalidation (`_actorCache.Invalidate(userId)`) to guarantee immediate authorization propagation across all subsequent requests without requiring user re-authentication.
+    - **Dynamic UI Persona & Operational Actor Population**:
+      - Frontend components (`login/page.tsx`, `finance-operations-hub.tsx`, `configuration.tsx`) must NEVER hardcode static persona lists or static actor selection `<option>` elements.
+      - All personas and actors must be queried dynamically from backend registries (`GET /api/v1/finance/users`, live auth state) with resilient fallback to authenticated user state.
+    - **Live OAuth Identity Verification & Unregistered User 401 Rejection**:
+      - OAuth token exchange and callback handlers must NEVER return static mock identities or synthesize arbitrary personas.
+      - All OAuth authenticated identities must be resolved dynamically against stored database user credentials. If an authenticating OAuth profile (e.g. Google account email/sub) is not pre-registered in user credentials, the backend MUST reject authentication with HTTP 401 Unauthorized (`Identity.OAuth.UnregisteredUser`), preventing unauthorized access.
+    - **Commit Scope Separation & Quality Gates**:
+      - Identity and RBAC changes touching backend APIs and frontend components must strictly maintain scope isolation across separate commits (`feat(backend)` vs `feat(frontend)`), preserving ADR 0011 `"0.0.0-managed"` and passing all 76 parity runner checks.
+
+
 
 
