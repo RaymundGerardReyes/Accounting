@@ -38,6 +38,8 @@ import {
   ReceiptData,
   formatPhpFromMinor,
 } from "@/lib/payment-api"
+import { PaymentCountdown } from "@/components/payment/PaymentCountdown"
+import { usePaymentSignalR } from "@/hooks/usePaymentSignalR"
 
 interface PageProps {
   params: Promise<{ paymentId: string }>
@@ -72,6 +74,29 @@ export default function PaymentResultPage({ params }: PageProps) {
   const isTerminal = (status?: string) => {
     return status === "succeeded" || status === "failed" || status === "cancelled" || status === "expired"
   }
+
+  // Real-time SignalR status subscription with polling fallback
+  const { isConnected: isSignalRConnected } = usePaymentSignalR({
+    transactionId: paymentId,
+    enabled: !isTerminal(payment?.status),
+    onStatusChanged: (payload) => {
+      if (payload.status) {
+        setPayment((prev) => (prev ? { ...prev, status: payload.status.toLowerCase() as any } : null))
+        if (payload.status.toLowerCase() === "succeeded" || payload.status.toLowerCase() === "paid") {
+          fetchPaymentReceipt(paymentId).then(setReceipt).catch(() => {})
+        }
+      }
+    },
+    onPollFallback: () => {
+      if (!isTerminal(payment?.status)) {
+        pollPaymentStatus(paymentId, false).then((data) => {
+          setPayment(data)
+          if (data.receipt) setReceipt(data.receipt)
+        }).catch(() => {})
+      }
+    },
+  })
+
 
   const handleCopy = (text: string, key: string) => {
     navigator.clipboard.writeText(text)
@@ -261,6 +286,12 @@ export default function PaymentResultPage({ params }: PageProps) {
           </CardHeader>
 
           <CardContent className="space-y-4">
+            <PaymentCountdown
+              expiresAt={payment.expires_at}
+              status={status}
+              onExpired={handleManualReconcile}
+              isSignalRConnected={isSignalRConnected}
+            />
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3.5 rounded-lg bg-muted/40 border border-border text-center">
               <div>
                 <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider block">Amount</span>
