@@ -49,7 +49,7 @@ public sealed class OAuthCallbackHandler : ICommandHandler<OAuthCallbackCommand,
         _authenticator = authenticator;
         _roleStore = roleStore;
         _csrfTokenService = csrfTokenService;
-        _clock = clock ?? DefaultClock.Instance;
+        _clock = clock ?? SystemClock.Instance;
     }
 
     public async Task<Result<OAuthCallbackResponse>> HandleAsync(
@@ -179,9 +179,9 @@ public sealed class OAuthCallbackHandler : ICommandHandler<OAuthCallbackCommand,
         return (rawToken, Convert.ToHexStringLower(hashBytes));
     }
 
-    private sealed class DefaultClock : IClock
+    private sealed class SystemClock : IClock
     {
-        public static readonly DefaultClock Instance = new();
+        public static readonly SystemClock Instance = new();
         public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
     }
 }

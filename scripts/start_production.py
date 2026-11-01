@@ -151,6 +151,26 @@ def remediate_production_secrets(env: dict) -> None:
         env["GOOGLE_CLIENT_SECRET"] = google_client_secret
         env["Authentication__Google__ClientSecret"] = google_client_secret
 
+    # 5b. Google OAuth redirect URI / callback URL override
+    google_redirect_uri = (
+        env.get("GOOGLE_REDIRECT_URI")
+        or env.get("GOOGLE_CALLBACK_URL")
+        or env.get("Authentication__Google__RedirectUri")
+        or ""
+    ).strip()
+    if google_redirect_uri:
+        env["GOOGLE_REDIRECT_URI"] = google_redirect_uri
+        env["Authentication__Google__RedirectUri"] = google_redirect_uri
+
+    google_redirect_path = (
+        env.get("GOOGLE_REDIRECT_PATH")
+        or env.get("Authentication__Google__RedirectPath")
+        or ""
+    ).strip()
+    if google_redirect_path:
+        env["GOOGLE_REDIRECT_PATH"] = google_redirect_path
+        env["Authentication__Google__RedirectPath"] = google_redirect_path
+
     # 6. Public App URL & Domain mapping
     public_app_url = (
         env.get("NEXT_PUBLIC_APP_URL")

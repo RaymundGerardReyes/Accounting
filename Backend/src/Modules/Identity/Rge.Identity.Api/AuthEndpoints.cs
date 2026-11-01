@@ -58,8 +58,8 @@ public sealed class AuthEndpoints : IEndpointModule
     {
         ArgumentNullException.ThrowIfNull(app);
 
-        // IDN-001: GET /api/auth/callback/{provider}
-        app.MapGet("/api/auth/callback/{provider}", async (
+        // IDN-001: OAuth Callback Handlers (Dual-path and multi-prefix binding)
+        var callbackDelegate = async (
             string provider,
             string? code,
             string? state,
@@ -92,7 +92,12 @@ public sealed class AuthEndpoints : IEndpointModule
             var callbackData = result.Value;
             SetAuthCookies(httpContext.Response, callbackData.RawSessionToken, callbackData.CsrfToken);
             return Results.Redirect(string.IsNullOrWhiteSpace(callbackData.RedirectUri) ? "/" : callbackData.RedirectUri);
-        }).WithTags("Authentication & Session");
+        };
+
+        app.MapGet("/api/auth/{provider}/callback", callbackDelegate).WithTags("Authentication & Session");
+        app.MapGet("/api/auth/callback/{provider}", callbackDelegate).WithTags("Authentication & Session");
+        app.MapGet("/auth/{provider}/callback", callbackDelegate).WithTags("Authentication & Session");
+        app.MapGet("/auth/callback/{provider}", callbackDelegate).WithTags("Authentication & Session");
 
         // IDN-002: GET /api/auth/csrf
         app.MapGet("/api/auth/csrf", async (
@@ -190,8 +195,8 @@ public sealed class AuthEndpoints : IEndpointModule
             return Results.Ok(new { authenticated = false });
         }).WithTags("Authentication & Session");
 
-        // IDN-005: GET /api/auth/oauth/{provider}
-        app.MapGet("/api/auth/oauth/{provider}", async (
+        // IDN-005: OAuth Begin Handlers (Multi-prefix binding)
+        var oauthBeginDelegate = async (
             string provider,
             string? login_hint,
             HttpContext httpContext,
@@ -200,7 +205,7 @@ public sealed class AuthEndpoints : IEndpointModule
             CancellationToken ct) =>
         {
             string publicBaseUrl = ResolvePublicBaseUrl(httpContext, configuration);
-            string redirectUri = $"{publicBaseUrl}/api/auth/callback/{provider}";
+            string redirectUri = ResolveRedirectUri(provider, publicBaseUrl, httpContext, configuration);
             var cmd = new OAuthBeginCommand(provider, redirectUri);
             var result = await handler.HandleAsync(cmd, ct).ConfigureAwait(false);
 
@@ -238,7 +243,10 @@ public sealed class AuthEndpoints : IEndpointModule
             }
 
             return Results.Redirect(authUrl);
-        }).WithTags("Authentication & Session");
+        };
+
+        app.MapGet("/api/auth/oauth/{provider}", oauthBeginDelegate).WithTags("Authentication & Session");
+        app.MapGet("/auth/oauth/{provider}", oauthBeginDelegate).WithTags("Authentication & Session");
 
         // IDN-006: GET /api/auth/session
         app.MapGet("/api/auth/session", async (
@@ -372,10 +380,37 @@ public sealed class AuthEndpoints : IEndpointModule
         return null;
     }
 
-    private static string ResolvePublicBaseUrl(HttpContext httpContext, IConfiguration? config = null)
+    [SuppressMessage("Design", "CA1055:URI-like return values should not be strings", Justification = "Public URL authority representation for routing and cookie generation")]
+    public static string ResolvePublicBaseUrl(HttpContext httpContext, IConfiguration? config = null)
     {
         ArgumentNullException.ThrowIfNull(httpContext);
 
+        // 1. Prioritize incoming reverse-proxy authority from browser request (multi-domain / preview domain resilience)
+        string? forwardedHost = httpContext.Request.Headers["X-Forwarded-Host"].FirstOrDefault();
+        string host = !string.IsNullOrWhiteSpace(forwardedHost)
+            ? forwardedHost.Split(',')[0].Trim()
+            : (httpContext.Request.Host.Value ?? string.Empty);
+
+        bool isLoopback = string.IsNullOrWhiteSpace(host) ||
+                          host.StartsWith("localhost", StringComparison.OrdinalIgnoreCase) ||
+                          host.StartsWith("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                          host.StartsWith("[::1]", StringComparison.OrdinalIgnoreCase) ||
+                          host.StartsWith("testserver", StringComparison.OrdinalIgnoreCase);
+
+        if (!isLoopback)
+        {
+            string scheme = httpContext.Request.Headers["X-Forwarded-Proto"].FirstOrDefault()
+                ?? httpContext.Request.Scheme;
+
+            if (string.Equals(scheme, "http", StringComparison.OrdinalIgnoreCase))
+            {
+                scheme = "https";
+            }
+
+            return $"{scheme}://{host}";
+        }
+
+        // 2. Next check configured static public URL (e.g. during local dev or server-to-server)
         string? configUrl = config?["Authentication:PublicAppUrl"]
             ?? config?["NEXT_PUBLIC_APP_URL"]
             ?? config?["APP_URL"]
@@ -387,22 +422,72 @@ public sealed class AuthEndpoints : IEndpointModule
             return $"{uri.Scheme}://{uri.Authority}";
         }
 
-        string scheme = httpContext.Request.Headers["X-Forwarded-Proto"].FirstOrDefault()
-            ?? httpContext.Request.Scheme
-            ?? "https";
+        // 3. Fallback to request scheme & host
+        string fallbackScheme = httpContext.Request.Headers["X-Forwarded-Proto"].FirstOrDefault()
+            ?? httpContext.Request.Scheme;
 
-        string host = httpContext.Request.Headers["X-Forwarded-Host"].FirstOrDefault()
-            ?? httpContext.Request.Host.Value
-            ?? "localhost";
+        return $"{fallbackScheme}://{host}";
+    }
 
-        if (string.Equals(scheme, "http", StringComparison.OrdinalIgnoreCase) &&
-            !host.StartsWith("localhost", StringComparison.OrdinalIgnoreCase) &&
-            !host.StartsWith("127.0.0.1", StringComparison.OrdinalIgnoreCase))
+    [SuppressMessage("Design", "CA1055:URI-like return values should not be strings", Justification = "OAuth 2.0 PKCE redirect_uri parameter formatting")]
+    public static string ResolveRedirectUri(
+        string provider,
+        string publicBaseUrl,
+        HttpContext httpContext,
+        IConfiguration? configuration = null)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentNullException.ThrowIfNull(publicBaseUrl);
+        ArgumentNullException.ThrowIfNull(httpContext);
+
+        // 1. Explicit full redirect URI override in configuration or environment variables
+        string? explicitUri = configuration?[$"Authentication:{provider}:RedirectUri"]
+            ?? configuration?["Authentication:Google:RedirectUri"]
+            ?? configuration?["GOOGLE_REDIRECT_URI"]
+            ?? configuration?["GOOGLE_CALLBACK_URL"]
+            ?? Environment.GetEnvironmentVariable("GOOGLE_REDIRECT_URI")
+            ?? Environment.GetEnvironmentVariable("GOOGLE_CALLBACK_URL");
+
+        if (!string.IsNullOrWhiteSpace(explicitUri) && Uri.TryCreate(explicitUri, UriKind.Absolute, out _))
         {
-            scheme = "https";
+            return explicitUri;
         }
 
-        return $"{scheme}://{host}";
+        // 2. Query parameter override (must match host authority or be relative to avoid open redirect)
+        if (httpContext.Request.Query.TryGetValue("redirect_uri", out var queryUri) &&
+            !string.IsNullOrWhiteSpace(queryUri))
+        {
+            string qUriStr = queryUri.ToString();
+            if (Uri.TryCreate(qUriStr, UriKind.Absolute, out var parsedUri))
+            {
+                if (Uri.TryCreate(publicBaseUrl, UriKind.Absolute, out var baseUri) &&
+                    string.Equals(parsedUri.Authority, baseUri.Authority, StringComparison.OrdinalIgnoreCase))
+                {
+                    return parsedUri.ToString();
+                }
+            }
+            else if (qUriStr.StartsWith('/'))
+            {
+                return $"{publicBaseUrl.TrimEnd('/')}{qUriStr}";
+            }
+        }
+
+        // 3. Explicit path override in configuration or environment variables
+        string? pathOverride = configuration?[$"Authentication:{provider}:RedirectPath"]
+            ?? configuration?["Authentication:Google:RedirectPath"]
+            ?? configuration?["GOOGLE_REDIRECT_PATH"]
+            ?? Environment.GetEnvironmentVariable("GOOGLE_REDIRECT_PATH");
+
+        if (!string.IsNullOrWhiteSpace(pathOverride))
+        {
+            string normPath = pathOverride.StartsWith('/')
+                ? pathOverride
+                : $"/{pathOverride}";
+            return $"{publicBaseUrl.TrimEnd('/')}{normPath}";
+        }
+
+        // 4. Default to standard /api/auth/{provider}/callback (e.g. /api/auth/google/callback)
+        return $"{publicBaseUrl.TrimEnd('/')}/api/auth/{provider}/callback";
     }
 
     private static string HashSessionToken(string token)

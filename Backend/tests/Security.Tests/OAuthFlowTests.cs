@@ -1,5 +1,8 @@
 using System.Security.Cryptography;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
+using Rge.Identity.Api;
 using Rge.Identity.Application.OAuthBegin;
 using Rge.Identity.Application.OAuthCallback;
 using Rge.Identity.Application.Ports;
@@ -197,5 +200,100 @@ public sealed class OAuthFlowTests
         var replayResult = await callbackHandler.HandleAsync(new OAuthCallbackCommand("google", state, "auth_code_live_xyz"));
         Assert.False(replayResult.IsSuccess);
         Assert.Equal("Identity.OAuth.InvalidOrExpiredState", replayResult.Error.Code);
+    }
+
+    [Fact]
+    public void ResolvePublicBaseUrl_Prioritizes_ForwardedHost_Over_Configured_AppUrl()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Headers["X-Forwarded-Host"] = "preview-app-123.ev";
+        context.Request.Headers["X-Forwarded-Proto"] = "https";
+
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["NEXT_PUBLIC_APP_URL"] = "https://rge-accounting.herokuapp.com"
+            })
+            .Build();
+
+        string resolved = AuthEndpoints.ResolvePublicBaseUrl(context, config);
+        Assert.Equal("https://preview-app-123.ev", resolved);
+    }
+
+    [Fact]
+    public void ResolvePublicBaseUrl_FallsBackToConfig_When_Host_Is_Loopback()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Host = new HostString("localhost:5000");
+        context.Request.Scheme = "http";
+
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["NEXT_PUBLIC_APP_URL"] = "https://rge-accounting.herokuapp.com"
+            })
+            .Build();
+
+        string resolved = AuthEndpoints.ResolvePublicBaseUrl(context, config);
+        Assert.Equal("https://rge-accounting.herokuapp.com", resolved);
+    }
+
+    [Fact]
+    public void ResolveRedirectUri_Defaults_To_Standard_Google_Callback_Convention()
+    {
+        var context = new DefaultHttpContext();
+        string redirectUri = AuthEndpoints.ResolveRedirectUri("google", "https://preview-app-123.ev", context);
+
+        Assert.Equal("https://preview-app-123.ev/api/auth/google/callback", redirectUri);
+    }
+
+    [Fact]
+    public void ResolveRedirectUri_Honors_Explicit_Config_Override()
+    {
+        var context = new DefaultHttpContext();
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Authentication:Google:RedirectUri"] = "https://preview-app-123.ev/custom/oauth/callback"
+            })
+            .Build();
+
+        string redirectUri = AuthEndpoints.ResolveRedirectUri("google", "https://preview-app-123.ev", context, config);
+        Assert.Equal("https://preview-app-123.ev/custom/oauth/callback", redirectUri);
+    }
+
+    [Fact]
+    public void ResolveRedirectUri_Honors_Path_Override()
+    {
+        var context = new DefaultHttpContext();
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["GOOGLE_REDIRECT_PATH"] = "/api/auth/callback/google"
+            })
+            .Build();
+
+        string redirectUri = AuthEndpoints.ResolveRedirectUri("google", "https://preview-app-123.ev", context, config);
+        Assert.Equal("https://preview-app-123.ev/api/auth/callback/google", redirectUri);
+    }
+
+    [Fact]
+    public async Task OAuthCallback_Supports_Dual_Path_Google_Callback_Convention()
+    {
+        var store = new InMemoryOAuthStore();
+        var exchange = new StubTokenExchangeService();
+        var clock = new DeterministicClock();
+        var beginHandler = new OAuthBeginHandler(store);
+        var callbackHandler = new OAuthCallbackHandler(store, exchange, store, store, store, clock);
+
+        // Standard Google Console format: /api/auth/google/callback
+        var beginResult = await beginHandler.HandleAsync(new OAuthBeginCommand("google", "https://preview-app-123.ev/api/auth/google/callback"));
+        Assert.True(beginResult.IsSuccess);
+        string state = beginResult.Value.State;
+
+        var callbackResult = await callbackHandler.HandleAsync(new OAuthCallbackCommand("google", state, "auth_code_live_456"));
+        Assert.True(callbackResult.IsSuccess);
+        Assert.Equal("google", callbackResult.Value.Provider);
+        Assert.Equal("raymundgerardrestaca@gmail.com", callbackResult.Value.Email);
     }
 }
