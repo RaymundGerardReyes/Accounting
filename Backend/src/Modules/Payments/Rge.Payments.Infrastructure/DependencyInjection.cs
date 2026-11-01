@@ -19,6 +19,7 @@ using Rge.Payments.Infrastructure.Catalog;
 using Rge.Payments.Infrastructure.Outbox;
 using Rge.Payments.Infrastructure.PayMongo;
 using Rge.Payments.Infrastructure.Persistence.Repositories;
+using Rge.Payments.Infrastructure.Workers;
 
 namespace Rge.Payments.Infrastructure;
 
@@ -65,6 +66,9 @@ public static class DependencyInjection
         services.AddScoped<IWebhookEventStore, WebhookEventStore>();
         services.AddScoped<IOrderPaidOutboxPublisher, OrderPaidOutboxPublisher>();
 
+        // Background worker — expiry polling every 15 s
+        services.AddHostedService<PaymentExpirationWorker>();
+
         // Application Command & Query Handlers
         services.AddScoped<CreateOrderHandler>();
         services.AddScoped<GetOrderHandler>();
@@ -83,3 +87,4 @@ public static class DependencyInjection
         return services;
     }
 }
+

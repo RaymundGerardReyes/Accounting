@@ -479,6 +479,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ActAsHandler>();
         services.AddScoped<UpsertCredentialsHandler>();
 
+        // SignalR & Real-Time Payment Synchronization
+        services.AddSignalR();
+        services.AddSingleton<Rge.Payments.Application.Ports.IPaymentStatusNotifier, Rge.Payments.Api.SignalR.SignalRPaymentStatusNotifier>();
+
         // 4. Register Remaining 7 Business Modules
         services.AddReceiptsModule();
         services.AddPaymentsModule(configuration);

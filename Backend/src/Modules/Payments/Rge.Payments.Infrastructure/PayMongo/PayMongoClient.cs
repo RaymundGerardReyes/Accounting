@@ -126,7 +126,7 @@ public sealed class PayMongoClient : IPaymentGateway
 
             DateTimeOffset? expiresAt = envelope.Data.Attributes.ExpiredAtUnix.HasValue
                 ? DateTimeOffset.FromUnixTimeSeconds(envelope.Data.Attributes.ExpiredAtUnix.Value)
-                : null;
+                : DateTimeOffset.UtcNow.AddMinutes(30);
 
             return Result.Success(new CheckoutSessionResult(
                 ProviderPaymentId: envelope.Data.Id,

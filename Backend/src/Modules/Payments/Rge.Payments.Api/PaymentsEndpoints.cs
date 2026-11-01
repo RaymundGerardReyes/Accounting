@@ -1,7 +1,9 @@
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Rge.BuildingBlocks.Api.Endpoints;
 using Rge.Payments.Api.Admin;
 using Rge.Payments.Api.Attempts;
+using Rge.Payments.Api.Hubs;
 using Rge.Payments.Api.Orders;
 using Rge.Payments.Api.Sandbox;
 using Rge.Payments.Api.Webhooks;
@@ -9,7 +11,7 @@ using Rge.Payments.Api.Webhooks;
 namespace Rge.Payments.Api;
 
 /// <summary>
-/// Root Payments endpoint module mapping Orders, Attempts, Webhooks, Reconciliation, and Sandbox routes.
+/// Root Payments endpoint module mapping Orders, Attempts, Webhooks, Reconciliation, Sandbox routes, and SignalR Hub.
 /// </summary>
 public sealed class PaymentsEndpoints : IEndpointModule
 {
@@ -37,5 +39,8 @@ public sealed class PaymentsEndpoints : IEndpointModule
         {
             module.MapEndpoints(app);
         }
+
+        // Map SignalR real-time payment hub for checkout countdown and status synchronization
+        app.MapHub<PaymentHub>("/hubs/payment");
     }
 }

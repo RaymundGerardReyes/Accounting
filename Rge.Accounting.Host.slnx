@@ -1,4 +1,20 @@
 <Solution>
+  <Folder Name="/Backend/" />
+  <Folder Name="/Backend/src/" />
+  <Folder Name="/Backend/src/BuildingBlocks/">
+    <Project Path="Backend/src/BuildingBlocks/Rge.BuildingBlocks.Api/Rge.BuildingBlocks.Api.csproj" />
+    <Project Path="Backend/src/BuildingBlocks/Rge.BuildingBlocks.Application/Rge.BuildingBlocks.Application.csproj" />
+    <Project Path="Backend/src/BuildingBlocks/Rge.BuildingBlocks.Infrastructure/Rge.BuildingBlocks.Infrastructure.csproj" />
+    <Project Path="Backend/src/BuildingBlocks/Rge.BuildingBlocks.SharedKernel/Rge.BuildingBlocks.SharedKernel.csproj" />
+  </Folder>
+  <Folder Name="/Backend/src/Modules/" />
+  <Folder Name="/Backend/src/Modules/Payments/">
+    <Project Path="Backend/src/Modules/Payments/Rge.Payments.Api/Rge.Payments.Api.csproj" />
+    <Project Path="Backend/src/Modules/Payments/Rge.Payments.Application/Rge.Payments.Application.csproj" />
+    <Project Path="Backend/src/Modules/Payments/Rge.Payments.Contracts/Rge.Payments.Contracts.csproj" />
+    <Project Path="Backend/src/Modules/Payments/Rge.Payments.Domain/Rge.Payments.Domain.csproj" />
+    <Project Path="Backend/src/Modules/Payments/Rge.Payments.Infrastructure/Rge.Payments.Infrastructure.csproj" />
+  </Folder>
   <Project Path="Backend/src/Host/Rge.Accounting.Host/Rge.Accounting.Host.csproj" />
 </Solution>
 

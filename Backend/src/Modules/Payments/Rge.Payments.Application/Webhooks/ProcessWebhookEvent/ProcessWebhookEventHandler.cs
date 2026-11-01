@@ -18,6 +18,7 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
     private readonly IOrderRepository _orderRepository;
     private readonly IOutboxWriter _outboxWriter;
     private readonly IClock _clock;
+    private readonly IPaymentStatusNotifier? _notifier;
 
     public ProcessWebhookEventHandler(
         IWebhookEventStore webhookStore,
@@ -37,6 +38,18 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
         _orderRepository = orderRepository;
         _outboxWriter = outboxWriter;
         _clock = clock;
+    }
+
+    public ProcessWebhookEventHandler(
+        IWebhookEventStore webhookStore,
+        IPaymentAttemptRepository attemptRepository,
+        IOrderRepository orderRepository,
+        IOutboxWriter outboxWriter,
+        IClock clock,
+        IPaymentStatusNotifier notifier)
+        : this(webhookStore, attemptRepository, orderRepository, outboxWriter, clock)
+    {
+        _notifier = notifier;
     }
 
     public async Task<Result<ProcessWebhookEventResponse>> HandleAsync(
@@ -163,6 +176,16 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
 
         webhookEvent.MarkProcessed(nowUtc);
         await _webhookStore.SaveAsync(webhookEvent, cancellationToken).ConfigureAwait(false);
+
+        // Broadcast real-time status change via SignalR (fire-and-forget on null notifier for offline tests)
+        if (_notifier is not null)
+        {
+            await _notifier.NotifyPaymentStatusChangedAsync(
+                attempt.Id,
+                attempt.Status.ToString(),
+                nowUtc,
+                cancellationToken).ConfigureAwait(false);
+        }
 
         return Result.Success(new ProcessWebhookEventResponse(
             Success: true,
