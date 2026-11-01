@@ -69,6 +69,9 @@ export function Configuration({ onBack }: ConfigurationProps) {
   const [config, setConfig] = useState<any>(null)
   const [departments, setDepartments] = useState<Department[]>([])
   const [users, setUsers] = useState<User[]>([])
+  const [auditLogs, setAuditLogs] = useState<any[]>([])
+  const [loadingAudit, setLoadingAudit] = useState(false)
+  const [auditChainStatus, setAuditChainStatus] = useState<{ isValid: boolean; count: number } | null>(null)
 
   const [activeTab, setActiveTab] = useState<"general" | "departments" | "users" | "audit" | "integrations">("general")
   const [showAddDeptModal, setShowAddDeptModal] = useState(false)
@@ -111,6 +114,56 @@ export function Configuration({ onBack }: ConfigurationProps) {
   const [emailSendResult, setEmailSendResult] = useState<any>(null)
   const [emailSaving, setEmailSaving] = useState(false)
   const [emailSaveMsg, setEmailSaveMsg] = useState<string | null>(null)
+
+  const fetchLiveAuditLogs = async () => {
+    setLoadingAudit(true)
+    try {
+      const actorId = currentUser?.id || "sys_admin_01"
+      const res = await fetch("/api/v1/finance/audit-events?limit=100", {
+        headers: {
+          "Accept": "application/json",
+          "X-User-ID": actorId,
+        },
+        cache: "no-store",
+      })
+      if (res.ok) {
+        const json = await res.json()
+        if (json?.chain_integrity) {
+          setAuditChainStatus({
+            isValid: json.chain_integrity.is_valid !== false,
+            count: json.chain_integrity.total_events ?? json.chain_integrity.checked_count ?? json.events?.length ?? 0,
+          })
+        }
+        if (Array.isArray(json?.events) && json.events.length > 0) {
+          const mapped = json.events.map((evt: any, idx: number) => ({
+            id: evt.id || `aud_${evt.sequence_no || idx}`,
+            sequenceNo: evt.sequence_no,
+            action: evt.action
+              ? `${evt.action.toUpperCase()} - ${evt.reason || `${evt.entity_type || 'system'}:${evt.entity_id || evt.sequence_no}`}`
+              : (evt.reason || "System Action"),
+            user: evt.actor_id || evt.actor_role || "System Operator",
+            time: evt.occurred_at
+              ? new Date(evt.occurred_at).toLocaleString("en-PH", { dateStyle: "short", timeStyle: "medium" })
+              : "Recently",
+            severity: (evt.action?.toLowerCase().includes("fail") ||
+              evt.action?.toLowerCase().includes("reject") ||
+              evt.action?.toLowerCase().includes("error"))
+              ? "warning"
+              : "success",
+            entityType: evt.entity_type,
+            entityId: evt.entity_id,
+            hash: evt.record_hash ? `${evt.record_hash.substring(0, 12)}...` : undefined,
+          }))
+          setAuditLogs(mapped)
+          return
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch live audit events:", err)
+    } finally {
+      setLoadingAudit(false)
+    }
+  }
 
   const fetchLiveIntegrations = async () => {
     setLoadingIntegrations(true)
@@ -277,6 +330,10 @@ export function Configuration({ onBack }: ConfigurationProps) {
         setData(result || { config: configObj, departments: [], users: [], auditLogs: [], integrations: [] })
         setConfig(configObj)
         setDepartments(result?.departments || [])
+        const initialLogs = result?.audit_logs || result?.auditLogs || []
+        if (Array.isArray(initialLogs) && initialLogs.length > 0) {
+          setAuditLogs(initialLogs)
+        }
         const cfgUsers: User[] = result?.users || []
         try {
           const finUsersResp = await fetch("/api/v1/finance/users")
@@ -314,6 +371,7 @@ export function Configuration({ onBack }: ConfigurationProps) {
 
     fetchConfigData()
     fetchLiveIntegrations()
+    fetchLiveAuditLogs()
   }, [])
 
   const handleSaveConfig = async () => {
@@ -609,7 +667,7 @@ export function Configuration({ onBack }: ConfigurationProps) {
     return <div className="p-8 text-center text-sm text-muted-foreground">No configuration data available.</div>
   }
 
-  const { auditLogs = [], integrations = [] } = data
+  const { integrations = [] } = data || {}
 
   const getIntegrationIcon = (name: string) => {
     switch (name) {
@@ -653,7 +711,12 @@ export function Configuration({ onBack }: ConfigurationProps) {
             <button
               key={tab}
               type="button"
-              onClick={() => setActiveTab(tab)}
+              onClick={() => {
+                setActiveTab(tab)
+                if (tab === "audit") {
+                  fetchLiveAuditLogs()
+                }
+              }}
               className={`pb-3 font-medium text-xs uppercase tracking-wider transition-colors border-b-2 -mb-px ${
                 isActive
                   ? "border-accent text-foreground font-semibold"
@@ -920,36 +983,75 @@ export function Configuration({ onBack }: ConfigurationProps) {
       {/* Audit Trail Tab */}
       {activeTab === "audit" && (
         <Card className="shadow-none border-border/90 overflow-hidden">
-          <CardHeader className="border-b border-border/60 pb-4">
-            <CardTitle className="text-base font-semibold">System Audit Trail</CardTitle>
-            <CardDescription className="text-xs">Immutable activity and webhook settlement log</CardDescription>
+          <CardHeader className="border-b border-border/60 pb-4 flex flex-row items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2.5">
+                <CardTitle className="text-base font-semibold">System Audit Trail</CardTitle>
+                <span
+                  className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-medium ${
+                    auditChainStatus?.isValid !== false
+                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                      : "bg-destructive/10 text-destructive border border-destructive/20"
+                  }`}
+                >
+                  {auditChainStatus?.isValid !== false ? "SHA-256 Valid" : "Tamper Alert"} ({auditLogs.length} events)
+                </span>
+              </div>
+              <CardDescription className="text-xs">Immutable, hash-chained activity, webhook settlement, and security journal</CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchLiveAuditLogs}
+              disabled={loadingAudit}
+              className="h-8 text-xs gap-1.5"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingAudit ? "animate-spin" : ""}`} />
+              <span>Refresh Trail</span>
+            </Button>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="divide-y divide-border/70">
-              {auditLogs.map((log: any, index: number) => (
-                <div
-                  key={`${log.id}-${index}-${log.action}`}
-                  className="flex items-center justify-between px-6 py-4 hover:bg-muted/30 transition-colors"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2.5">
-                      <span className="font-semibold text-sm text-foreground">{log.action}</span>
-                      <span
-                        className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded-full font-medium ${
-                          log.severity === "warning"
-                            ? "bg-accent/10 text-accent border border-accent/20"
-                            : "bg-muted text-foreground"
-                        }`}
-                      >
-                        {log.severity}
-                      </span>
+            {loadingAudit && auditLogs.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted-foreground flex flex-col items-center justify-center gap-2">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                <span>Loading immutable audit records...</span>
+              </div>
+            ) : auditLogs.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted-foreground">
+                No audit trail records found. Real-time platform activities and webhook transactions will populate automatically.
+              </div>
+            ) : (
+              <div className="divide-y divide-border/70">
+                {auditLogs.map((log: any, index: number) => (
+                  <div
+                    key={`${log.id}-${index}-${log.action}`}
+                    className="flex items-center justify-between px-6 py-4 hover:bg-muted/30 transition-colors"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2.5">
+                        <span className="font-semibold text-sm text-foreground">{log.action}</span>
+                        <span
+                          className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded-full font-medium ${
+                            log.severity === "warning"
+                              ? "bg-accent/10 text-accent border border-accent/20"
+                              : "bg-muted text-foreground"
+                          }`}
+                        >
+                          {log.severity}
+                        </span>
+                        {log.hash && (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-muted/60 text-muted-foreground">
+                            {log.hash}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">Operator: {log.user}</p>
                     </div>
-                    <p className="text-xs text-muted-foreground">Operator: {log.user}</p>
+                    <span className="text-xs font-mono text-muted-foreground">{log.time}</span>
                   </div>
-                  <span className="text-xs font-mono text-muted-foreground">{log.time}</span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
