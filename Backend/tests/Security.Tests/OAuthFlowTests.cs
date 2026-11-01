@@ -372,4 +372,71 @@ public sealed class OAuthFlowTests
         Assert.Equal("Identity.OAuth.UnregisteredUser", callbackResult.Error.Code);
         Assert.Equal(Rge.BuildingBlocks.SharedKernel.Results.ErrorType.Unauthorized, callbackResult.Error.Type);
     }
+
+    [Fact]
+    public async Task OAuthCallback_With_AutoProvision_Flag_Provisions_Unregistered_User()
+    {
+        string? previousEnv = Environment.GetEnvironmentVariable("AUTH_ALLOW_OAUTH_AUTOPROVISION");
+        try
+        {
+            Environment.SetEnvironmentVariable("AUTH_ALLOW_OAUTH_AUTOPROVISION", "true");
+
+            var store = new InMemoryOAuthStore();
+            var exchange = new StubTokenExchangeService();
+            var clock = new DeterministicClock();
+            var beginHandler = new OAuthBeginHandler(store);
+            var callbackHandler = new OAuthCallbackHandler(store, exchange, store, store, store, clock);
+
+            var beginResult = await beginHandler.HandleAsync(new OAuthBeginCommand("google", "https://preview-app-123.ev/api/auth/google/callback"));
+            Assert.True(beginResult.IsSuccess);
+            string state = beginResult.Value.State;
+
+            var callbackResult = await callbackHandler.HandleAsync(new OAuthCallbackCommand("google", state, "auth_code_live_provision"));
+            Assert.True(callbackResult.IsSuccess);
+            Assert.Equal("raymundgerardrestaca@gmail.com", callbackResult.Value.Email);
+
+            Actor? provisionedActor = await store.GetActorByEmailOrUsernameAsync("raymundgerardrestaca@gmail.com");
+            Assert.NotNull(provisionedActor);
+            Assert.Equal("Raymund Gerard Restaca", provisionedActor.FullName);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("AUTH_ALLOW_OAUTH_AUTOPROVISION", previousEnv);
+        }
+    }
+
+    [Fact]
+    public async Task OAuthCallback_When_User_Configured_Via_Upsert_Credentials_Succeeds()
+    {
+        var store = new InMemoryOAuthStore();
+        // Simulate configuration sync upserting credentials into IRoleStore
+        await store.UpsertUserCredentialsAndRolesAsync(
+            userId: "usr_cfg_12345",
+            employeeCode: "EMP-CFG-0001",
+            fullName: "Raymund Gerard Restaca",
+            email: "raymundgerardrestaca@gmail.com",
+            username: "raymundgerardrestaca",
+            password: null,
+            departmentId: "finance",
+            costCenterId: "CC-FIN",
+            employeeGroup: "management",
+            roles: [Role.SystemAdmin],
+            departmentScope: "*",
+            isActive: true);
+
+        var exchange = new StubTokenExchangeService();
+        var clock = new DeterministicClock();
+        var beginHandler = new OAuthBeginHandler(store);
+        var callbackHandler = new OAuthCallbackHandler(store, exchange, store, store, store, clock);
+
+        var beginResult = await beginHandler.HandleAsync(new OAuthBeginCommand("google", "https://preview-app-123.ev/api/auth/google/callback"));
+        Assert.True(beginResult.IsSuccess);
+        string state = beginResult.Value.State;
+
+        var callbackResult = await callbackHandler.HandleAsync(new OAuthCallbackCommand("google", state, "auth_code_live_sync"));
+        Assert.True(callbackResult.IsSuccess);
+        Assert.Equal("raymundgerardrestaca@gmail.com", callbackResult.Value.Email);
+        Assert.Equal("usr_cfg_12345", callbackResult.Value.UserId);
+        Assert.Contains(Role.SystemAdmin, callbackResult.Value.Roles!);
+    }
 }
