@@ -83,19 +83,23 @@ export function usePayMongoRealtimeSync({
   initialCheckoutUrl = null,
   checkoutUrl: fallbackCheckoutUrl = null,
   initialProviderPaymentId = null,
-  signalRHubUrl = process.env.NEXT_PUBLIC_SIGNALR_HUB_URL || "/hubs/payments",
+  signalRHubUrl = process.env.NEXT_PUBLIC_SIGNALR_HUB_URL || "/api/hubs/payments",
   pollIntervalMs = 3000,
   enableDebugLogs = true,
   onStatusChange,
 }: UsePayMongoRealtimeSyncOptions) {
-  const effectiveExpiresAt = initialExpiresAtUtc ?? expiresAt ?? null;
-  const effectiveCheckoutUrl = initialCheckoutUrl ?? fallbackCheckoutUrl ?? null;
+  const effectiveInitialExpiresAt = initialExpiresAtUtc ?? expiresAt ?? null;
+  const effectiveInitialCheckoutUrl = initialCheckoutUrl ?? fallbackCheckoutUrl ?? null;
 
   const [status, setStatus] = useState<AuthoritativePaymentStatus>(() =>
     normalizePaymentStatus(initialStatus)
   );
-  const [expiresAtUtc, setExpiresAtUtc] = useState<string | null>(effectiveExpiresAt);
-  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(effectiveCheckoutUrl);
+  const [expiresAtUtc, setExpiresAtUtc] = useState<string | null>(
+    effectiveInitialExpiresAt
+  );
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(
+    effectiveInitialCheckoutUrl
+  );
   const [providerPaymentId, setProviderPaymentId] = useState<string | null>(
     initialProviderPaymentId
   );
@@ -109,7 +113,7 @@ export function usePayMongoRealtimeSync({
     lastPollTimeIso: null,
     lastPollHttpStatus: null,
     pollCount: 0,
-    signalRState: "Disconnected",
+    signalRState: "Active 3s Poll",
     serverClockOffsetMs: 0,
     rawGatewayStatus: initialStatus,
     providerPaymentId: initialProviderPaymentId,
@@ -117,8 +121,7 @@ export function usePayMongoRealtimeSync({
 
   const serverClockOffsetMsRef = useRef<number>(0);
   const hasTriggeredZeroReconcileRef = useRef<boolean>(false);
-  const onStatusChangeRef = useRef(onStatusChange);
-  onStatusChangeRef.current = onStatusChange;
+  const isPollInFlightRef = useRef<boolean>(false);
   const statusRef = useRef<AuthoritativePaymentStatus>(status);
   statusRef.current = status;
 
@@ -140,12 +143,11 @@ export function usePayMongoRealtimeSync({
     [attemptId, enableDebugLogs]
   );
 
-  // Reset state if the user creates a brand-new attemptId
   useEffect(() => {
     const nextStatus = normalizePaymentStatus(initialStatus);
     setStatus(nextStatus);
-    setExpiresAtUtc(effectiveExpiresAt);
-    setCheckoutUrl(effectiveCheckoutUrl);
+    setExpiresAtUtc(effectiveInitialExpiresAt);
+    setCheckoutUrl(effectiveInitialCheckoutUrl);
     setProviderPaymentId(initialProviderPaymentId);
     setFailureCode(null);
     setFailureMessage(null);
@@ -153,14 +155,14 @@ export function usePayMongoRealtimeSync({
     logDebug("HOOK_INITIALIZED_FOR_ATTEMPT", {
       attemptId,
       initialStatus: nextStatus,
-      initialExpiresAtUtc: effectiveExpiresAt,
+      initialExpiresAtUtc: effectiveInitialExpiresAt,
       initialProviderPaymentId,
     });
   }, [
     attemptId,
     initialStatus,
-    effectiveExpiresAt,
-    effectiveCheckoutUrl,
+    effectiveInitialExpiresAt,
+    effectiveInitialCheckoutUrl,
     initialProviderPaymentId,
     logDebug,
   ]);
@@ -196,13 +198,8 @@ export function usePayMongoRealtimeSync({
       if (nextFailureCode) setFailureCode(nextFailureCode);
       if (nextFailureMessage) setFailureMessage(nextFailureMessage);
 
-      setStatus((prev) => {
+      setStatus((prev: AuthoritativePaymentStatus) => {
         if (TERMINAL_STATUSES.has(prev)) {
-          logDebug("IGNORED_UPDATE_ALREADY_TERMINAL", {
-            source,
-            currentTerminalStatus: prev,
-            incomingStatus: normalized,
-          });
           return prev;
         }
 
@@ -214,7 +211,7 @@ export function usePayMongoRealtimeSync({
             failureCode: nextFailureCode,
             failureMessage: nextFailureMessage,
           });
-          onStatusChangeRef.current?.(normalized);
+          onStatusChange?.(normalized);
         }
 
         if (TERMINAL_STATUSES.has(normalized)) {
@@ -227,13 +224,9 @@ export function usePayMongoRealtimeSync({
         return normalized;
       });
     },
-    [logDebug]
+    [logDebug, onStatusChange]
   );
 
-  /**
-   * Calls POST /api/v1/payments/{attemptId}/poll (with automatic fallback to GET /api/v1/payments/{attemptId})
-   * so your backend queries PayMongo's live Checkout Session endpoint.
-   */
   const reconcileWithGateway = useCallback(
     async (triggerReason: string = "scheduled_poll") => {
       if (!attemptId || TERMINAL_STATUSES.has(statusRef.current)) {
@@ -241,6 +234,12 @@ export function usePayMongoRealtimeSync({
         return;
       }
 
+      // Prevent overlapping duplicate requests when focus + visibilitychange + interval fire together
+      if (isPollInFlightRef.current && triggerReason !== "manual_debug_button") {
+        return;
+      }
+
+      isPollInFlightRef.current = true;
       setIsReconciling(true);
       const encodedId = encodeURIComponent(attemptId);
 
@@ -257,7 +256,6 @@ export function usePayMongoRealtimeSync({
           cache: "no-store",
         });
 
-        // Fallback to GET /api/v1/payments/{id} if POST /poll returns 404/405
         if (response.status === 404 || response.status === 405) {
           response = await fetch(`/api/v1/payments/${encodedId}`, {
             method: "GET",
@@ -270,7 +268,7 @@ export function usePayMongoRealtimeSync({
 
         if (!response.ok) {
           logDebug("POLL_HTTP_ERROR", { triggerReason, httpStatus });
-          setTelemetry((prev) => ({
+          setTelemetry((prev: SyncDebugTelemetry) => ({
             ...prev,
             lastPollTimeIso: new Date().toISOString(),
             lastPollHttpStatus: httpStatus,
@@ -297,7 +295,7 @@ export function usePayMongoRealtimeSync({
           failureMessage: data.failure_message,
         });
 
-        setTelemetry((prev) => ({
+        setTelemetry((prev: SyncDebugTelemetry) => ({
           ...prev,
           lastPollTimeIso: new Date().toISOString(),
           lastPollHttpStatus: httpStatus,
@@ -323,24 +321,23 @@ export function usePayMongoRealtimeSync({
           error: err instanceof Error ? err.message : String(err),
         });
       } finally {
+        isPollInFlightRef.current = false;
         setIsReconciling(false);
       }
     },
     [attemptId, applyAuthoritativeState, logDebug]
   );
 
-  // 1. Immediate reconciliation on mount/reload + when switching back from the PayMongo tab
+  // 1. Reconcile on mount/reload and tab focus
   useEffect(() => {
     reconcileWithGateway("mount_or_reload");
 
     const onFocus = () => {
-      logDebug("WINDOW_FOCUS_DETECTED", { visibility: document.visibilityState });
       reconcileWithGateway("window_focus");
     };
 
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        logDebug("TAB_VISIBLE_DETECTED", {});
         reconcileWithGateway("tab_visibility_visible");
       }
     };
@@ -352,16 +349,16 @@ export function usePayMongoRealtimeSync({
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [reconcileWithGateway, logDebug]);
+  }, [reconcileWithGateway]);
 
-  // 2. Real-time SignalR subscription
+  // 2. SignalR connection with LogLevel.None so Next.js proxy 404s never pollute console
   useEffect(() => {
     if (!attemptId || isTerminal) return;
 
     const connection = new signalR.HubConnectionBuilder()
       .withUrl(signalRHubUrl)
-      .withAutomaticReconnect([0, 2000, 5000, 10000])
-      .configureLogging(signalR.LogLevel.Warning)
+      .withAutomaticReconnect([0, 3000, 10000])
+      .configureLogging(signalR.LogLevel.None)
       .build();
 
     connection.on(
@@ -374,17 +371,15 @@ export function usePayMongoRealtimeSync({
         failureCode?: string;
         failureMessage?: string;
       }) => {
-        const targetId = (event.attemptId ?? event.transactionId ?? "").toLowerCase();
+        const targetId = (
+          event.attemptId ??
+          event.transactionId ??
+          ""
+        ).toLowerCase();
         const matchesAttempt = targetId === attemptId.toLowerCase();
         const matchesProviderId =
           Boolean(providerPaymentId) &&
           targetId === (providerPaymentId ?? "").toLowerCase();
-
-        logDebug("SIGNALR_EVENT_RECEIVED", {
-          event,
-          matchesAttempt,
-          matchesProviderId,
-        });
 
         if (matchesAttempt || matchesProviderId) {
           applyAuthoritativeState(
@@ -400,43 +395,27 @@ export function usePayMongoRealtimeSync({
       }
     );
 
-    connection.onreconnecting(() => {
-      setIsSignalRConnected(false);
-      setTelemetry((prev) => ({ ...prev, signalRState: "Reconnecting" }));
-    });
-
-    connection.onreconnected(() => {
-      setIsSignalRConnected(true);
-      setTelemetry((prev) => ({ ...prev, signalRState: "Connected" }));
-      connection.invoke("SubscribeToPayment", attemptId).catch(() => {});
-      if (providerPaymentId) {
-        connection.invoke("SubscribeToPayment", providerPaymentId).catch(() => {});
-      }
-      reconcileWithGateway("signalr_reconnected");
-    });
-
-    connection.onclose(() => {
-      setIsSignalRConnected(false);
-      setTelemetry((prev) => ({ ...prev, signalRState: "Disconnected" }));
-    });
-
     connection
       .start()
       .then(() => {
         setIsSignalRConnected(true);
-        setTelemetry((prev) => ({ ...prev, signalRState: "Connected" }));
-        logDebug("SIGNALR_CONNECTED", { signalRHubUrl, attemptId, providerPaymentId });
+        setTelemetry((prev: SyncDebugTelemetry) => ({
+          ...prev,
+          signalRState: "Connected",
+        }));
         connection.invoke("SubscribeToPayment", attemptId).catch(() => {});
         if (providerPaymentId) {
-          connection.invoke("SubscribeToPayment", providerPaymentId).catch(() => {});
+          connection
+            .invoke("SubscribeToPayment", providerPaymentId)
+            .catch(() => {});
         }
       })
-      .catch((err) => {
+      .catch(() => {
         setIsSignalRConnected(false);
-        setTelemetry((prev) => ({ ...prev, signalRState: "Polling Fallback" }));
-        logDebug("SIGNALR_CONNECT_FALLBACK_TO_POLLING", {
-          reason: err instanceof Error ? err.message : String(err),
-        });
+        setTelemetry((prev: SyncDebugTelemetry) => ({
+          ...prev,
+          signalRState: "Active 3s Poll",
+        }));
       });
 
     return () => {
@@ -448,8 +427,6 @@ export function usePayMongoRealtimeSync({
     signalRHubUrl,
     isTerminal,
     applyAuthoritativeState,
-    reconcileWithGateway,
-    logDebug,
   ]);
 
   // 3. Active 3-second polling loop while non-terminal
@@ -482,12 +459,14 @@ export function usePayMongoRealtimeSync({
 
     const tick = () => {
       const nowAuthoritative = Date.now() + serverClockOffsetMsRef.current;
-      const secs = Math.max(0, Math.ceil((deadlineMs - nowAuthoritative) / 1000));
+      const secs = Math.max(
+        0,
+        Math.ceil((deadlineMs - nowAuthoritative) / 1000)
+      );
       setRemainingSeconds(secs);
 
       if (secs === 0 && !hasTriggeredZeroReconcileRef.current) {
         hasTriggeredZeroReconcileRef.current = true;
-        logDebug("COUNTDOWN_REACHED_ZERO_TRIGGERING_RECONCILE", { attemptId });
         reconcileWithGateway("countdown_reached_zero");
       }
     };
@@ -495,7 +474,7 @@ export function usePayMongoRealtimeSync({
     tick();
     const timerId = setInterval(tick, 1000);
     return () => clearInterval(timerId);
-  }, [attemptId, expiresAtUtc, isTerminal, reconcileWithGateway, logDebug]);
+  }, [attemptId, expiresAtUtc, isTerminal, reconcileWithGateway]);
 
   const minutes = Math.floor(remainingSeconds / 60);
   const seconds = remainingSeconds % 60;
@@ -509,17 +488,13 @@ export function usePayMongoRealtimeSync({
     isPayable: !isTerminal && remainingSeconds > 0 && Boolean(checkoutUrl),
     remainingSeconds,
     formattedCountdown,
-    formattedRemaining: formattedCountdown,
     checkoutUrl,
     providerPaymentId,
     failureCode,
     failureMessage,
     isReconciling,
-    isSyncing: isReconciling,
     isSignalRConnected,
     telemetry,
     reconcileWithGateway,
-    reconcileNow: reconcileWithGateway,
-    error: failureMessage,
   };
 }
