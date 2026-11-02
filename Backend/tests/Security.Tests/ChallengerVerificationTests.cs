@@ -387,34 +387,11 @@ public sealed class ChallengerVerificationTests
         Assert.True(File.Exists(sqlPath), $"Seed SQL file not found at {sqlPath}");
         string sql = File.ReadAllText(sqlPath);
 
-        // Verify all 9 personas
-        string[] personas =
-        [
-            "emp_field_01",
-            "sup_mfg_01",
-            "fin_maker_01",
-            "fin_verifier_01",
-            "fin_bank_01",
-            "fin_evidence_01",
-            "fin_reviewer_01",
-            "fin_controller_01",
-            "sys_admin_01"
-        ];
-
-        foreach (string persona in personas)
-        {
-            Assert.Contains(persona, sql, StringComparison.Ordinal);
-        }
-
-        // Verify admin alias
-        Assert.Contains("'admin'", sql, StringComparison.Ordinal);
-
-        // Verify password123 bcrypt hashing with public.gen_salt('bf', 10)
-        Assert.Contains("public.crypt('password123', public.gen_salt('bf', 10))", sql, StringComparison.Ordinal);
-
-        // Verify idempotency with ON CONFLICT
-        Assert.Contains("ON CONFLICT (id) DO UPDATE", sql, StringComparison.Ordinal);
-        Assert.Contains("ON CONFLICT (user_id) DO UPDATE", sql, StringComparison.Ordinal);
+        // Verify static user and persona seeders are removed in favor of dynamic identity
+        Assert.Contains("pgcrypto", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("INSERT INTO public.users_finance", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("INSERT INTO public.role_assignments", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("INSERT INTO public.user_credentials", sql, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -8,6 +8,21 @@
     <Project Path="Backend/src/BuildingBlocks/Rge.BuildingBlocks.SharedKernel/Rge.BuildingBlocks.SharedKernel.csproj" />
   </Folder>
   <Folder Name="/Backend/src/Modules/" />
+  <Folder Name="/Backend/src/Modules/CostAllocation/">
+    <Project Path="Backend/src/Modules/CostAllocation/Rge.CostAllocation.Application/Rge.CostAllocation.Application.csproj" />
+    <Project Path="Backend/src/Modules/CostAllocation/Rge.CostAllocation.Contracts/Rge.CostAllocation.Contracts.csproj" />
+    <Project Path="Backend/src/Modules/CostAllocation/Rge.CostAllocation.Domain/Rge.CostAllocation.Domain.csproj" />
+    <Project Path="Backend/src/Modules/CostAllocation/Rge.CostAllocation.Infrastructure/Rge.CostAllocation.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/Backend/src/Modules/Finance/">
+    <Project Path="Backend/src/Modules/Finance/Rge.Finance.Domain/Rge.Finance.Domain.csproj" />
+  </Folder>
+  <Folder Name="/Backend/src/Modules/Identity/">
+    <Project Path="Backend/src/Modules/Identity/Rge.Identity.Application/Rge.Identity.Application.csproj" />
+    <Project Path="Backend/src/Modules/Identity/Rge.Identity.Contracts/Rge.Identity.Contracts.csproj" />
+    <Project Path="Backend/src/Modules/Identity/Rge.Identity.Domain/Rge.Identity.Domain.csproj" />
+    <Project Path="Backend/src/Modules/Identity/Rge.Identity.Infrastructure/Rge.Identity.Infrastructure.csproj" />
+  </Folder>
   <Folder Name="/Backend/src/Modules/Payments/">
     <Project Path="Backend/src/Modules/Payments/Rge.Payments.Api/Rge.Payments.Api.csproj" />
     <Project Path="Backend/src/Modules/Payments/Rge.Payments.Application/Rge.Payments.Application.csproj" />

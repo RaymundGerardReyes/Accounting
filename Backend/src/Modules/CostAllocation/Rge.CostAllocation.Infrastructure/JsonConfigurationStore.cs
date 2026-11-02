@@ -137,22 +137,12 @@ public sealed class JsonConfigurationStore : ICostAllocationStore
 
         if (!_config.ContainsKey("users"))
         {
-            _config["users"] = new List<object>
-            {
-                new Dictionary<string, object> { ["id"] = 1, ["name"] = "John Smith", ["role"] = "System Administrator", ["email"] = "admin@rge.com.ph", ["status"] = "Active" },
-                new Dictionary<string, object> { ["id"] = 2, ["name"] = "Sarah Johnson", ["role"] = "Cost Analyst", ["email"] = "sarah@acme.com", ["status"] = "Active" },
-                new Dictionary<string, object> { ["id"] = 3, ["name"] = "Mike Davis", ["role"] = "Auditor", ["email"] = "mike@acme.com", ["status"] = "Active" },
-                new Dictionary<string, object> { ["id"] = 4, ["name"] = "Lisa Chen", ["role"] = "Department Manager", ["email"] = "lisa@acme.com", ["status"] = "Inactive" }
-            };
+            _config["users"] = new List<object>();
         }
 
         if (!_config.ContainsKey("auditLogs"))
         {
-            _config["auditLogs"] = new List<object>
-            {
-                new Dictionary<string, object> { ["id"] = 774, ["action"] = "Payment received: \u20b189.00 for ORD-202610-2581 (QRPh Paid Test Order)", ["user"] = "PayMongo Gateway", ["time"] = "Just now", ["severity"] = "success" },
-                new Dictionary<string, object> { ["id"] = 773, ["action"] = "System configuration updated: Default Allocation Basis set to activity-based", ["user"] = "System Administrator", ["time"] = "1 hour ago", ["severity"] = "info" }
-            };
+            _config["auditLogs"] = new List<object>();
         }
 
         if (!_config.ContainsKey("integrations"))
