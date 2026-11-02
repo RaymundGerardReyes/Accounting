@@ -253,9 +253,23 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
                 await _outboxWriter.EnqueueAsync(paidEvent, cancellationToken).ConfigureAwait(false);
             }
         }
-        else if (command.EventType is "checkout_session.expired")
+        else if (command.EventType is "checkout_session.expired" or "qr_code.expired")
         {
             attempt.MarkExpired(nowUtc);
+
+            if (_paymentGateway is not null &&
+                !string.IsNullOrWhiteSpace(attempt.ProviderPaymentId) &&
+                attempt.ProviderPaymentId.StartsWith("cs_", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    await _paymentGateway.ExpireCheckoutSessionAsync(attempt.ProviderPaymentId, cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Best-effort gateway lock
+                }
+            }
         }
         else if (command.EventType is "payment.failed")
         {
@@ -306,7 +320,8 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
             Success: true,
             ProviderEventId: command.ProviderEventId,
             ProcessingStatus: WebhookProcessingStatus.Processed,
-            Message: $"Webhook event '{command.ProviderEventId}' processed for attempt '{attempt.Id}'."));
+            Message: $"Webhook event '{command.ProviderEventId}' processed for attempt '{attempt.Id}'.",
+            PaymentAttemptId: attempt.Id));
     }
 
     private static void ExtractMetadata(

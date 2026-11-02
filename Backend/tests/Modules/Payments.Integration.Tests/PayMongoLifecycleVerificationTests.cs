@@ -463,5 +463,70 @@ public sealed class PayMongoLifecycleVerificationTests
         Assert.Equal("failed", polled.Value.Status);
         Assert.Null(polled.Value.CheckoutUrl);
     }
+
+    // =========================================================================
+    // Scenario 8: qr_code.expired Webhook Locks Checkout Session & Notifies SignalR
+    // =========================================================================
+    [Fact]
+    public async Task Scenario08_QrCodeExpiredWebhook_LocksRemoteSession_MarksExpired_And_NotifiesSignalR()
+    {
+        var (sp, clock, gateway, notifier) = BuildTestHarness();
+        await using var _ = sp;
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var createOrder = scope.ServiceProvider.GetRequiredService<CreateOrderHandler>();
+        var initiateAttempt = scope.ServiceProvider.GetRequiredService<InitiateAttemptHandler>();
+        var receiveWebhook = scope.ServiceProvider.GetRequiredService<ReceivePayMongoWebhookHandler>();
+        var pollHandler = scope.ServiceProvider.GetRequiredService<PollAndReconcileHandler>();
+
+        var ordRes = await createOrder.HandleAsync(new CreateOrderCommand("COST-ACC-TEXT-2026", Quantity: 1));
+        var attRes = await initiateAttempt.HandleAsync(new InitiateAttemptCommand(ordRes.Value.Id, "qrph", "idem-qr-expire-test"));
+        string csId = attRes.Value.ProviderPaymentId!;
+        string attemptId = attRes.Value.Id;
+
+        long unixNow = clock.UtcNow.ToUnixTimeSeconds();
+        string rawPayload = $$"""
+            {
+              "data": {
+                "id": "evt_qr_expire_001",
+                "type": "event",
+                "attributes": {
+                  "type": "qr_code.expired",
+                  "data": {
+                    "id": "qr_expired_999",
+                    "type": "qr_code",
+                    "attributes": {
+                      "status": "expired",
+                      "metadata": {
+                        "payment_attempt_id": "{{attemptId}}",
+                        "order_id": "{{ordRes.Value.Id}}",
+                        "idempotency_key": "idem-qr-expire-test"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        string sigHeader = WebhookSigner.CreateSignatureHeader(rawPayload, WebhookSecret, unixNow);
+        var webhookRes = await receiveWebhook.HandleAsync(new ReceivePayMongoWebhookCommand(sigHeader, rawPayload, "corr-qr-1"));
+
+        Assert.True(webhookRes.IsSuccess);
+        Assert.Equal("processed", webhookRes.Value.ProcessingStatus);
+        Assert.Equal(attemptId, webhookRes.Value.PaymentAttemptId);
+
+        // 1. Verify checkout session on PayMongo gateway was explicitly locked/expired
+        Assert.Contains(csId, gateway.ExpiredSessionCalls);
+
+        // 2. Verify SignalR notification was published for attemptId with status "expired"
+        Assert.Contains(notifier.PublishedEvents, e => e.AttemptId == attemptId && e.Status == "expired");
+
+        // 3. Verify local query confirms attempt is Expired and CheckoutUrl is null
+        var polled = await pollHandler.HandleAsync(new PollAndReconcileQuery(attemptId, AutoReconcile: false));
+        Assert.True(polled.IsSuccess);
+        Assert.Equal("expired", polled.Value.Status);
+        Assert.Null(polled.Value.CheckoutUrl);
+    }
 }
 

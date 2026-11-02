@@ -11,7 +11,8 @@ public sealed record WebhookAckResponse(
     string WebhookEventId,
     string ProviderEventId,
     string EventType,
-    string ProcessingStatus)
+    string ProcessingStatus,
+    string? PaymentAttemptId = null)
 {
     public string Status => ProcessingStatus;
 }

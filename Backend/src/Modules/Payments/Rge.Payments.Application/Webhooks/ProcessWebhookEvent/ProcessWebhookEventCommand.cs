@@ -11,4 +11,5 @@ public sealed record ProcessWebhookEventResponse(
     bool Success,
     string ProviderEventId,
     string ProcessingStatus,
-    string Message);
+    string Message,
+    string? PaymentAttemptId = null);

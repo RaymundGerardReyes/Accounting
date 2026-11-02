@@ -16,7 +16,8 @@ public sealed class ReceivePayMongoWebhookHandler : ICommandHandler<ReceivePayMo
         "checkout_session.payment.paid",
         "payment.paid",
         "payment.failed",
-        "checkout_session.expired"
+        "checkout_session.expired",
+        "qr_code.expired"
     };
 
     private readonly ProcessWebhookEventHandler? _processHandler;
@@ -72,6 +73,7 @@ public sealed class ReceivePayMongoWebhookHandler : ICommandHandler<ReceivePayMo
             string processingStatus = SupportedEvents.Contains(eventType)
                 ? "received"
                 : "ignored";
+            string? paymentAttemptId = null;
 
             if (_processHandler is not null && processingStatus == "received")
             {
@@ -82,6 +84,7 @@ public sealed class ReceivePayMongoWebhookHandler : ICommandHandler<ReceivePayMo
                 if (processRes.IsSuccess)
                 {
                     processingStatus = processRes.Value.ProcessingStatus;
+                    paymentAttemptId = processRes.Value.PaymentAttemptId;
                 }
             }
 
@@ -89,7 +92,8 @@ public sealed class ReceivePayMongoWebhookHandler : ICommandHandler<ReceivePayMo
                 WebhookEventId: Guid.NewGuid().ToString("D"),
                 ProviderEventId: providerEventId,
                 EventType: eventType,
-                ProcessingStatus: processingStatus);
+                ProcessingStatus: processingStatus,
+                PaymentAttemptId: paymentAttemptId);
 
             return Result.Success(response);
         }
