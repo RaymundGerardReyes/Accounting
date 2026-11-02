@@ -90,5 +90,61 @@ public sealed class PayMongoRealGatewayProofTests
         // Must prioritize "expired" over the stale nested "pending" payment
         Assert.Equal("expired", evaluated.Status);
     }
+
+    [Fact]
+    public void RealPayMongoJson_WhenSourceExpiresOrFails_TransitionsToAwaitingPaymentMethod_EvaluatesAsFailed()
+    {
+        const string sourceActionJson = """
+        {
+          "data": {
+            "id": "cs_source_drop_test_789",
+            "type": "checkout_session",
+            "attributes": {
+              "status": "active",
+              "payment_intent": {
+                "id": "pi_source_789",
+                "type": "payment_intent",
+                "attributes": {
+                  "status": "awaiting_next_action"
+                }
+              }
+            }
+          }
+        }
+        """;
+
+        var actionEnvelope = JsonSerializer.Deserialize<PayMongoCheckoutSessionEnvelope>(sourceActionJson);
+        Assert.NotNull(actionEnvelope?.Data);
+        var initialEvaluation = PayMongoClient.EvaluateCheckoutSessionStatus(actionEnvelope.Data);
+        Assert.Equal("awaiting_next_action", initialEvaluation.Status);
+
+        // When customer lets src_ expire or clicks fail, PayMongo resets payment_intent to awaiting_payment_method
+        const string sourceExpiredResetJson = """
+        {
+          "data": {
+            "id": "cs_source_drop_test_789",
+            "type": "checkout_session",
+            "attributes": {
+              "status": "active",
+              "payment_intent": {
+                "id": "pi_source_789",
+                "type": "payment_intent",
+                "attributes": {
+                  "status": "awaiting_payment_method"
+                }
+              }
+            }
+          }
+        }
+        """;
+
+        var resetEnvelope = JsonSerializer.Deserialize<PayMongoCheckoutSessionEnvelope>(sourceExpiredResetJson);
+        Assert.NotNull(resetEnvelope?.Data);
+        var finalEvaluation = PayMongoClient.EvaluateCheckoutSessionStatus(resetEnvelope.Data);
+
+        // Must catch the source expiry drop and evaluate as failed
+        Assert.Equal("failed", finalEvaluation.Status);
+        Assert.Equal("source_expired_or_failed", finalEvaluation.FailureCode);
+    }
 }
 

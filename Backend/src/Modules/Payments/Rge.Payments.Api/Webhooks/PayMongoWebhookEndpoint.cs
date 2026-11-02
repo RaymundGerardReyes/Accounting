@@ -1,7 +1,9 @@
+#pragma warning disable CA1873
 using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Logging;
 using Rge.BuildingBlocks.Api.Endpoints;
 using Rge.BuildingBlocks.Api.Http;
 using Rge.BuildingBlocks.SharedKernel.Results;
@@ -34,6 +36,7 @@ public sealed class PayMongoWebhookEndpoint : IEndpointModule
         HttpContext httpContext,
         PayMongoSignatureVerifier signatureVerifier,
         ReceivePayMongoWebhookHandler handler,
+        ILogger<PayMongoWebhookEndpoint> logger,
         CancellationToken cancellationToken)
     {
         if (httpContext.Request.ContentLength > MaxWebhookBodyBytes)
@@ -57,6 +60,7 @@ public sealed class PayMongoWebhookEndpoint : IEndpointModule
 
         if (!signatureVerifier.IsValidSignature(signatureHeader, rawBody))
         {
+            logger.LogWarning("[PAYMONGO-WEBHOOK] Signature verification failed for incoming request.");
             var sigError = Error.Unauthorized(
                 "Webhooks.InvalidSignature",
                 "Paymongo-Signature HMAC-SHA256 verification failed or timestamp expired.");
@@ -65,6 +69,15 @@ public sealed class PayMongoWebhookEndpoint : IEndpointModule
 
         var command = new ReceivePayMongoWebhookCommand(signatureHeader, rawBody);
         Result<WebhookAckResponse> result = await handler.HandleAsync(command, cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            logger.LogInformation(
+                "[PAYMONGO-WEBHOOK] Validated event_id={ProviderEventId} | type={EventType} | status={ProcessingStatus}",
+                result.Value.ProviderEventId,
+                result.Value.EventType,
+                result.Value.ProcessingStatus);
+        }
 
         return result.ToHttpResult(httpContext, ack => Results.Ok(ack));
     }

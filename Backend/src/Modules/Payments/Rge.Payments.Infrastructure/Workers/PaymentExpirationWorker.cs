@@ -1,3 +1,4 @@
+#pragma warning disable CA1873
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -10,11 +11,6 @@ using Rge.Payments.Infrastructure.Outbox;
 
 namespace Rge.Payments.Infrastructure.Workers;
 
-/// <summary>
-/// Background worker that continuously reconciles non-terminal payment attempts against PayMongo
-/// and enforces server-side expiration deadlines every 15 seconds.
-/// Stops the Next.js countdown immediately when a session is Paid, Failed, or Expired.
-/// </summary>
 public sealed class PaymentExpirationWorker : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(15);
@@ -35,7 +31,7 @@ public sealed class PaymentExpirationWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("PaymentExpirationWorker started.");
+        _logger.LogInformation("[PAYMONGO-WORKER] Started with 15s active reconciliation interval.");
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -50,14 +46,14 @@ public sealed class PaymentExpirationWorker : BackgroundService
 #pragma warning disable CA1031
             catch (Exception ex)
             {
-                _logger.LogError(ex, "PaymentExpirationWorker encountered an unhandled error.");
+                _logger.LogError(ex, "[PAYMONGO-WORKER-ERR] Unhandled exception during reconciliation pass.");
             }
 #pragma warning restore CA1031
 
             await Task.Delay(Interval, stoppingToken).ConfigureAwait(false);
         }
 
-        _logger.LogInformation("PaymentExpirationWorker stopped.");
+        _logger.LogInformation("[PAYMONGO-WORKER] Stopped.");
     }
 
     /// <summary>
@@ -84,6 +80,19 @@ public sealed class PaymentExpirationWorker : BackgroundService
         IReadOnlyList<PaymentAttempt> nonTerminal =
             await attemptRepository.ListNonTerminalAsync(cancellationToken).ConfigureAwait(false);
 
+        if (nonTerminal.Count == 0)
+        {
+            return 0;
+        }
+
+        // Identify the newest attempt per OrderId so any older superseded attempt is automatically expired
+        Dictionary<string, string> latestAttemptIdByOrder = nonTerminal
+            .GroupBy(a => a.OrderId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(a => a.CreatedAt).First().Id,
+                StringComparer.OrdinalIgnoreCase);
+
         int transitionedCount = 0;
         int inspected = 0;
 
@@ -96,9 +105,38 @@ public sealed class PaymentExpirationWorker : BackgroundService
 
             inspected++;
 
+            double remainingSeconds = attempt.ExpiresAt.HasValue
+                ? (attempt.ExpiresAt.Value - nowUtc).TotalSeconds
+                : 0;
             bool isDeadlineReached = attempt.ExpiresAt.HasValue && attempt.ExpiresAt.Value <= nowUtc;
 
-            // 1. Always query PayMongo's live status for non-terminal attempts with a ProviderPaymentId
+            // Clean up superseded attempts on the same order (e.g. cs_33ab872df98fd94f8ee87338 when cs_1753341df564a3c58fb3cc49 is created)
+            if (latestAttemptIdByOrder.TryGetValue(attempt.OrderId, out string? newestId) &&
+                !string.Equals(newestId, attempt.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation(
+                    "[PAYMONGO-WORKER-SUPERSEDED] Expiring older attempt {OldAttemptId} (cs={OldCsId}) superseded by {NewAttemptId} on Order {OrderId}",
+                    attempt.Id,
+                    attempt.ProviderPaymentId ?? "none",
+                    newestId,
+                    attempt.OrderId);
+
+                if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId))
+                {
+                    _ = await gateway.ExpireCheckoutSessionAsync(attempt.ProviderPaymentId, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (attempt.MarkExpired(nowUtc).IsSuccess)
+                {
+                    await attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
+                    transitionedCount++;
+                    await NotifyFrontendAsync(notifier, attempt.Id, attempt.ProviderPaymentId, nameof(PaymentAttemptStatus.Expired), nowUtc, cancellationToken).ConfigureAwait(false);
+                }
+
+                continue;
+            }
+
+            // 1. Poll PayMongo for the live Checkout Session status
             if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId))
             {
                 var statusResult = await gateway
@@ -109,7 +147,16 @@ public sealed class PaymentExpirationWorker : BackgroundService
                 {
                     string remoteStatus = statusResult.Value.Status.Trim().ToLowerInvariant();
 
-                    // Case A: Remote payment SUCCEEDED / PAID
+                    _logger.LogInformation(
+                        "[PAYMONGO-WORKER-CHECK] attempt_id={AttemptId} | cs_id={CsId} | local_status={LocalStatus} | remote_status={RemoteStatus} | remaining_sec={RemSec:F0} | deadline_reached={DeadlineReached}",
+                        attempt.Id,
+                        attempt.ProviderPaymentId,
+                        attempt.Status,
+                        remoteStatus,
+                        remainingSeconds,
+                        isDeadlineReached);
+
+                    // Case A: PAID / SUCCEEDED
                     if (remoteStatus is "paid" or "succeeded")
                     {
                         DateTimeOffset paidAt = statusResult.Value.PaidAtUtc ?? nowUtc;
@@ -142,20 +189,26 @@ public sealed class PaymentExpirationWorker : BackgroundService
                             }
 
                             transitionedCount++;
-                            await NotifyFrontendAsync(notifier, attempt.Id, nameof(PaymentAttemptStatus.Succeeded), paidAt, cancellationToken)
+                            await NotifyFrontendAsync(notifier, attempt.Id, attempt.ProviderPaymentId, nameof(PaymentAttemptStatus.Succeeded), paidAt, cancellationToken)
                                 .ConfigureAwait(false);
                         }
 
                         continue;
                     }
 
-                    // Case B: Remote payment FAILED on PayMongo (even while countdown is still at 25:58!)
+                    // Case B: FAILED (including when a Source src_... expires/fails during checkout)
                     if (remoteStatus is "failed")
                     {
                         string failCode = statusResult.Value.FailureCode ?? "payment_failed";
                         string failMsg = statusResult.Value.FailureMessage ?? "Payment failed at gateway.";
 
-                        // Also expire the Checkout Session on PayMongo so the failed session is closed
+                        _logger.LogWarning(
+                            "[PAYMONGO-WORKER-FAIL-DETECTED] Locking failed session cs_id={CsId} for attempt={AttemptId} (code={Code}, msg={Msg})",
+                            attempt.ProviderPaymentId,
+                            attempt.Id,
+                            failCode,
+                            failMsg);
+
                         _ = await gateway.ExpireCheckoutSessionAsync(attempt.ProviderPaymentId, cancellationToken).ConfigureAwait(false);
 
                         if (attempt.MarkFailed(failCode, failMsg, nowUtc).IsSuccess)
@@ -163,57 +216,59 @@ public sealed class PaymentExpirationWorker : BackgroundService
                             await attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
                             transitionedCount++;
 
-                            await NotifyFrontendAsync(notifier, attempt.Id, nameof(PaymentAttemptStatus.Failed), nowUtc, cancellationToken)
+                            await NotifyFrontendAsync(notifier, attempt.Id, attempt.ProviderPaymentId, nameof(PaymentAttemptStatus.Failed), nowUtc, cancellationToken)
                                 .ConfigureAwait(false);
                         }
 
                         continue;
                     }
 
-                    // Case C: Remote session EXPIRED on PayMongo before local timer reached zero
+                    // Case C: EXPIRED / CANCELLED on PayMongo
                     if (remoteStatus is "expired" or "cancelled")
                     {
+                        _logger.LogInformation(
+                            "[PAYMONGO-WORKER-EXPIRED-DETECTED] Remote session cs_id={CsId} is already '{RemoteStatus}'. Marking local attempt {AttemptId} Expired.",
+                            attempt.ProviderPaymentId,
+                            remoteStatus,
+                            attempt.Id);
+
                         if (attempt.MarkExpired(nowUtc).IsSuccess)
                         {
                             await attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
                             transitionedCount++;
 
-                            await NotifyFrontendAsync(notifier, attempt.Id, nameof(PaymentAttemptStatus.Expired), nowUtc, cancellationToken)
+                            await NotifyFrontendAsync(notifier, attempt.Id, attempt.ProviderPaymentId, nameof(PaymentAttemptStatus.Expired), nowUtc, cancellationToken)
                                 .ConfigureAwait(false);
                         }
 
                         continue;
                     }
 
-                    // Case D: Payment is actively processing at the deadline -> Defer expiration
+                    // Case D: Processing at deadline -> defer
                     if (isDeadlineReached && remoteStatus is "processing")
                     {
+                        _logger.LogInformation(
+                            "[PAYMONGO-WORKER-DEFER] Attempt {AttemptId} reached deadline but remote is 'processing'. Deferring.",
+                            attempt.Id);
                         continue;
                     }
                 }
             }
 
-            // 2. If local deadline has not been reached yet and remote is still "active", keep counting down
             if (!isDeadlineReached)
             {
                 continue;
             }
 
-            // 3. Local deadline reached -> Explicitly expire the Checkout Session on PayMongo
+            // 2. Local deadline reached -> Call PayMongo Expire API and transition to Expired
+            _logger.LogInformation(
+                "[PAYMONGO-WORKER-DEADLINE] Local deadline reached for attempt {AttemptId} (cs_id={CsId}). Calling Expire API.",
+                attempt.Id,
+                attempt.ProviderPaymentId ?? "none");
+
             if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId))
             {
-                var expireResult = await gateway
-                    .ExpireCheckoutSessionAsync(attempt.ProviderPaymentId, cancellationToken)
-                    .ConfigureAwait(false);
-
-                if (expireResult.IsFailure && _logger.IsEnabled(LogLevel.Warning))
-                {
-                    _logger.LogWarning(
-                        "Could not expire PayMongo session {ProviderPaymentId} for attempt {AttemptId}: {Error}",
-                        attempt.ProviderPaymentId,
-                        attempt.Id,
-                        expireResult.Error.Message);
-                }
+                _ = await gateway.ExpireCheckoutSessionAsync(attempt.ProviderPaymentId, cancellationToken).ConfigureAwait(false);
             }
 
             if (attempt.MarkExpired(nowUtc).IsSuccess)
@@ -221,7 +276,7 @@ public sealed class PaymentExpirationWorker : BackgroundService
                 await attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
                 transitionedCount++;
 
-                await NotifyFrontendAsync(notifier, attempt.Id, nameof(PaymentAttemptStatus.Expired), nowUtc, cancellationToken)
+                await NotifyFrontendAsync(notifier, attempt.Id, attempt.ProviderPaymentId, nameof(PaymentAttemptStatus.Expired), nowUtc, cancellationToken)
                     .ConfigureAwait(false);
             }
         }
@@ -232,12 +287,14 @@ public sealed class PaymentExpirationWorker : BackgroundService
     private async Task NotifyFrontendAsync(
         IPaymentStatusNotifier? notifier,
         string attemptId,
+        string? providerPaymentId,
         string status,
         DateTimeOffset updatedAtUtc,
         CancellationToken cancellationToken)
     {
         if (notifier is null)
         {
+            _logger.LogWarning("[PAYMONGO-SIGNALR-SKIP] IPaymentStatusNotifier is not registered in DI!");
             return;
         }
 
@@ -245,14 +302,23 @@ public sealed class PaymentExpirationWorker : BackgroundService
         {
             await notifier.NotifyPaymentStatusChangedAsync(attemptId, status, updatedAtUtc, cancellationToken)
                 .ConfigureAwait(false);
+
+            if (!string.IsNullOrWhiteSpace(providerPaymentId))
+            {
+                await notifier.NotifyPaymentStatusChangedAsync(providerPaymentId, status, updatedAtUtc, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            _logger.LogInformation(
+                "[PAYMONGO-SIGNALR-SENT] Broadcast status='{Status}' to groups payment:{AttemptId} and payment:{CsId}",
+                status,
+                attemptId,
+                providerPaymentId ?? "none");
         }
 #pragma warning disable CA1031
         catch (Exception ex)
         {
-            if (_logger.IsEnabled(LogLevel.Warning))
-            {
-                _logger.LogWarning(ex, "SignalR notification failed for attempt {AttemptId}.", attemptId);
-            }
+            _logger.LogWarning(ex, "[PAYMONGO-SIGNALR-ERR] Failed broadcasting SignalR for attempt {AttemptId}.", attemptId);
         }
 #pragma warning restore CA1031
     }

@@ -1,7 +1,9 @@
+#pragma warning disable CA1873
 using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Rge.BuildingBlocks.SharedKernel.Results;
@@ -12,10 +14,19 @@ namespace Rge.Payments.Infrastructure.PayMongo;
 /// <summary>
 /// Typed HTTP client for PayMongo API v1 (Checkout Sessions, Status Polling, Session Expiry).
 /// Uses HTTP Basic Auth: Base64("{SecretKey}:").
+/// Includes deep diagnostic logging and automatic Source (src_...) expiry / fail detection.
 /// </summary>
 public sealed class PayMongoClient : IPaymentGateway
 {
     private static readonly ConcurrentDictionary<string, GatewayPaymentStatusResult> OfflineSessions =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Tracks Checkout Sessions whose PaymentIntent entered 'awaiting_next_action' (meaning a Source src_... was initiated).
+    /// If PayMongo resets the PaymentIntent back to 'awaiting_payment_method' with 0 successful payments,
+    /// the underlying Source (src_...) has expired or failed!
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, bool> ObservedAwaitingNextActionSessions =
         new(StringComparer.OrdinalIgnoreCase);
 
     private readonly HttpClient _httpClient;
@@ -120,20 +131,21 @@ public sealed class PayMongoClient : IPaymentGateway
             httpRequest.Headers.Add("Idempotency-Key", request.IdempotencyKey);
 
             using HttpResponseMessage response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+            string rawCreateJson = await response.Content.ReadAsStringAsync(cancellationToken);
+
             if (!response.IsSuccessStatusCode)
             {
-                string errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogWarning(
-                    "PayMongo checkout_sessions creation failed with HTTP {StatusCode} for Order {OrderNumber}: {ErrorBody}",
+                    "[PAYMONGO-CREATE-FAIL] HTTP {StatusCode} for Order {OrderNumber}: {ErrorBody}",
                     (int)response.StatusCode,
                     request.OrderNumber,
-                    errorBody);
+                    rawCreateJson);
 
                 return Result.Failure<CheckoutSessionResult>(
                     Error.Validation("PayMongo.CheckoutCreationFailed", $"Gateway returned HTTP {(int)response.StatusCode}."));
             }
 
-            var envelope = await response.Content.ReadFromJsonAsync<PayMongoCheckoutSessionEnvelope>(cancellationToken);
+            var envelope = JsonSerializer.Deserialize<PayMongoCheckoutSessionEnvelope>(rawCreateJson);
             if (envelope?.Data is null || string.IsNullOrWhiteSpace(envelope.Data.Attributes.CheckoutUrl))
             {
                 return Result.Failure<CheckoutSessionResult>(
@@ -144,6 +156,14 @@ public sealed class PayMongoClient : IPaymentGateway
                 ? DateTimeOffset.FromUnixTimeSeconds(envelope.Data.Attributes.ExpiredAtUnix.Value)
                 : DateTimeOffset.UtcNow.AddMinutes(30);
 
+            _logger.LogInformation(
+                "[PAYMONGO-CREATE-OK] Order={OrderNumber} | cs_id={CsId} | status={Status} | expires_at={ExpiresAt:O} | url={Url}",
+                request.OrderNumber,
+                envelope.Data.Id,
+                envelope.Data.Attributes.Status,
+                expiresAt,
+                envelope.Data.Attributes.CheckoutUrl);
+
             return Result.Success(new CheckoutSessionResult(
                 ProviderPaymentId: envelope.Data.Id,
                 CheckoutUrl: envelope.Data.Attributes.CheckoutUrl,
@@ -152,13 +172,13 @@ public sealed class PayMongoClient : IPaymentGateway
         }
         catch (TaskCanceledException ex)
         {
-            _logger.LogError(ex, "PayMongo checkout creation timed out for Order {OrderNumber}", request.OrderNumber);
+            _logger.LogError(ex, "[PAYMONGO-CREATE-TIMEOUT] Order {OrderNumber}", request.OrderNumber);
             return Result.Failure<CheckoutSessionResult>(
                 new Error("PayMongo.Timeout", "Gateway request timed out."));
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, "PayMongo network error for Order {OrderNumber}", request.OrderNumber);
+            _logger.LogError(ex, "[PAYMONGO-CREATE-NETERR] Order {OrderNumber}", request.OrderNumber);
             return Result.Failure<CheckoutSessionResult>(
                 new Error("PayMongo.NetworkError", "Unable to reach PayMongo gateway."));
         }
@@ -196,24 +216,57 @@ public sealed class PayMongoClient : IPaymentGateway
                 $"checkout_sessions/{Uri.EscapeDataString(providerPaymentId)}",
                 cancellationToken);
 
+            string rawJson = await response.Content.ReadAsStringAsync(cancellationToken);
+
             if (!response.IsSuccessStatusCode)
             {
+                _logger.LogWarning(
+                    "[PAYMONGO-POLL-HTTP-ERR] cs_id={CsId} | HTTP={StatusCode} | Body={Body}",
+                    providerPaymentId,
+                    (int)response.StatusCode,
+                    rawJson);
+
                 return Result.Failure<GatewayPaymentStatusResult>(
                     Error.NotFound("PayMongo.SessionNotFound", $"Checkout session '{providerPaymentId}' could not be retrieved."));
             }
 
-            var envelope = await response.Content.ReadFromJsonAsync<PayMongoCheckoutSessionEnvelope>(cancellationToken);
+            var envelope = JsonSerializer.Deserialize<PayMongoCheckoutSessionEnvelope>(rawJson);
             if (envelope?.Data is null)
             {
+                _logger.LogWarning("[PAYMONGO-POLL-EMPTY] cs_id={CsId} | Raw={Raw}", providerPaymentId, rawJson);
                 return Result.Failure<GatewayPaymentStatusResult>(
                     new Error("PayMongo.EmptySession", "Empty session payload returned by gateway."));
             }
 
-            return Result.Success(EvaluateCheckoutSessionStatus(envelope.Data));
+            GatewayPaymentStatusResult evaluated = EvaluateCheckoutSessionStatus(envelope.Data);
+
+            // Extract diagnostic details from raw JSON so we can see exact payment_intent & source states in Heroku logs
+            var attrs = envelope.Data.Attributes;
+            string piId = attrs.PaymentIntent?.Id ?? "none";
+            string piStatus = attrs.PaymentIntent?.Attributes?.Status ?? "none";
+            string lastErrCode = attrs.PaymentIntent?.Attributes?.LastPaymentError?.Code
+                ?? attrs.PaymentIntent?.Attributes?.LastPaymentError?.FailedCode
+                ?? "none";
+            int paymentsCount = attrs.Payments?.Count ?? 0;
+            string latestPaymentStatus = attrs.Payments?.LastOrDefault()?.Attributes?.Status ?? "none";
+
+            _logger.LogInformation(
+                "[PAYMONGO-POLL-DIAG] cs_id={CsId} | cs_status={CsStatus} | pi_id={PiId} | pi_status={PiStatus} | payments_count={PayCount} | latest_pay_status={LatestPayStatus} | last_err={LastErr} => EVALUATED={EvalStatus} (code={FailCode})",
+                envelope.Data.Id,
+                attrs.Status ?? "null",
+                piId,
+                piStatus,
+                paymentsCount,
+                latestPaymentStatus,
+                lastErrCode,
+                evaluated.Status,
+                evaluated.FailureCode ?? "none");
+
+            return Result.Success(evaluated);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            _logger.LogError(ex, "Failed to poll PayMongo session {ProviderPaymentId}", providerPaymentId);
+            _logger.LogError(ex, "[PAYMONGO-POLL-EX] Failed to poll PayMongo session {ProviderPaymentId}", providerPaymentId);
             return Result.Failure<GatewayPaymentStatusResult>(
                 new Error("PayMongo.PollFailed", "Gateway status poll failed due to network or timeout error."));
         }
@@ -223,7 +276,8 @@ public sealed class PayMongoClient : IPaymentGateway
     /// Evaluates the true status of a PayMongo Checkout Session by inspecting:
     /// 1) Nested payments[] array
     /// 2) Nested payment_intent (status + last_payment_error)
-    /// 3) Top-level Checkout Session status and expired_at timestamp
+    /// 3) Source (src_...) status drops from awaiting_next_action to awaiting_payment_method
+    /// 4) Top-level Checkout Session status and expired_at timestamp
     /// </summary>
     public static GatewayPaymentStatusResult EvaluateCheckoutSessionStatus(PayMongoCheckoutSessionData data)
     {
@@ -244,12 +298,19 @@ public sealed class PayMongoClient : IPaymentGateway
         string paymentStatus = (latestPayment?.Status ?? string.Empty).Trim().ToLowerInvariant();
         string intentStatus = (paymentIntent?.Status ?? string.Empty).Trim().ToLowerInvariant();
 
+        // Track when a user initiates an e-wallet / QRPh Source (pi_status becomes 'awaiting_next_action')
+        if (intentStatus is "awaiting_next_action" or "processing")
+        {
+            ObservedAwaitingNextActionSessions[data.Id] = true;
+        }
+
         // Priority 1: Succeeded / Paid
         if (paymentStatus is "paid" or "succeeded" ||
             intentStatus is "succeeded" ||
             sessionStatus is "paid" ||
             paidAt.HasValue)
         {
+            ObservedAwaitingNextActionSessions.TryRemove(data.Id, out _);
             return new GatewayPaymentStatusResult(
                 ProviderPaymentId: data.Id,
                 Status: "paid",
@@ -259,20 +320,28 @@ public sealed class PayMongoClient : IPaymentGateway
                 FailureMessage: null);
         }
 
-        // Priority 2: Failed payment (either in payments[] or in payment_intent.last_payment_error)
-        if (paymentStatus is "failed" || lastError is not null)
+        // Priority 2: Explicit Failed payment OR Source (src_...) that dropped from 'awaiting_next_action' back to 'awaiting_payment_method'
+        bool sourceExpiredOrFailedAfterAction =
+            ObservedAwaitingNextActionSessions.ContainsKey(data.Id) &&
+            intentStatus is "awaiting_payment_method";
+
+        if (paymentStatus is "failed" || lastError is not null || sourceExpiredOrFailedAfterAction)
         {
+            ObservedAwaitingNextActionSessions.TryRemove(data.Id, out _);
+
             string failureCode = latestPayment?.FailedCode
                 ?? lastError?.FailedCode
                 ?? lastError?.Code
                 ?? attrs.FailedCode
-                ?? "payment_failed";
+                ?? (sourceExpiredOrFailedAfterAction ? "source_expired_or_failed" : "payment_failed");
 
             string failureMessage = latestPayment?.FailedMessage
                 ?? lastError?.FailedMessage
                 ?? lastError?.Detail
                 ?? attrs.FailedMessage
-                ?? "Payment failed at gateway.";
+                ?? (sourceExpiredOrFailedAfterAction
+                    ? "The underlying payment source (src_) expired or failed authorization on PayMongo."
+                    : "Payment failed at gateway.");
 
             return new GatewayPaymentStatusResult(
                 ProviderPaymentId: data.Id,
@@ -289,6 +358,7 @@ public sealed class PayMongoClient : IPaymentGateway
 
         if (sessionStatus is "expired" || intentStatus is "cancelled" || isPastExpiredAtUnix)
         {
+            ObservedAwaitingNextActionSessions.TryRemove(data.Id, out _);
             return new GatewayPaymentStatusResult(
                 ProviderPaymentId: data.Id,
                 Status: "expired",
@@ -301,8 +371,8 @@ public sealed class PayMongoClient : IPaymentGateway
         // Priority 4: Processing / Awaiting Next Action / Active
         string activeOrProcessing = !string.IsNullOrWhiteSpace(paymentStatus)
             ? paymentStatus
-            : !string.IsNullOrWhiteSpace(intentStatus) && intentStatus is "processing"
-                ? "processing"
+            : intentStatus is "processing" or "awaiting_next_action"
+                ? intentStatus
                 : !string.IsNullOrWhiteSpace(sessionStatus)
                     ? sessionStatus
                     : "active";
@@ -325,6 +395,8 @@ public sealed class PayMongoClient : IPaymentGateway
             return Result.Failure(Error.Validation("PayMongo.MissingSessionId", "Provider payment ID is required."));
         }
 
+        ObservedAwaitingNextActionSessions.TryRemove(providerPaymentId, out _);
+
         if (IsOfflineMode || providerPaymentId.StartsWith("cs_offline_", StringComparison.OrdinalIgnoreCase))
         {
             OfflineSessions[providerPaymentId] = new GatewayPaymentStatusResult(
@@ -344,13 +416,20 @@ public sealed class PayMongoClient : IPaymentGateway
                 content: null,
                 cancellationToken);
 
+            string respBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogInformation(
+                "[PAYMONGO-EXPIRE-API] cs_id={CsId} | HTTP={StatusCode} | Success={IsSuccess}",
+                providerPaymentId,
+                (int)response.StatusCode,
+                response.IsSuccessStatusCode);
+
             return response.IsSuccessStatusCode
                 ? Result.Success()
-                : Result.Failure(Error.Validation("PayMongo.ExpireFailed", $"Could not expire session '{providerPaymentId}'."));
+                : Result.Failure(Error.Validation("PayMongo.ExpireFailed", $"Could not expire session '{providerPaymentId}': {respBody}"));
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            _logger.LogError(ex, "Error expiring PayMongo session {ProviderPaymentId}", providerPaymentId);
+            _logger.LogError(ex, "[PAYMONGO-EXPIRE-EX] Error expiring PayMongo session {ProviderPaymentId}", providerPaymentId);
             return Result.Failure(new Error("PayMongo.ExpireNetworkError", "Gateway network error while expiring session."));
         }
     }
