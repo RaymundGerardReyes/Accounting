@@ -119,10 +119,12 @@ export function Configuration({ onBack }: ConfigurationProps) {
     setLoadingAudit(true)
     try {
       const actorId = currentUser?.id || "sys_admin_01"
+      const rolesHeader = currentUser?.roles?.join(",") || "system_admin,auditor"
       const res = await fetch("/api/v1/finance/audit-events?limit=100", {
         headers: {
           "Accept": "application/json",
           "X-User-ID": actorId,
+          "X-User-Roles": rolesHeader,
         },
         cache: "no-store",
       })

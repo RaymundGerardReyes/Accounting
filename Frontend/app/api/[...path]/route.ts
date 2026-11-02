@@ -28,6 +28,7 @@ async function proxyRequest(
     "x-csrf-token",
     "idempotency-key",
     "x-user-id",
+    "x-user-roles",
     "x-act-as-user",
     "user-agent",
     "x-forwarded-for",
