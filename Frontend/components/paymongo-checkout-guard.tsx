@@ -2,6 +2,7 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -11,6 +12,7 @@ import {
   RefreshCw,
   Terminal,
   XCircle,
+  FileText,
 } from "lucide-react";
 import { usePayMongoRealtimeSync } from "@/hooks/use-paymongo-realtime-sync";
 import { Button } from "@/components/ui/button";
@@ -24,8 +26,7 @@ export interface PayMongoCheckoutGuardProps {
   initialCheckoutUrl?: string | null;
   initialProviderPaymentId?: string | null;
   onCreateNewAttempt?: () => void;
-  onPaymentSucceeded?: () => void;
-  // Backwards compatibility props
+  // Backward compatibility props (optional)
   orderId?: string;
   orderNumber?: string;
   amountMinor?: number;
@@ -42,7 +43,6 @@ export function PayMongoCheckoutGuard({
   initialCheckoutUrl,
   initialProviderPaymentId,
   onCreateNewAttempt,
-  onPaymentSucceeded,
   expiresAt,
   checkoutUrl: fallbackCheckoutUrl,
   onRetry,
@@ -73,12 +73,6 @@ export function PayMongoCheckoutGuard({
     initialProviderPaymentId,
   });
 
-  React.useEffect(() => {
-    if (status === "succeeded") {
-      onPaymentSucceeded?.();
-    }
-  }, [status, onPaymentSucceeded]);
-
   return (
     <Card className={`w-full border-2 shadow-sm ${className}`}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
@@ -93,14 +87,22 @@ export function PayMongoCheckoutGuard({
       <CardContent className="space-y-4">
         {/* 1. SUCCEEDED STATE */}
         {status === "succeeded" && (
-          <div className="flex items-start gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 text-emerald-700 dark:text-emerald-400">
-            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
-            <div className="space-y-1">
-              <p className="font-semibold">Payment Verified & Confirmed (00:00)</p>
-              <p className="text-sm">
-                PayMongo confirmed your payment. Your BIR Official Receipt is ready.
-              </p>
+          <div className="space-y-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 text-emerald-700 dark:text-emerald-400">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
+              <div className="space-y-1">
+                <p className="font-semibold">Payment Verified & Confirmed (00:00)</p>
+                <p className="text-sm">
+                  PayMongo confirmed your payment. Your BIR Official Receipt is ready.
+                </p>
+              </div>
             </div>
+            <Button asChild className="w-full bg-emerald-600 hover:bg-emerald-700 text-white">
+              <Link href={`/payment/result/${encodeURIComponent(attemptId)}`}>
+                <FileText className="mr-2 h-4 w-4" />
+                View Official Receipt
+              </Link>
+            </Button>
           </div>
         )}
 
@@ -230,7 +232,7 @@ export function PayMongoCheckoutGuard({
           <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
             <div>
               <span className="text-zinc-500">Attempt ID: </span>
-              <span className="text-zinc-100">{attemptId}</span>
+              <span className="text-zinc-100">{attemptId.slice(0, 8)}...</span>
             </div>
             <div>
               <span className="text-zinc-500">PayMongo ID: </span>

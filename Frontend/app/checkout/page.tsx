@@ -60,8 +60,8 @@ function CheckoutPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const orderId = searchParams.get("order_id") || searchParams.get("orderId") || "";
-  const urlAttemptId = searchParams.get("attempt_id") || searchParams.get("attemptId") || "";
+  const orderId = searchParams.get("order_id") || "";
+  const urlAttemptId = searchParams.get("attempt_id") || "";
 
   const [order, setOrder] = useState<OrderDetailDto | null>(null);
   const [activeAttempt, setActiveAttempt] =
@@ -71,7 +71,6 @@ function CheckoutPageContent() {
   const [isInitiating, setIsInitiating] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // 1. Restore persisted attempt from URL or sessionStorage on mount / reload
   useEffect(() => {
     if (!orderId || typeof window === "undefined") return;
 
@@ -82,23 +81,15 @@ function CheckoutPageContent() {
       try {
         const parsed = JSON.parse(rawSaved) as PaymentAttemptCreatedDto;
         if (parsed && parsed.id) {
-          console.info(
-            "[PAYMONGO-CHECKOUT] Restored active attempt from sessionStorage on reload:",
-            parsed
-          );
           setActiveAttempt(parsed);
           return;
         }
       } catch {
-        // Ignore corrupted sessionStorage entry
+        // Ignore corrupted sessionStorage
       }
     }
 
     if (urlAttemptId) {
-      console.info(
-        "[PAYMONGO-CHECKOUT] Restored active attemptId from URL query parameter:",
-        urlAttemptId
-      );
       setActiveAttempt({
         id: urlAttemptId,
         order_id: orderId,
@@ -108,7 +99,6 @@ function CheckoutPageContent() {
     }
   }, [orderId, urlAttemptId, selectedMethod]);
 
-  // 2. Load Order details from GET /api/v1/orders/{order_id}
   const fetchOrder = useCallback(async () => {
     if (!orderId) {
       setIsLoadingOrder(false);
@@ -135,7 +125,6 @@ function CheckoutPageContent() {
       const data: OrderDetailDto = await response.json();
       setOrder(data);
 
-      // If the order response includes a latest_payment_attempt_id and we don't have one yet, mount it
       if (data.latest_payment_attempt_id) {
         setActiveAttempt((prev) =>
           prev
@@ -161,7 +150,6 @@ function CheckoutPageContent() {
     fetchOrder();
   }, [fetchOrder]);
 
-  // 3. Create PayMongo Checkout Session & automatically mount <PayMongoCheckoutGuard />
   const handleInitiateCheckout = async () => {
     if (!orderId) return;
 
@@ -170,12 +158,6 @@ function CheckoutPageContent() {
 
     try {
       const idempotencyKey = `idem-${orderId}-${Date.now()}`;
-      console.info("[PAYMONGO-CHECKOUT] Creating new payment attempt...", {
-        orderId,
-        selectedMethod,
-        idempotencyKey,
-      });
-
       const response = await fetch(
         `/api/v1/orders/${encodeURIComponent(orderId)}/payment-attempts`,
         {
@@ -193,18 +175,11 @@ function CheckoutPageContent() {
 
       if (!response.ok) {
         const errText = await response.text();
-        throw new Error(
-          `Checkout creation failed (HTTP ${response.status}): ${errText}`
-        );
+        throw new Error(`Checkout creation failed: ${errText}`);
       }
 
       const created: PaymentAttemptCreatedDto = await response.json();
-      console.info(
-        "[PAYMONGO-CHECKOUT] PaymentAttempt created! Mounting <PayMongoCheckoutGuard />:",
-        created
-      );
 
-      // Persist in sessionStorage and URL so page reloads (F5) keep monitoring this exact attempt
       if (typeof window !== "undefined") {
         window.sessionStorage.setItem(
           `${STORAGE_KEY_PREFIX}${orderId}`,
@@ -216,10 +191,8 @@ function CheckoutPageContent() {
         window.history.replaceState(null, "", nextUrl);
       }
 
-      // Mount <PayMongoCheckoutGuard /> immediately
       setActiveAttempt(created);
 
-      // Open PayMongo Hosted Checkout in a new tab so this page stays alive monitoring SignalR & polling
       if (created.checkout_url) {
         window.open(created.checkout_url, "_blank", "noopener,noreferrer");
       }
@@ -289,7 +262,7 @@ function CheckoutPageContent() {
               </span>
             </div>
 
-            {/* AUTOMATICALLY MOUNTS <PayMongoCheckoutGuard /> WHEN AN ATTEMPT EXISTS */}
+            {/* MOUNTS ONCE: NO INFINITE LOOPS */}
             {activeAttempt ? (
               <PayMongoCheckoutGuard
                 attemptId={activeAttempt.id}
@@ -304,19 +277,16 @@ function CheckoutPageContent() {
                   activeAttempt.provider_payment_id ?? null
                 }
                 onCreateNewAttempt={handleResetAttempt}
-                onPaymentSucceeded={() => {
-                  fetchOrder();
-                }}
               />
             ) : (
               <div className="space-y-4">
                 <p className="text-sm font-medium">Select Payment Method</p>
                 <div className="grid grid-cols-3 gap-3">
-                  {[
+                  {([
                     { id: "qrph", label: "QR Ph", icon: QrCode },
                     { id: "gcash", label: "GCash / Maya", icon: Smartphone },
                     { id: "card", label: "Credit / Debit", icon: CreditCard },
-                  ].map((m) => {
+                  ] as const).map((m) => {
                     const Icon = m.icon;
                     const active = selectedMethod === m.id;
                     return (
