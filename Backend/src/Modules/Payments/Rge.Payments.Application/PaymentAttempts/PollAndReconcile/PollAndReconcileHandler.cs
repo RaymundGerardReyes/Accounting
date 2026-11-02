@@ -155,6 +155,15 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
                 else if (gwStatus is "failed")
                 {
                     attempt.MarkFailed(gw.FailureCode ?? "FAILED", gw.FailureMessage ?? "Payment failed", nowUtc);
+                    if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId) &&
+                        attempt.ProviderPaymentId.StartsWith("cs_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        try
+                        {
+                            await _paymentGateway.ExpireCheckoutSessionAsync(attempt.ProviderPaymentId, cancellationToken).ConfigureAwait(false);
+                        }
+                        catch { }
+                    }
                 }
 
                 await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
@@ -181,6 +190,42 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
             }
         }
 
+        if (!PaymentAttemptStateMachine.IsTerminal(attempt.Status) &&
+            attempt.ExpiresAt.HasValue &&
+            attempt.ExpiresAt.Value <= nowUtc)
+        {
+            attempt.MarkExpired(nowUtc);
+            if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId) &&
+                attempt.ProviderPaymentId.StartsWith("cs_", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    await _paymentGateway.ExpireCheckoutSessionAsync(attempt.ProviderPaymentId, cancellationToken).ConfigureAwait(false);
+                }
+                catch { }
+            }
+            await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
+
+            if (_notifier is not null)
+            {
+                await _notifier.NotifyPaymentStatusChangedAsync(
+                    attempt.Id,
+                    "expired",
+                    nowUtc,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId) &&
+                    !string.Equals(attempt.ProviderPaymentId, attempt.Id, StringComparison.OrdinalIgnoreCase))
+                {
+                    await _notifier.NotifyPaymentStatusChangedAsync(
+                        attempt.ProviderPaymentId,
+                        "expired",
+                        nowUtc,
+                        cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+
         if (order is not null && order.Status == OrderStatus.Paid && attempt.Status != PaymentAttemptStatus.Succeeded)
         {
             attempt.MarkSucceeded(order.UpdatedAt, attempt.PaymentMethod);
@@ -196,6 +241,6 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
             }
         }
 
-        return Result.Success(attempt.ToDto());
+        return Result.Success(attempt.ToDto(nowUtc));
     }
 }

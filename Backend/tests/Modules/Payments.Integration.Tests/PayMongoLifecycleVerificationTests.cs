@@ -396,5 +396,72 @@ public sealed class PayMongoLifecycleVerificationTests
         Assert.Equal("succeeded", cachedResult.Value.Status);
         Assert.Single(gateway.StatusCalls); // Still 1, not 2! Cooldown prevented redundant call
     }
+
+    // =========================================================================
+    // Scenario 7: Multi-Key Correlation & Session Invalidation on payment.failed
+    // =========================================================================
+    [Fact]
+    public async Task Scenario07_PaymentFailedWebhook_WithPayResourceId_CorrelatesViaMetadata_LocksSession_And_NotifiesSignalR()
+    {
+        var (sp, clock, gateway, notifier) = BuildTestHarness();
+        await using var _ = sp;
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var createOrder = scope.ServiceProvider.GetRequiredService<CreateOrderHandler>();
+        var initiateAttempt = scope.ServiceProvider.GetRequiredService<InitiateAttemptHandler>();
+        var receiveWebhook = scope.ServiceProvider.GetRequiredService<ReceivePayMongoWebhookHandler>();
+        var pollHandler = scope.ServiceProvider.GetRequiredService<PollAndReconcileHandler>();
+
+        var ordRes = await createOrder.HandleAsync(new CreateOrderCommand("COST-ACC-TEXT-2026", Quantity: 1));
+        var attRes = await initiateAttempt.HandleAsync(new InitiateAttemptCommand(ordRes.Value.Id, "card", "idem-fail-test"));
+        string csId = attRes.Value.ProviderPaymentId!;
+        string attemptId = attRes.Value.Id;
+
+        // Construct realistic PayMongo payment.failed webhook where resource ID is pay_..., NOT cs_...
+        long unixNow = clock.UtcNow.ToUnixTimeSeconds();
+        string rawPayload = $$"""
+            {
+              "data": {
+                "id": "evt_fail_proof_001",
+                "type": "event",
+                "attributes": {
+                  "type": "payment.failed",
+                  "data": {
+                    "id": "pay_failed_declined_999",
+                    "type": "payment",
+                    "attributes": {
+                      "status": "failed",
+                      "failed_code": "card_declined",
+                      "failed_message": "The customer card was declined due to insufficient funds.",
+                      "metadata": {
+                        "payment_attempt_id": "{{attemptId}}",
+                        "order_id": "{{ordRes.Value.Id}}",
+                        "idempotency_key": "idem-fail-test"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        string sigHeader = WebhookSigner.CreateSignatureHeader(rawPayload, WebhookSecret, unixNow);
+        var webhookRes = await receiveWebhook.HandleAsync(new ReceivePayMongoWebhookCommand(sigHeader, rawPayload, "corr-fail-1"));
+
+        Assert.True(webhookRes.IsSuccess);
+        Assert.Equal("processed", webhookRes.Value.ProcessingStatus);
+
+        // 1. Verify checkout session on PayMongo gateway was explicitly locked/expired
+        Assert.Contains(csId, gateway.ExpiredSessionCalls);
+
+        // 2. Verify SignalR notification was published for attemptId with status "failed"
+        Assert.Contains(notifier.PublishedEvents, e => e.AttemptId == attemptId && e.Status == "failed");
+
+        // 3. Verify local query confirms attempt is Failed and CheckoutUrl is locked (null)
+        var polled = await pollHandler.HandleAsync(new PollAndReconcileQuery(attemptId, AutoReconcile: false));
+        Assert.True(polled.IsSuccess);
+        Assert.Equal("failed", polled.Value.Status);
+        Assert.Null(polled.Value.CheckoutUrl);
+    }
 }
 

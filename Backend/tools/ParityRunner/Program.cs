@@ -561,6 +561,9 @@ Assert("PayMongoLifecycleVerificationTests.Scenario05_DuplicatePaidWebhook_Proce
 await paymentsTests.Scenario06_PollAndReconcile_EnforcesCooldown_And_NotifiesSignalR().ConfigureAwait(false);
 Assert("PayMongoLifecycleVerificationTests.Scenario06_PollAndReconcile_EnforcesCooldown_And_NotifiesSignalR", true);
 
+await paymentsTests.Scenario07_PaymentFailedWebhook_WithPayResourceId_CorrelatesViaMetadata_LocksSession_And_NotifiesSignalR().ConfigureAwait(false);
+Assert("PayMongoLifecycleVerificationTests.Scenario07_PaymentFailedWebhook_WithPayResourceId_CorrelatesViaMetadata_LocksSession_And_NotifiesSignalR", true);
+
 Console.WriteLine("\n==============================================================");
 
 Console.WriteLine($" RESULTS: {passed} PASSED, {failed} FAILED");

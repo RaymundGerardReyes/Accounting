@@ -16,6 +16,10 @@ public sealed class GetPaymentEndpoint : IEndpointModule
         app.MapGet("/api/v1/payments/{payment_id}", HandleAsync)
            .WithName("GetPaymentStatus")
            .WithTags("Payments.Attempts");
+
+        app.MapPost("/api/v1/payments/{payment_id}/poll", HandleAsync)
+           .WithName("PollPaymentStatus")
+           .WithTags("Payments.Attempts");
     }
 
     private static async Task<IResult> HandleAsync(

@@ -21,7 +21,8 @@ public sealed record PaymentAttemptDto(
     DateTimeOffset? ExpiresAt,
     DateTimeOffset? PaidAt,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    DateTimeOffset? ServerTimeUtc = null);
 
 public sealed record OrderDto(
     string Id,
@@ -52,9 +53,15 @@ public sealed record WebhookEventDto(
 
 public static class PaymentMappings
 {
-    public static PaymentAttemptDto ToDto(this PaymentAttempt attempt)
+    public static PaymentAttemptDto ToDto(this PaymentAttempt attempt, DateTimeOffset? nowUtc = null)
     {
         ArgumentNullException.ThrowIfNull(attempt);
+
+        DateTimeOffset currentUtc = nowUtc ?? DateTimeOffset.UtcNow;
+        bool isTerminal = PaymentAttemptStateMachine.IsTerminal(attempt.Status);
+        bool isExpired = attempt.ExpiresAt.HasValue && attempt.ExpiresAt.Value <= currentUtc;
+        bool isPayable = !isTerminal && !isExpired &&
+            (attempt.Status == PaymentAttemptStatus.RequiresAction || attempt.Status == PaymentAttemptStatus.Pending);
 
         return new PaymentAttemptDto(
             Id: attempt.Id,
@@ -66,13 +73,14 @@ public static class PaymentMappings
             Currency: attempt.Amount.CurrencyCode,
             Status: attempt.Status.ToString().ToLowerInvariant(),
             IdempotencyKey: attempt.IdempotencyKey,
-            CheckoutUrl: attempt.CheckoutUrl,
+            CheckoutUrl: isPayable ? attempt.CheckoutUrl : null,
             FailureCode: attempt.FailureCode,
             FailureMessage: attempt.FailureMessage,
             ExpiresAt: attempt.ExpiresAt,
             PaidAt: attempt.PaidAt,
             CreatedAt: attempt.CreatedAt,
-            UpdatedAt: attempt.UpdatedAt);
+            UpdatedAt: attempt.UpdatedAt,
+            ServerTimeUtc: currentUtc);
     }
 
     public static OrderDto ToDto(
