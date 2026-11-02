@@ -1,221 +1,260 @@
-"use client"
+// File: Frontend/components/paymongo-checkout-guard.tsx
+"use client";
 
-import React from "react"
-import { useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
+import React from "react";
 import {
-  Clock,
   AlertTriangle,
   CheckCircle2,
-  XCircle,
-  RefreshCw,
+  Clock,
   ExternalLink,
-  Radio,
-  ArrowRight,
-} from "lucide-react"
-import { formatPhpFromMinor, isApprovedGatewayOrigin } from "@/lib/payment-api"
-import { usePayMongoRealtimeSync } from "@/hooks/use-paymongo-realtime-sync"
+  Lock,
+  RefreshCw,
+  Terminal,
+  XCircle,
+} from "lucide-react";
+import { usePayMongoRealtimeSync } from "@/hooks/use-paymongo-realtime-sync";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 
 export interface PayMongoCheckoutGuardProps {
-  attemptId: string
-  orderId: string
-  orderNumber?: string
-  amountMinor: number
-  initialStatus?: string
-  expiresAt?: string | null
-  checkoutUrl?: string | null
-  onRetry?: () => void
-  className?: string
+  attemptId: string;
+  initialStatus?: string;
+  initialExpiresAtUtc?: string | null;
+  initialCheckoutUrl?: string | null;
+  initialProviderPaymentId?: string | null;
+  onCreateNewAttempt?: () => void;
+  onPaymentSucceeded?: () => void;
+  // Backwards compatibility props
+  orderId?: string;
+  orderNumber?: string;
+  amountMinor?: number;
+  expiresAt?: string | null;
+  checkoutUrl?: string | null;
+  onRetry?: () => void;
+  className?: string;
 }
 
 export function PayMongoCheckoutGuard({
   attemptId,
-  orderId,
-  orderNumber,
-  amountMinor,
-  initialStatus = "pending",
+  initialStatus = "requiresaction",
+  initialExpiresAtUtc,
+  initialCheckoutUrl,
+  initialProviderPaymentId,
+  onCreateNewAttempt,
+  onPaymentSucceeded,
   expiresAt,
-  checkoutUrl,
+  checkoutUrl: fallbackCheckoutUrl,
   onRetry,
   className = "",
 }: PayMongoCheckoutGuardProps) {
-  const router = useRouter()
+  const effectiveExpiresAt = initialExpiresAtUtc ?? expiresAt ?? null;
+  const effectiveCheckoutUrl = initialCheckoutUrl ?? fallbackCheckoutUrl ?? null;
+  const handleRetry = onCreateNewAttempt ?? onRetry;
 
   const {
     status,
-    isPayable,
     isTerminal,
-    remainingSeconds,
-    formattedRemaining,
-    checkoutUrl: activeCheckoutUrl,
-    isSyncing,
+    isPayable,
+    formattedCountdown,
+    checkoutUrl,
+    providerPaymentId,
+    failureCode,
+    failureMessage,
+    isReconciling,
     isSignalRConnected,
-    reconcileNow,
+    telemetry,
+    reconcileWithGateway,
   } = usePayMongoRealtimeSync({
     attemptId,
     initialStatus,
-    expiresAt,
-    checkoutUrl,
-    autoReconcile: true,
-  })
+    initialExpiresAtUtc: effectiveExpiresAt,
+    initialCheckoutUrl: effectiveCheckoutUrl,
+    initialProviderPaymentId,
+  });
 
-  const isUrgent = remainingSeconds > 0 && remainingSeconds <= 180
-
-  const handleOpenCheckout = () => {
-    if (!activeCheckoutUrl) return
-    if (!isApprovedGatewayOrigin(activeCheckoutUrl)) {
-      console.error("Untrusted gateway URL origin:", activeCheckoutUrl)
-      return
+  React.useEffect(() => {
+    if (status === "succeeded") {
+      onPaymentSucceeded?.();
     }
-    window.location.assign(activeCheckoutUrl)
-  }
+  }, [status, onPaymentSucceeded]);
 
-  // Succeeded state
-  if (status === "succeeded" || status === "paid") {
-    return (
-      <div className={`p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 space-y-3 ${className}`}>
-        <div className="flex items-center gap-2">
-          <CheckCircle2 className="w-5 h-5 flex-shrink-0 text-emerald-600 dark:text-emerald-400" />
-          <div>
-            <h4 className="font-semibold text-sm">Payment Confirmed</h4>
-            <p className="text-xs opacity-90">Transaction has been successfully settled and verified.</p>
-          </div>
-        </div>
-        <Button
-          type="button"
-          onClick={() => router.push(`/payment/result/${attemptId}`)}
-          className="w-full bg-emerald-600 text-white hover:bg-emerald-700 text-xs font-semibold gap-1.5"
-        >
-          <span>View Official Receipt &amp; Summary</span>
-          <ArrowRight className="w-3.5 h-3.5" />
-        </Button>
-      </div>
-    )
-  }
-
-  // Expired state
-  if (status === "expired") {
-    return (
-      <div className={`p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-300 space-y-3 ${className}`}>
-        <div className="flex items-center gap-2">
-          <AlertTriangle className="w-5 h-5 flex-shrink-0 text-amber-600 dark:text-amber-400" />
-          <div>
-            <h4 className="font-semibold text-sm">Checkout Session Expired</h4>
-            <p className="text-xs opacity-90">
-              The 30-minute gateway authorization window has expired. The payment link is locked.
-            </p>
-          </div>
-        </div>
-        <Button
-          type="button"
-          onClick={onRetry || (() => router.push(`/checkout?order_id=${orderId}`))}
-          className="w-full bg-amber-600 text-white hover:bg-amber-700 text-xs font-semibold"
-        >
-          Generate New Checkout Session
-        </Button>
-      </div>
-    )
-  }
-
-  // Failed state
-  if (status === "failed" || status === "cancelled") {
-    return (
-      <div className={`p-4 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-900 dark:text-rose-300 space-y-3 ${className}`}>
-        <div className="flex items-center gap-2">
-          <XCircle className="w-5 h-5 flex-shrink-0 text-rose-600 dark:text-rose-400" />
-          <div>
-            <h4 className="font-semibold text-sm">Payment Unsuccessful</h4>
-            <p className="text-xs opacity-90">The payment attempt was declined or cancelled.</p>
-          </div>
-        </div>
-        <Button
-          type="button"
-          onClick={onRetry || (() => router.push(`/checkout?order_id=${orderId}`))}
-          className="w-full bg-rose-600 text-white hover:bg-rose-700 text-xs font-semibold"
-        >
-          Try Checkout Again
-        </Button>
-      </div>
-    )
-  }
-
-  // Active / Payable Countdown View
   return (
-    <div className={`p-4 rounded-xl border border-border bg-card shadow-sm space-y-3 ${className}`}>
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span className="flex items-center gap-1.5 font-medium">
-          <Clock className="w-4 h-4 text-accent" />
-          <span>PayMongo Session Timer</span>
-        </span>
-        <div className="flex items-center gap-2">
-          <Badge
-            variant="outline"
-            className={`text-[10px] px-2 py-0.5 flex items-center gap-1 ${
-              isSignalRConnected
-                ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400"
-                : "border-amber-500/40 text-amber-600 dark:text-amber-400"
-            }`}
-          >
-            <Radio className={`w-3 h-3 ${isSignalRConnected ? "animate-pulse" : ""}`} />
-            <span>{isSignalRConnected ? "SignalR Live" : "Polling"}</span>
-          </Badge>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => reconcileNow()}
-            disabled={isSyncing}
-            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-            title="Refresh payment status"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin text-accent" : ""}`} />
-          </Button>
+    <Card className={`w-full border-2 shadow-sm ${className}`}>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+        <CardTitle className="text-base font-semibold">
+          PayMongo Checkout Session Guard
+        </CardTitle>
+        <Badge variant={isSignalRConnected ? "default" : "secondary"}>
+          {isSignalRConnected ? "SignalR Live" : "3s Active Poll"}
+        </Badge>
+      </CardHeader>
+
+      <CardContent className="space-y-4">
+        {/* 1. SUCCEEDED STATE */}
+        {status === "succeeded" && (
+          <div className="flex items-start gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 text-emerald-700 dark:text-emerald-400">
+            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
+            <div className="space-y-1">
+              <p className="font-semibold">Payment Verified & Confirmed (00:00)</p>
+              <p className="text-sm">
+                PayMongo confirmed your payment. Your BIR Official Receipt is ready.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* 2. FAILED STATE */}
+        {status === "failed" && (
+          <div className="space-y-3 rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-destructive">
+            <div className="flex items-start gap-3">
+              <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
+              <div className="space-y-1">
+                <p className="font-semibold">
+                  Payment Attempt Failed — Countdown Stopped (00:00)
+                </p>
+                <p className="text-sm">
+                  {failureMessage ||
+                    "The payment or authorization source failed inside PayMongo. This Checkout Session has been locked and expired."}
+                </p>
+                {failureCode && (
+                  <p className="font-mono text-xs opacity-80">
+                    Gateway Error Code: {failureCode}
+                  </p>
+                )}
+              </div>
+            </div>
+            {handleRetry && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRetry}
+                className="w-full"
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Create New Checkout Session
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* 3. EXPIRED / CANCELLED STATE */}
+        {(status === "expired" || status === "cancelled") && (
+          <div className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-amber-800 dark:text-amber-300">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+              <div className="space-y-1">
+                <p className="font-semibold">
+                  Checkout Session Expired — Locked (00:00)
+                </p>
+                <p className="text-sm">
+                  This PayMongo session ({providerPaymentId || attemptId}) has expired
+                  and can no longer accept payments.
+                </p>
+              </div>
+            </div>
+            {handleRetry && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRetry}
+                className="w-full"
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Start Fresh Checkout Session
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* 4. ACTIVE COUNTDOWN STATE */}
+        {!isTerminal && (
+          <div className="space-y-4 rounded-lg border bg-muted/30 p-4 text-center">
+            <div className="flex items-center justify-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              <Clock className="h-3.5 w-3.5" />
+              <span>Authoritative Session Countdown</span>
+            </div>
+
+            <div
+              data-testid="payment-countdown-timer"
+              className="font-mono text-4xl font-bold tracking-tight tabular-nums"
+            >
+              {formattedCountdown}
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button
+                className="flex-1"
+                disabled={!isPayable}
+                onClick={() => {
+                  if (checkoutUrl && isPayable) {
+                    window.open(checkoutUrl, "_blank", "noopener,noreferrer");
+                  }
+                }}
+              >
+                {isPayable ? (
+                  <>
+                    <span>Open PayMongo Gateway</span>
+                    <ExternalLink className="ml-2 h-4 w-4" />
+                  </>
+                ) : (
+                  <>
+                    <Lock className="mr-2 h-4 w-4" />
+                    <span>Checkout Link Locked</span>
+                  </>
+                )}
+              </Button>
+
+              <Button
+                variant="secondary"
+                disabled={isReconciling}
+                onClick={() => reconcileWithGateway("manual_debug_button")}
+              >
+                <RefreshCw
+                  className={`mr-2 h-4 w-4 ${isReconciling ? "animate-spin" : ""}`}
+                />
+                Verify Now
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* 5. LIVE DIAGNOSTIC TELEMETRY PANEL */}
+        <div className="rounded-md border bg-zinc-950 p-3 font-mono text-xs text-zinc-300">
+          <div className="mb-1.5 flex items-center gap-1.5 text-zinc-400">
+            <Terminal className="h-3.5 w-3.5 text-red-400" />
+            <span className="font-semibold uppercase">
+              Live Gateway Sync Telemetry (Also in F12 Console)
+            </span>
+          </div>
+          <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+            <div>
+              <span className="text-zinc-500">Attempt ID: </span>
+              <span className="text-zinc-100">{attemptId}</span>
+            </div>
+            <div>
+              <span className="text-zinc-500">PayMongo ID: </span>
+              <span className="text-emerald-400">
+                {providerPaymentId || telemetry.providerPaymentId || "pending"}
+              </span>
+            </div>
+            <div>
+              <span className="text-zinc-500">Evaluated Status: </span>
+              <span className="font-bold text-amber-300">{status.toUpperCase()}</span>
+            </div>
+            <div>
+              <span className="text-zinc-500">Poll Count / HTTP: </span>
+              <span>
+                #{telemetry.pollCount} ({telemetry.lastPollHttpStatus ?? "---"})
+              </span>
+            </div>
+            <div className="sm:col-span-2">
+              <span className="text-zinc-500">Last Gateway Check: </span>
+              <span>{telemetry.lastPollTimeIso || "Checking..."}</span>
+            </div>
+          </div>
         </div>
-      </div>
-
-      <div className="flex items-baseline justify-between">
-        <div
-          className={`font-mono text-3xl font-extrabold tracking-tight ${
-            isUrgent ? "text-rose-500 animate-pulse" : "text-foreground"
-          }`}
-        >
-          {formattedRemaining}
-        </div>
-        <span className="text-xs text-muted-foreground">
-          {formatPhpFromMinor(amountMinor)}
-        </span>
-      </div>
-
-      {/* Progress Bar */}
-      <div className="w-full bg-muted h-1.5 rounded-full overflow-hidden">
-        <div
-          className={`h-full transition-all duration-1000 rounded-full ${
-            isUrgent ? "bg-rose-500" : "bg-accent"
-          }`}
-          style={{
-            width: `${Math.min(100, Math.max(0, (remainingSeconds / 1800) * 100))}%`,
-          }}
-        />
-      </div>
-
-      {/* Pay CTA Button */}
-      <Button
-        type="button"
-        disabled={!isPayable || !activeCheckoutUrl}
-        onClick={handleOpenCheckout}
-        className="w-full py-5 text-sm font-semibold bg-accent text-accent-foreground hover:bg-accent/90 gap-2"
-      >
-        <ExternalLink className="w-4 h-4" />
-        <span>Complete Payment on PayMongo</span>
-      </Button>
-
-      {orderNumber && (
-        <p className="text-[11px] text-center text-muted-foreground font-mono">
-          Order: {orderNumber}
-        </p>
-      )}
-    </div>
-  )
+      </CardContent>
+    </Card>
+  );
 }
-
