@@ -52,3 +52,15 @@ description: Strict architectural guardrails for E:\Accounting legacy compatibil
 
 
 
+
+
+8. **Multi-Key Correlation, Gateway Failure Locking, and Tab Return Synchronization**:
+   - **Multi-Key Webhook Correlation**: In PayMongo webhook payloads, failure events (`payment.failed`) provide a payment resource ID (`pay_...`) rather than the checkout session ID (`cs_...`). The webhook processor (`ProcessWebhookEventHandler`) must correlate attempts across 5 cascading keys:
+     1. `metadata.payment_attempt_id` (direct Guid/string lookup)
+     2. `resourceId` (`cs_...` or `pay_...`)
+     3. `checkout_session_id` extracted from nested payment attributes
+     4. `metadata.idempotency_key`
+     5. `metadata.order_id` (resolving latest attempt)
+   - **Immediate Gateway Invalidation on Decline**: When an attempt transitions to `Failed` via webhook or live reconciliation, the backend must immediately invoke `_paymentGateway.ExpireCheckoutSessionAsync(attempt.ProviderPaymentId)` if it holds a checkout session ID (`cs_...`). This locks the hosted PayMongo link (`pm.link/...`), preventing double-submits or unauthorized retries on compromised sessions.
+   - **Locked Checkout URL Nulling**: `PaymentMappings.ToDto` must evaluate payable state and return `CheckoutUrl = isPayable ? attempt.CheckoutUrl : null`. When an attempt is `succeeded`, `failed`, or `expired`, the checkout URL is securely wiped from all API responses.
+   - **Tab-Focus & Window Reload Synchronization**: Frontend checkout guards (`usePayMongoRealtimeSync` / `PayMongoCheckoutGuard`) must listen to `visibilitychange` (`document.visibilityState === "visible"`) and `focus` events to immediately query backend reconciliation when the customer switches back from the PayMongo payment tab. In addition, clock skew must be calculated via `serverClockOffsetMs = serverTime - Date.now()` to ensure visual countdown accuracy regardless of local client time discrepancies.
