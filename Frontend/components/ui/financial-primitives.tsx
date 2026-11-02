@@ -13,6 +13,8 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
+  Copy,
+  Check,
 } from "lucide-react"
 
 // ============================================================================
@@ -20,6 +22,7 @@ import {
 // ============================================================================
 
 export interface CurrencyDisplayProps extends React.HTMLAttributes<HTMLSpanElement> {
+  className?: string
   /** Pass either `amount` (major units, e.g. 1250.50) OR `amountMinor` (cents, e.g. 125050) */
   amount?: number | null
   amountMinor?: number | null
@@ -151,6 +154,7 @@ export type FinancialStatusType =
   | string
 
 export interface StatusBadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
+  className?: string
   status: FinancialStatusType
   label?: string
 }
@@ -303,4 +307,74 @@ export function PageHeader({
     </div>
   )
 }
+
+// ============================================================================
+// 4. ALIAS & COPYABLE HASH PRIMITIVE
+// ============================================================================
+
+export const StatusBadge = FinancialStatusBadge
+
+export interface CopyableHashProps extends React.HTMLAttributes<HTMLDivElement> {
+  value: string
+  label?: string
+  truncateLength?: number
+  className?: string
+}
+
+export function CopyableHash({
+  value,
+  label,
+  truncateLength = 8,
+  className,
+  ...props
+}: CopyableHashProps) {
+  const [copied, setCopied] = React.useState(false)
+
+  const handleCopy = React.useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation()
+      try {
+        await navigator.clipboard.writeText(value)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      } catch {
+        // Fallback for non-secure contexts
+      }
+    },
+    [value]
+  )
+
+  const truncated =
+    value.length > truncateLength * 2 + 3
+      ? `${value.slice(0, truncateLength)}...${value.slice(-truncateLength)}`
+      : value
+
+  return (
+    <div
+      className={cn(
+        "inline-flex items-center gap-1.5 font-mono text-xs text-muted-foreground bg-muted/50 hover:bg-muted px-2 py-0.5 rounded border border-border/60 transition-colors cursor-pointer select-none",
+        className
+      )}
+      onClick={handleCopy}
+      title={label ? `${label}: ${value} (Click to copy)` : `${value} (Click to copy)`}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          handleCopy(e as unknown as React.MouseEvent)
+        }
+      }}
+      {...props}
+    >
+      <span>{truncated}</span>
+      {copied ? (
+        <Check className="h-3 w-3 text-emerald-500 shrink-0" aria-label="Copied" />
+      ) : (
+        <Copy className="h-3 w-3 opacity-60 hover:opacity-100 shrink-0" aria-label="Copy" />
+      )}
+    </div>
+  )
+}
+
 

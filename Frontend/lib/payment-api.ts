@@ -454,7 +454,60 @@ export async function simulatePaymentAttemptWebhook(
   )
 }
 
+/**
+ * Updates order details (description, metadata, or recalculates total if pending)
+ */
+export async function updateOrder(
+  orderId: string,
+  payload: {
+    description?: string
+    amount?: number
+    currency?: string
+    metadata?: Record<string, any>
+  }
+): Promise<{ success: boolean; order_id: string; message: string }> {
+  return apiFetch<{ success: boolean; order_id: string; message: string }>(
+    `/api/v1/orders/${encodeURIComponent(orderId)}`,
+    {
+      method: "PATCH",
+      body: payload,
+    }
+  )
+}
+
+/**
+ * Authoritatively cancels a pending order
+ */
+export async function cancelOrder(
+  orderId: string,
+  reason?: string
+): Promise<{ success: boolean; order_id: string; message: string }> {
+  return apiFetch<{ success: boolean; order_id: string; message: string }>(
+    `/api/v1/orders/${encodeURIComponent(orderId)}/cancel`,
+    {
+      method: "POST",
+      body: { reason: reason || "User cancelled order" },
+    }
+  )
+}
+
+/**
+ * Authoritatively cancels or deletes an order via DELETE verb
+ */
+export async function deleteOrder(
+  orderId: string,
+  reason?: string
+): Promise<{ success: boolean; order_id: string; message: string }> {
+  return apiFetch<{ success: boolean; order_id: string; message: string }>(
+    `/api/v1/orders/${encodeURIComponent(orderId)}${reason ? `?reason=${encodeURIComponent(reason)}` : ""}`,
+    {
+      method: "DELETE",
+    }
+  )
+}
+
 function jsonStringifyWithFallback(data: any): string {
   return JSON.stringify(data)
 }
+
 
