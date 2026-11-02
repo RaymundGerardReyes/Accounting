@@ -110,15 +110,11 @@ public sealed class InitiateAttemptHandler : ICommandHandler<InitiateAttemptComm
                     meta["customer_phone"] = command.CustomerPhone.Trim();
                 }
 
-                order = Order.Create(
-                    orderNumber: order.OrderNumber,
+                order.UpdateDetails(
                     title: order.Title,
-                    category: order.Category,
-                    referenceCode: order.ReferenceCode,
-                    authoritativeAmount: order.Amount,
+                    newAmount: null,
                     metadataJson: JsonSerializer.Serialize(meta),
-                    nowUtc: nowUtc,
-                    userId: order.UserId);
+                    updatedAtUtc: nowUtc);
 
                 await _orderRepository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
             }

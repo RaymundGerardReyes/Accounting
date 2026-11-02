@@ -99,5 +99,58 @@ public sealed class Order : AggregateRoot<string>
         UpdatedAt = paidAtUtc;
         return Result.Success();
     }
+
+    public Result UpdateDetails(
+        string? title,
+        Money? newAmount,
+        string? metadataJson,
+        DateTimeOffset updatedAtUtc)
+    {
+        if (Status == "paid")
+        {
+            return Result.Failure(PaymentErrors.OrderAlreadyPaid(OrderNumber));
+        }
+
+        if (Status == "cancelled")
+        {
+            return Result.Failure(Error.Conflict("Payments.OrderCancelled", $"Order '{OrderNumber}' has been cancelled and cannot be updated."));
+        }
+
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            Title = title.Trim();
+        }
+
+        if (newAmount is not null)
+        {
+            Guard.AgainstNonPositive(newAmount.Value.AmountMinor, nameof(newAmount));
+            Amount = newAmount.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(metadataJson))
+        {
+            MetadataJson = metadataJson;
+        }
+
+        UpdatedAt = updatedAtUtc;
+        return Result.Success();
+    }
+
+    public Result Cancel(string reason, DateTimeOffset cancelledAtUtc)
+    {
+        if (Status == "paid")
+        {
+            return Result.Failure(PaymentErrors.OrderAlreadyPaid(OrderNumber));
+        }
+
+        if (Status == "cancelled")
+        {
+            return Result.Success(); // Idempotent
+        }
+
+        Status = "cancelled";
+        UpdatedAt = cancelledAtUtc;
+        return Result.Success();
+    }
 }
 

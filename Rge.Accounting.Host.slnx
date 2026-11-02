@@ -23,6 +23,11 @@
     <Project Path="Backend/src/Modules/Identity/Rge.Identity.Domain/Rge.Identity.Domain.csproj" />
     <Project Path="Backend/src/Modules/Identity/Rge.Identity.Infrastructure/Rge.Identity.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/Backend/src/Modules/Integrations/">
+    <Project Path="Backend/src/Modules/Integrations/Rge.Integrations.Application/Rge.Integrations.Application.csproj" />
+    <Project Path="Backend/src/Modules/Integrations/Rge.Integrations.Contracts/Rge.Integrations.Contracts.csproj" />
+    <Project Path="Backend/src/Modules/Integrations/Rge.Integrations.Domain/Rge.Integrations.Domain.csproj" />
+  </Folder>
   <Folder Name="/Backend/src/Modules/Payments/">
     <Project Path="Backend/src/Modules/Payments/Rge.Payments.Api/Rge.Payments.Api.csproj" />
     <Project Path="Backend/src/Modules/Payments/Rge.Payments.Application/Rge.Payments.Application.csproj" />

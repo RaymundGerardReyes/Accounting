@@ -39,3 +39,15 @@ public sealed record SimulateWebhookRequest(
     string? EventType = "checkout_session.payment.paid",
     string? FailureCode = null,
     string? FailureMessage = null);
+
+public sealed record UpdateOrderRequest(
+    string? Title = null,
+    string? Description = null,
+    long? Amount = null,
+    long? AmountMinor = null,
+    string? Currency = null,
+    System.Text.Json.JsonElement? Metadata = null);
+
+public sealed record CancelOrderRequest(
+    string? Reason = null);
+

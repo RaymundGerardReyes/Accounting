@@ -37,11 +37,6 @@ public sealed class ServerAuthoritativePricing : IPricingPolicy
         ArgumentNullException.ThrowIfNull(category);
         ArgumentNullException.ThrowIfNull(referenceCode);
 
-        if (clientSuppliedAmountMinor.HasValue && clientSuppliedAmountMinor.Value > 0)
-        {
-            return Result.Success(Money.Php(clientSuppliedAmountMinor.Value));
-        }
-
         int qty = Math.Max(1, quantity);
 
         if (string.Equals(category, OrderCategory.ProductOrder, StringComparison.OrdinalIgnoreCase))
@@ -49,6 +44,11 @@ public sealed class ServerAuthoritativePricing : IPricingPolicy
             if (KnownProductUnitCostsPesos.TryGetValue(referenceCode.Trim(), out long unitPesos))
             {
                 return Result.Success(Money.Php(unitPesos * 100 * qty));
+            }
+
+            if (clientSuppliedAmountMinor.HasValue && clientSuppliedAmountMinor.Value > 0)
+            {
+                return Result.Success(Money.Php(clientSuppliedAmountMinor.Value));
             }
 
             return Result.Success(Money.Php(100_00 * qty));
@@ -61,7 +61,17 @@ public sealed class ServerAuthoritativePricing : IPricingPolicy
                 return Result.Success(Money.Php(allocationCentavos));
             }
 
+            if (clientSuppliedAmountMinor.HasValue && clientSuppliedAmountMinor.Value > 0)
+            {
+                return Result.Success(Money.Php(clientSuppliedAmountMinor.Value));
+            }
+
             return Result.Success(Money.Php(25000_00));
+        }
+
+        if (clientSuppliedAmountMinor.HasValue && clientSuppliedAmountMinor.Value > 0)
+        {
+            return Result.Success(Money.Php(clientSuppliedAmountMinor.Value));
         }
 
         return Result.Success(Money.Php(100_00));

@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using Rge.BuildingBlocks.Application.Abstractions;
 using Rge.BuildingBlocks.SharedKernel.Money;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
@@ -49,7 +51,10 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
         if (!string.IsNullOrWhiteSpace(expectedSecret))
         {
             string cleanProvided = (command.ProvidedSecret ?? req.Secret ?? req.SecretKey ?? string.Empty).Trim().Trim('"', '\'');
-            if (!string.Equals(cleanProvided, expectedSecret, StringComparison.Ordinal))
+            byte[] expectedBytes = Encoding.UTF8.GetBytes(expectedSecret);
+            byte[] providedBytes = Encoding.UTF8.GetBytes(cleanProvided);
+            if (expectedBytes.Length != providedBytes.Length ||
+                !CryptographicOperations.FixedTimeEquals(expectedBytes, providedBytes))
             {
                 return Result.Failure<GoogleFormSubmissionResponse>(
                     Error.Unauthorized("GoogleForms.Unauthorized", "Missing or invalid X-Google-Forms-Secret header."));
@@ -70,7 +75,7 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
                 OrderNumber: existing.OrderNumber ?? $"ORD-{existing.Id[..8]}",
                 OrderTitle: existing.ItemReference,
                 AmountMinor: existing.Amount.AmountMinor,
-                AmountPhp: (existing.Amount.AmountMinor / 100.0).ToString("N2", CultureInfo.InvariantCulture),
+                AmountPhp: FormatCentavosAsPhp(existing.Amount.AmountMinor),
                 Currency: existing.Amount.CurrencyCode,
                 CheckoutUrl: existing.CheckoutUrl ?? "https://checkout.paymongo.com/simulated",
                 PaymentAttemptId: $"att_{existing.Id[..8]}",
@@ -121,7 +126,7 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
             submission.CustomerPhone,
             submission.ItemReference,
             submission.Quantity,
-            (submission.Amount.AmountMinor / 100.0).ToString("N2", CultureInfo.InvariantCulture),
+            FormatCentavosAsPhp(submission.Amount.AmountMinor),
             submission.PaymentMethod,
             "pending",
             submission.OrderId,
@@ -143,7 +148,7 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
             OrderNumber: orderNumber,
             OrderTitle: submission.ItemReference,
             AmountMinor: submission.Amount.AmountMinor,
-            AmountPhp: (submission.Amount.AmountMinor / 100.0).ToString("N2", CultureInfo.InvariantCulture),
+            AmountPhp: FormatCentavosAsPhp(submission.Amount.AmountMinor),
             Currency: submission.Amount.CurrencyCode,
             CheckoutUrl: checkoutUrl,
             PaymentAttemptId: $"att_{id[..8]}",
@@ -151,6 +156,14 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
             CustomerEmail: submission.CustomerEmail,
             CustomerName: submission.CustomerName,
             IsDuplicate: false));
+    }
+
+    private static string FormatCentavosAsPhp(long centavos)
+    {
+        long whole = Math.Abs(centavos) / 100;
+        long remainder = Math.Abs(centavos) % 100;
+        string sign = centavos < 0 ? "-" : "";
+        return $"{sign}{whole:N0}.{remainder:D2}";
     }
 }
 

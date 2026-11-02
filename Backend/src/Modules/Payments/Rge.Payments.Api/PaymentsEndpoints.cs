@@ -18,6 +18,7 @@ public sealed class PaymentsEndpoints : IEndpointModule
     private readonly IEndpointModule[] _modules =
     [
         new CreateOrderEndpoint(),
+        new ManageOrderEndpoints(),
         new GetOrderEndpoint(),
         new ListOrdersEndpoint(),
         new InitiateAttemptEndpoint(),

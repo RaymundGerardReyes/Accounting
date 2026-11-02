@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Rge.Payments.Application.Orders.CreateOrder;
 using Rge.Payments.Application.Orders.GetOrder;
 using Rge.Payments.Application.Orders.ListOrders;
+using Rge.Payments.Application.Orders.ManageOrder;
 using Rge.Payments.Application.PaymentAttempts.ExpireAttempt;
 using Rge.Payments.Application.PaymentAttempts.FailAttempt;
 using Rge.Payments.Application.PaymentAttempts.InitiateAttempt;
@@ -71,6 +72,8 @@ public static class DependencyInjection
 
         // Application Command & Query Handlers
         services.AddScoped<CreateOrderHandler>();
+        services.AddScoped<UpdateOrderHandler>();
+        services.AddScoped<CancelOrderHandler>();
         services.AddScoped<GetOrderHandler>();
         services.AddScoped<ListOrdersHandler>();
         services.AddScoped<InitiateAttemptHandler>();

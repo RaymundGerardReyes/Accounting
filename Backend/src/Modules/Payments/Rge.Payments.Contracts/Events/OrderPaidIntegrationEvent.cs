@@ -31,8 +31,55 @@ public sealed record OrderPaidIntegrationEvent(
         string paymentMethod,
         string customerName,
         string customerEmail,
-        DateTimeOffset paidAtUtc)
+        DateTimeOffset paidAtUtc,
+        string? metadataJson = null)
     {
+        string resolvedName = customerName;
+        string resolvedEmail = customerEmail;
+
+        if (!string.IsNullOrWhiteSpace(metadataJson) && (string.IsNullOrWhiteSpace(resolvedName) || string.IsNullOrWhiteSpace(resolvedEmail)))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(metadataJson);
+                var root = doc.RootElement;
+                if (string.IsNullOrWhiteSpace(resolvedName))
+                {
+                    if (root.TryGetProperty("customer_name", out var n) ||
+                        root.TryGetProperty("customerName", out n) ||
+                        root.TryGetProperty("buyer_name", out n) ||
+                        root.TryGetProperty("name", out n))
+                    {
+                        resolvedName = n.GetString() ?? string.Empty;
+                    }
+                }
+                if (string.IsNullOrWhiteSpace(resolvedEmail))
+                {
+                    if (root.TryGetProperty("customer_email", out var e) ||
+                        root.TryGetProperty("customerEmail", out e) ||
+                        root.TryGetProperty("buyer_email", out e) ||
+                        root.TryGetProperty("email", out e))
+                    {
+                        resolvedEmail = e.GetString() ?? string.Empty;
+                    }
+                }
+            }
+            catch
+            {
+                // Fallback to provided values
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(resolvedName))
+        {
+            resolvedName = "Valued Customer";
+        }
+
+        if (string.IsNullOrWhiteSpace(resolvedEmail))
+        {
+            resolvedEmail = "customer@example.com";
+        }
+
         return new OrderPaidIntegrationEvent(
             EventId: Guid.NewGuid(),
             EventType: Type,
@@ -44,8 +91,8 @@ public sealed record OrderPaidIntegrationEvent(
             AmountMinor: amountMinor,
             Currency: currency,
             PaymentMethod: paymentMethod,
-            CustomerName: customerName,
-            CustomerEmail: customerEmail);
+            CustomerName: resolvedName,
+            CustomerEmail: resolvedEmail);
     }
 }
 

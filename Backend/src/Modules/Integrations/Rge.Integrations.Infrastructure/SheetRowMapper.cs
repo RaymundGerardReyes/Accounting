@@ -18,7 +18,7 @@ public static class SheetRowMapper
             submission.CustomerPhone,
             submission.ItemReference,
             submission.Quantity,
-            (submission.Amount.AmountMinor / 100.0).ToString("N2", CultureInfo.InvariantCulture),
+            FormatCentavosAsPhp(submission.Amount.AmountMinor),
             submission.PaymentMethod,
             "pending",
             submission.OrderId,
@@ -30,6 +30,14 @@ public static class SheetRowMapper
             submission.Notes,
             syncTimeUtc.ToString("O", CultureInfo.InvariantCulture)
         ];
+    }
+
+    private static string FormatCentavosAsPhp(long centavos)
+    {
+        long whole = Math.Abs(centavos) / 100;
+        long remainder = Math.Abs(centavos) % 100;
+        string sign = centavos < 0 ? "-" : "";
+        return $"{sign}{whole:N0}.{remainder:D2}";
     }
 }
 

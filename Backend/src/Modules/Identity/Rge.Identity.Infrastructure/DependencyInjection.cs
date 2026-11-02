@@ -133,34 +133,44 @@ public sealed class IdentityModuleServices
 
 
     public static IdentityModuleServices Create(
-
         IIdentityDbConnectionFactory connectionFactory,
-
         IClock clock,
-
         byte[] csrfSigningKey,
-
         TimeSpan? actorCacheTtl = null)
-
     {
-
         ArgumentNullException.ThrowIfNull(connectionFactory);
-
         ArgumentNullException.ThrowIfNull(clock);
-
         ArgumentNullException.ThrowIfNull(csrfSigningKey);
 
+        var authenticator = new PgAuthenticator(connectionFactory);
+        var oauthStateStore = new PgOAuthStateStore(connectionFactory);
+        var roleStore = new RoleStore(connectionFactory);
+        var actorCache = new ActorCache(clock, actorCacheTtl);
+        var csrfTokenService = new CsrfTokenService(csrfSigningKey);
 
+        return new IdentityModuleServices(
+            authenticator,
+            oauthStateStore,
+            roleStore,
+            actorCache,
+            csrfTokenService,
+            clock);
+    }
+
+    public static IdentityModuleServices Create(
+        IIdentityDbConnectionFactory connectionFactory,
+        IClock clock,
+        IActorCache actorCache,
+        ICsrfTokenService csrfTokenService)
+    {
+        ArgumentNullException.ThrowIfNull(connectionFactory);
+        ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(actorCache);
+        ArgumentNullException.ThrowIfNull(csrfTokenService);
 
         var authenticator = new PgAuthenticator(connectionFactory);
-
         var oauthStateStore = new PgOAuthStateStore(connectionFactory);
-
         var roleStore = new RoleStore(connectionFactory);
-
-        var actorCache = new ActorCache(clock, actorCacheTtl);
-
-        var csrfTokenService = new CsrfTokenService(csrfSigningKey);
 
         return new IdentityModuleServices(
             authenticator,
@@ -195,12 +205,20 @@ public static class IdentityServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddScoped<IIdentityDbConnectionFactory, ConnectionScopeIdentityDbFactory>();
+        services.AddSingleton<IActorCache>(sp => new ActorCache(sp.GetRequiredService<IClock>()));
+        services.AddSingleton<ICsrfTokenService>(sp =>
+        {
+            byte[] csrfKey = "0123456789abcdef0123456789abcdef"u8.ToArray();
+            return new CsrfTokenService(csrfKey);
+        });
+
         services.AddScoped(sp =>
         {
             var factory = sp.GetRequiredService<IIdentityDbConnectionFactory>();
             var clock = sp.GetRequiredService<IClock>();
-            byte[] csrfKey = "0123456789abcdef0123456789abcdef"u8.ToArray();
-            return IdentityModuleServices.Create(factory, clock, csrfKey);
+            var actorCache = sp.GetRequiredService<IActorCache>();
+            var csrfTokenService = sp.GetRequiredService<ICsrfTokenService>();
+            return IdentityModuleServices.Create(factory, clock, actorCache, csrfTokenService);
         });
 
         services.AddScoped(sp => sp.GetRequiredService<IdentityModuleServices>().LoginHandler);
