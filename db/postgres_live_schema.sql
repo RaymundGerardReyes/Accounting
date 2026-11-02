@@ -589,43 +589,10 @@ END;
 $$;
 
 -- ============================================================================
--- SEED THE 11 FINANCE USERS, ROLES, POLICIES & LIVE COST ALLOCATION DATA
+-- DYNAMIC FINANCE IDENTITY & LIVE COST ALLOCATION DATA
 -- ============================================================================
-INSERT INTO users_finance (id, employee_code, full_name, email, department_id, cost_center_id, employee_group, status)
-VALUES
-  ('emp_field_01', 'EMP-2026-001', 'Juan Dela Cruz', 'juan.delacruz@acme.com', 'manufacturing', 'CC-001', 'field_staff', 'active'),
-  ('emp_field_02', 'EMP-2026-002', 'Maria Clara Santos', 'maria.santos@acme.com', 'logistics', 'CC-004', 'field_staff', 'active'),
-  ('sup_approver_01', 'EMP-2026-010', 'Roberto Reyes', 'roberto.reyes@acme.com', 'manufacturing', 'CC-001', 'management', 'active'),
-  ('fin_reviewer_01', 'EMP-2026-020', 'Elena Gomez', 'elena.gomez@acme.com', 'finance', 'CC-FIN', 'finance', 'active'),
-  ('fin_maker_01', 'EMP-2026-021', 'Carlos Mendoza', 'carlos.mendoza@acme.com', 'finance', 'CC-FIN', 'finance', 'active'),
-  ('fin_verifier_01', 'EMP-2026-022', 'Diana Lim', 'diana.lim@acme.com', 'finance', 'CC-FIN', 'finance', 'active'),
-  ('bank_approver_01', 'EMP-2026-023', 'Arthur Tan', 'arthur.tan@acme.com', 'finance', 'CC-FIN', 'finance', 'active'),
-  ('evidence_verifier_01', 'EMP-2026-024', 'Patricia Ong', 'patricia.ong@acme.com', 'finance', 'CC-FIN', 'finance', 'active'),
-  ('fin_controller_01', 'EMP-2026-030', 'Victoria Sy (CPA)', 'victoria.sy@acme.com', 'finance', 'CC-FIN', 'finance', 'active'),
-  ('auditor_01', 'EMP-2026-040', 'Gabriel Ramos (CIA)', 'gabriel.ramos@acme.com', 'finance', 'CC-FIN', 'finance', 'active'),
-  ('sys_admin_01', 'EMP-2026-099', 'System Administrator', 'sysadmin@acme.com', 'finance', 'CC-FIN', 'corporate', 'active')
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO role_assignments (user_id, role, department_scope, is_active)
-VALUES
-  ('emp_field_01', 'employee', 'manufacturing', 1),
-  ('emp_field_02', 'employee', 'logistics', 1),
-  ('sup_approver_01', 'supervisor', '*', 1),
-  ('fin_reviewer_01', 'finance_reviewer', '*', 1),
-  ('fin_maker_01', 'maker', '*', 1),
-  ('fin_verifier_01', 'verifier', '*', 1),
-  ('bank_approver_01', 'bank_approver', '*', 1),
-  ('evidence_verifier_01', 'evidence_verifier', '*', 1),
-  ('fin_controller_01', 'finance_controller', '*', 1),
-  ('auditor_01', 'auditor', '*', 1),
-  ('sys_admin_01', 'system_admin', '*', 1)
-ON CONFLICT (user_id, role, department_scope) DO NOTHING;
-
--- Provision bcrypt password hashes ('Acme@2026!') inside PostgreSQL using pgcrypto
-INSERT INTO auth_credentials (user_id, password_hash, oauth_provider)
-SELECT id, crypt('Acme@2026!', gen_salt('bf', 10)), 'enterprise_sso'
-FROM users_finance
-ON CONFLICT (user_id) DO NOTHING;
+-- Users, roles, and credentials are dynamically managed via the Identity Module
+-- and PostgreSQL Dynamic RBAC store rather than hardcoded static seeders.
 
 INSERT INTO cost_departments (id, name, cost_center_id, direct_cost, actual_cost, volume, machine_hours, labor_hours, weight)
 VALUES
