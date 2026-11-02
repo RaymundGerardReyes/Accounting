@@ -30,6 +30,18 @@ public sealed class PayMongoWebhookEndpoint : IEndpointModule
            .RequireRateLimiting("RateLimit.Webhook")
            .WithName("ReceivePayMongoWebhook")
            .WithTags("Payments.Webhooks");
+
+        app.MapPost("/api/payments/webhook", HandleWebhookAsync)
+           .AllowAnonymous()
+           .RequireRateLimiting("RateLimit.Webhook")
+           .WithName("ReceivePayMongoWebhookLegacyAlias")
+           .WithTags("Payments.Webhooks");
+
+        app.MapPost("/webhooks/paymongo", HandleWebhookAsync)
+           .AllowAnonymous()
+           .RequireRateLimiting("RateLimit.Webhook")
+           .WithName("ReceivePayMongoWebhookRootAlias")
+           .WithTags("Payments.Webhooks");
     }
 
     private static async Task<IResult> HandleWebhookAsync(

@@ -148,9 +148,18 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
                         await _outboxWriter.EnqueueAsync(paidEvent, cancellationToken).ConfigureAwait(false);
                     }
                 }
-                else if (gwStatus is "expired")
+                else if (gwStatus is "expired" or "cancelled")
                 {
                     attempt.MarkExpired(nowUtc);
+                    if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId) &&
+                        attempt.ProviderPaymentId.StartsWith("cs_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        try
+                        {
+                            await _paymentGateway.ExpireCheckoutSessionAsync(attempt.ProviderPaymentId, cancellationToken).ConfigureAwait(false);
+                        }
+                        catch { }
+                    }
                 }
                 else if (gwStatus is "failed")
                 {

@@ -1,3 +1,4 @@
+// File: src/Modules/Payments/Rge.Payments.Infrastructure/PayMongo/PayMongoDtos.cs
 using System.Text.Json.Serialization;
 
 namespace Rge.Payments.Infrastructure.PayMongo;
@@ -70,8 +71,18 @@ public sealed record PayMongoNestedPaymentIntent(
 
 public sealed record PayMongoNestedPaymentIntentAttributes(
     [property: JsonPropertyName("status")] string? Status,
+    [property: JsonPropertyName("payment_method_id")] string? PaymentMethodId,
+    [property: JsonPropertyName("next_action")] PayMongoNextAction? NextAction,
     [property: JsonPropertyName("last_payment_error")] PayMongoLastPaymentError? LastPaymentError,
     [property: JsonPropertyName("metadata")] IReadOnlyDictionary<string, string>? Metadata);
+
+public sealed record PayMongoNextAction(
+    [property: JsonPropertyName("type")] string? Type,
+    [property: JsonPropertyName("redirect")] PayMongoNextActionRedirect? Redirect);
+
+public sealed record PayMongoNextActionRedirect(
+    [property: JsonPropertyName("url")] string? Url,
+    [property: JsonPropertyName("return_url")] string? ReturnUrl);
 
 public sealed record PayMongoLastPaymentError(
     [property: JsonPropertyName("code")] string? Code,
@@ -91,7 +102,27 @@ public sealed record PayMongoNestedPaymentAttributes(
     [property: JsonPropertyName("metadata")] IReadOnlyDictionary<string, string>? Metadata);
 
 // =============================================================================
-// 3. Inbound Webhook Event Envelope (evt_...)
+// 3. Inbound Response DTOs: Source Resource (src_...) & PaymentIntent (pi_...)
+// =============================================================================
+
+public sealed record PayMongoSourceEnvelope(
+    [property: JsonPropertyName("data")] PayMongoSourceData? Data);
+
+public sealed record PayMongoSourceData(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("type")] string? Type,
+    [property: JsonPropertyName("attributes")] PayMongoSourceAttributes? Attributes);
+
+public sealed record PayMongoSourceAttributes(
+    [property: JsonPropertyName("status")] string? Status,
+    [property: JsonPropertyName("type")] string? SourceType,
+    [property: JsonPropertyName("amount")] long? AmountMinor);
+
+public sealed record PayMongoPaymentIntentEnvelope(
+    [property: JsonPropertyName("data")] PayMongoNestedPaymentIntent? Data);
+
+// =============================================================================
+// 4. Inbound Webhook Event Envelope (evt_...)
 // =============================================================================
 
 public sealed record PayMongoWebhookEnvelope(

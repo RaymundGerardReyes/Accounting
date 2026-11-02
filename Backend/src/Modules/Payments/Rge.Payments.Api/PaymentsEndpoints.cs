@@ -43,5 +43,7 @@ public sealed class PaymentsEndpoints : IEndpointModule
 
         // Map SignalR real-time payment hub for checkout countdown and status synchronization
         app.MapHub<PaymentHub>("/hubs/payment");
+        app.MapHub<PaymentHub>("/hubs/payments");
+        app.MapHub<PaymentHub>("/api/hubs/payments");
     }
 }
