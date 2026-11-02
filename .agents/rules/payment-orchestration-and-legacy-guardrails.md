@@ -41,5 +41,14 @@ description: Strict architectural guardrails for E:\Accounting legacy compatibil
    - **Terminal State Fast-Path**: If `PaymentAttemptStateMachine.IsTerminal(attempt.Status)` is true, remote reconciliation must be completely bypassed, returning database state in <1ms.
    - **Real-Time Push on Reconciliation**: When manual or background polling reconciliation transitions an attempt to `Succeeded` or `Expired`, the handler must notify `IPaymentStatusNotifier` to immediately synchronize all open browser sessions and unmount client countdowns.
 
+7. **PayMongo Checkout Session Status Priority Order & Active Reconciliation**:
+   - **Authoritative Priority Evaluation (`EvaluateCheckoutSessionStatus`)**: Checkout session responses from PayMongo (`cs_...`) must be parsed with full DTO fidelity (`payment_intent.last_payment_error`, nested `payments[]`, `metadata`). Status must be resolved in strict precedence order:
+     1. *Succeeded/Paid*: `paymentStatus == "paid"` OR `intentStatus == "succeeded"` OR `sessionStatus == "paid"` OR `paid_at.HasValue`.
+     2. *Failed*: `paymentStatus == "failed"` OR `paymentIntent.last_payment_error is not null`. Immediately call `ExpireCheckoutSessionAsync` to lock the session, transition attempt to `Failed`, and push SignalR notification.
+     3. *Expired*: `sessionStatus == "expired"` OR `intentStatus == "cancelled"` OR `expired_at <= now`.
+     4. *Processing/Active*: Preserve active countdown until terminal transition or expiration deadline.
+   - **Mid-Session Reconciliation (Active Polling & 15s Worker)**: `PaymentExpirationWorker` must actively reconcile all non-terminal attempts against PayMongo every 15 seconds without waiting for the full 30-minute deadline (`attempt.ExpiresAt <= nowUtc`), halting frontend countdowns immediately on mid-session failure or external expiration.
+
+
 
 
