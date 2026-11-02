@@ -53,10 +53,31 @@ public sealed record PayMongoCheckoutSessionAttributes(
     [property: JsonPropertyName("checkout_url")] string? CheckoutUrl,
     [property: JsonPropertyName("status")] string? Status,
     [property: JsonPropertyName("reference_number")] string? ReferenceNumber,
+    [property: JsonPropertyName("external_reference_number")] string? ExternalReferenceNumber,
     [property: JsonPropertyName("payment_method_used")] string? PaymentMethodUsed,
     [property: JsonPropertyName("paid_at")] long? PaidAtUnix,
     [property: JsonPropertyName("expired_at")] long? ExpiredAtUnix,
+    [property: JsonPropertyName("failed_code")] string? FailedCode,
+    [property: JsonPropertyName("failed_message")] string? FailedMessage,
+    [property: JsonPropertyName("metadata")] IReadOnlyDictionary<string, string>? Metadata,
+    [property: JsonPropertyName("payment_intent")] PayMongoNestedPaymentIntent? PaymentIntent,
     [property: JsonPropertyName("payments")] IReadOnlyList<PayMongoNestedPayment>? Payments);
+
+public sealed record PayMongoNestedPaymentIntent(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("type")] string? Type,
+    [property: JsonPropertyName("attributes")] PayMongoNestedPaymentIntentAttributes? Attributes);
+
+public sealed record PayMongoNestedPaymentIntentAttributes(
+    [property: JsonPropertyName("status")] string? Status,
+    [property: JsonPropertyName("last_payment_error")] PayMongoLastPaymentError? LastPaymentError,
+    [property: JsonPropertyName("metadata")] IReadOnlyDictionary<string, string>? Metadata);
+
+public sealed record PayMongoLastPaymentError(
+    [property: JsonPropertyName("code")] string? Code,
+    [property: JsonPropertyName("detail")] string? Detail,
+    [property: JsonPropertyName("failed_code")] string? FailedCode,
+    [property: JsonPropertyName("failed_message")] string? FailedMessage);
 
 public sealed record PayMongoNestedPayment(
     [property: JsonPropertyName("id")] string Id,
@@ -66,7 +87,8 @@ public sealed record PayMongoNestedPaymentAttributes(
     [property: JsonPropertyName("status")] string? Status,
     [property: JsonPropertyName("failed_code")] string? FailedCode,
     [property: JsonPropertyName("failed_message")] string? FailedMessage,
-    [property: JsonPropertyName("paid_at")] long? PaidAtUnix);
+    [property: JsonPropertyName("paid_at")] long? PaidAtUnix,
+    [property: JsonPropertyName("metadata")] IReadOnlyDictionary<string, string>? Metadata);
 
 // =============================================================================
 // 3. Inbound Webhook Event Envelope (evt_...)
@@ -85,4 +107,3 @@ public sealed record PayMongoWebhookEventAttributes(
     [property: JsonPropertyName("livemode")] bool LiveMode,
     [property: JsonPropertyName("created_at")] long CreatedAtUnix,
     [property: JsonPropertyName("data")] PayMongoCheckoutSessionData? ResourceData);
-

@@ -11,8 +11,9 @@ using Rge.Payments.Infrastructure.Outbox;
 namespace Rge.Payments.Infrastructure.Workers;
 
 /// <summary>
-/// Background worker that reconciles and expires overdue non-terminal payment attempts.
-/// Enforces the rule: ALWAYS verify PayMongo's authoritative session status before expiring.
+/// Background worker that continuously reconciles non-terminal payment attempts against PayMongo
+/// and enforces server-side expiration deadlines every 15 seconds.
+/// Stops the Next.js countdown immediately when a session is Paid, Failed, or Expired.
 /// </summary>
 public sealed class PaymentExpirationWorker : BackgroundService
 {
@@ -40,13 +41,13 @@ public sealed class PaymentExpirationWorker : BackgroundService
         {
             try
             {
-                await ProcessOverdueBatchOnceAsync(stoppingToken).ConfigureAwait(false);
+                await ProcessOverdueAttemptsAsync(stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 break;
             }
-#pragma warning disable CA1031 // Catch all for background worker resilience
+#pragma warning disable CA1031
             catch (Exception ex)
             {
                 _logger.LogError(ex, "PaymentExpirationWorker encountered an unhandled error.");
@@ -63,7 +64,10 @@ public sealed class PaymentExpirationWorker : BackgroundService
     /// Executes a single bounded reconciliation + expiration pass.
     /// Can be called directly by deterministic integration tests.
     /// </summary>
-    public async Task<int> ProcessOverdueBatchOnceAsync(CancellationToken cancellationToken = default)
+    public Task<int> ProcessOverdueBatchOnceAsync(CancellationToken cancellationToken = default) =>
+        ProcessOverdueAttemptsAsync(cancellationToken);
+
+    public async Task<int> ProcessOverdueAttemptsAsync(CancellationToken cancellationToken = default)
     {
         await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
         IServiceProvider sp = scope.ServiceProvider;
@@ -80,151 +84,152 @@ public sealed class PaymentExpirationWorker : BackgroundService
         IReadOnlyList<PaymentAttempt> nonTerminal =
             await attemptRepository.ListNonTerminalAsync(cancellationToken).ConfigureAwait(false);
 
-        int processedCount = 0;
+        int transitionedCount = 0;
+        int inspected = 0;
 
         foreach (PaymentAttempt attempt in nonTerminal)
         {
-            if (processedCount >= BatchSize)
+            if (inspected >= BatchSize)
             {
                 break;
             }
 
-            // Skip attempts that have no deadline or have not yet reached their deadline
-            if (attempt.ExpiresAt is null || attempt.ExpiresAt > nowUtc)
+            inspected++;
+
+            bool isDeadlineReached = attempt.ExpiresAt.HasValue && attempt.ExpiresAt.Value <= nowUtc;
+
+            // 1. Always query PayMongo's live status for non-terminal attempts with a ProviderPaymentId
+            if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId))
             {
-                continue;
-            }
+                var statusResult = await gateway
+                    .GetCheckoutSessionStatusAsync(attempt.ProviderPaymentId, cancellationToken)
+                    .ConfigureAwait(false);
 
-            processedCount++;
-
-            await ReconcileAndExpireSingleAttemptAsync(
-                attempt,
-                attemptRepository,
-                orderRepository,
-                outboxPublisher,
-                gateway,
-                notifier,
-                nowUtc,
-                cancellationToken).ConfigureAwait(false);
-        }
-
-        return processedCount;
-    }
-
-    private async Task ReconcileAndExpireSingleAttemptAsync(
-        PaymentAttempt attempt,
-        IPaymentAttemptRepository attemptRepository,
-        IOrderRepository orderRepository,
-        IOrderPaidOutboxPublisher outboxPublisher,
-        IPaymentGateway gateway,
-        IPaymentStatusNotifier? notifier,
-        DateTimeOffset nowUtc,
-        CancellationToken cancellationToken)
-    {
-        // 1. Reconcile against PayMongo's authoritative Checkout Session status first
-        if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId))
-        {
-            var statusResult = await gateway
-                .GetCheckoutSessionStatusAsync(attempt.ProviderPaymentId, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (statusResult.IsSuccess)
-            {
-                string remoteStatus = statusResult.Value.Status.Trim().ToLowerInvariant();
-
-                // Case A: Already paid on PayMongo (e.g., missed or delayed webhook) -> Preserve Paid status!
-                if (remoteStatus is "paid" or "succeeded")
+                if (statusResult.IsSuccess)
                 {
-                    DateTimeOffset paidAt = statusResult.Value.PaidAtUtc ?? nowUtc;
-                    string methodUsed = statusResult.Value.PaymentMethodUsed ?? attempt.PaymentMethod;
+                    string remoteStatus = statusResult.Value.Status.Trim().ToLowerInvariant();
 
-                    var markPaidRes = attempt.MarkSucceeded(paidAt, methodUsed);
-                    if (markPaidRes.IsSuccess)
+                    // Case A: Remote payment SUCCEEDED / PAID
+                    if (remoteStatus is "paid" or "succeeded")
                     {
-                        await attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
+                        DateTimeOffset paidAt = statusResult.Value.PaidAtUtc ?? nowUtc;
+                        string methodUsed = statusResult.Value.PaymentMethodUsed ?? attempt.PaymentMethod;
 
-                        Order? order = await orderRepository.GetByIdAsync(attempt.OrderId, cancellationToken).ConfigureAwait(false);
-                        if (order is not null && !string.Equals(order.Status, "paid", StringComparison.OrdinalIgnoreCase))
+                        if (attempt.MarkSucceeded(paidAt, methodUsed).IsSuccess)
                         {
-                            order.MarkPaid(paidAt);
-                            await orderRepository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
+                            await attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
 
-                            await outboxPublisher.PublishOrderPaidAsync(
-                                OrderPaidIntegrationEvent.Create(
+                            Order? order = await orderRepository.GetByIdAsync(attempt.OrderId, cancellationToken).ConfigureAwait(false);
+                            if (order is not null && !string.Equals(order.Status, "paid", StringComparison.OrdinalIgnoreCase))
+                            {
+                                order.MarkPaid(paidAt);
+                                await orderRepository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
+
+                                var paidEvent = OrderPaidIntegrationEvent.Create(
                                     orderId: order.Id,
                                     orderNumber: order.OrderNumber,
                                     paymentAttemptId: attempt.Id,
                                     amountMinor: attempt.Amount.AmountMinor,
                                     currency: attempt.Amount.CurrencyCode,
-                                    paymentMethod: attempt.PaymentMethod,
+                                    paymentMethod: methodUsed,
                                     customerName: "Valued Customer",
                                     customerEmail: string.Empty,
-                                    paidAtUtc: paidAt),
-                                cancellationToken).ConfigureAwait(false);
+                                    paidAtUtc: paidAt);
+
+                                await outboxPublisher.PublishOrderPaidAsync(
+                                    paidEvent,
+                                    cancellationToken).ConfigureAwait(false);
+                            }
+
+                            transitionedCount++;
+                            await NotifyFrontendAsync(notifier, attempt.Id, nameof(PaymentAttemptStatus.Succeeded), paidAt, cancellationToken)
+                                .ConfigureAwait(false);
                         }
 
-                        await SafeNotifyAsync(notifier, attempt.Id, nameof(PaymentAttemptStatus.Succeeded), paidAt, cancellationToken)
-                            .ConfigureAwait(false);
+                        continue;
                     }
 
-                    return;
-                }
-
-                // Case B: Payment is currently in-flight/processing -> Defer expiration!
-                if (remoteStatus is "processing" or "awaiting_next_action")
-                {
-                    if (_logger.IsEnabled(LogLevel.Information))
+                    // Case B: Remote payment FAILED on PayMongo (even while countdown is still at 25:58!)
+                    if (remoteStatus is "failed")
                     {
-                        _logger.LogInformation(
-                            "Deferring expiration for attempt {AttemptId} because remote status is '{RemoteStatus}'.",
-                            attempt.Id,
-                            remoteStatus);
+                        string failCode = statusResult.Value.FailureCode ?? "payment_failed";
+                        string failMsg = statusResult.Value.FailureMessage ?? "Payment failed at gateway.";
+
+                        // Also expire the Checkout Session on PayMongo so the failed session is closed
+                        _ = await gateway.ExpireCheckoutSessionAsync(attempt.ProviderPaymentId, cancellationToken).ConfigureAwait(false);
+
+                        if (attempt.MarkFailed(failCode, failMsg, nowUtc).IsSuccess)
+                        {
+                            await attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
+                            transitionedCount++;
+
+                            await NotifyFrontendAsync(notifier, attempt.Id, nameof(PaymentAttemptStatus.Failed), nowUtc, cancellationToken)
+                                .ConfigureAwait(false);
+                        }
+
+                        continue;
                     }
 
-                    return;
+                    // Case C: Remote session EXPIRED on PayMongo before local timer reached zero
+                    if (remoteStatus is "expired" or "cancelled")
+                    {
+                        if (attempt.MarkExpired(nowUtc).IsSuccess)
+                        {
+                            await attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
+                            transitionedCount++;
+
+                            await NotifyFrontendAsync(notifier, attempt.Id, nameof(PaymentAttemptStatus.Expired), nowUtc, cancellationToken)
+                                .ConfigureAwait(false);
+                        }
+
+                        continue;
+                    }
+
+                    // Case D: Payment is actively processing at the deadline -> Defer expiration
+                    if (isDeadlineReached && remoteStatus is "processing")
+                    {
+                        continue;
+                    }
                 }
             }
 
-            // 2. Session is eligible for expiration -> Call PayMongo Expire API if not already expired remotely
-            if (!statusResult.IsSuccess ||
-                !string.Equals(statusResult.Value.Status, "expired", StringComparison.OrdinalIgnoreCase))
+            // 2. If local deadline has not been reached yet and remote is still "active", keep counting down
+            if (!isDeadlineReached)
+            {
+                continue;
+            }
+
+            // 3. Local deadline reached -> Explicitly expire the Checkout Session on PayMongo
+            if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId))
             {
                 var expireResult = await gateway
                     .ExpireCheckoutSessionAsync(attempt.ProviderPaymentId, cancellationToken)
                     .ConfigureAwait(false);
 
-                if (expireResult.IsFailure)
+                if (expireResult.IsFailure && _logger.IsEnabled(LogLevel.Warning))
                 {
-                    // Do NOT blindly mark expired if PayMongo rejected the expiration request
-                    if (_logger.IsEnabled(LogLevel.Warning))
-                    {
-                        _logger.LogWarning(
-                            "PayMongo rejected expiration for session {ProviderPaymentId} (Attempt {AttemptId}): {Error}. Skipping local expiration.",
-                            attempt.ProviderPaymentId,
-                            attempt.Id,
-                            expireResult.Error.Message);
-                    }
-
-                    return;
+                    _logger.LogWarning(
+                        "Could not expire PayMongo session {ProviderPaymentId} for attempt {AttemptId}: {Error}",
+                        attempt.ProviderPaymentId,
+                        attempt.Id,
+                        expireResult.Error.Message);
                 }
+            }
+
+            if (attempt.MarkExpired(nowUtc).IsSuccess)
+            {
+                await attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
+                transitionedCount++;
+
+                await NotifyFrontendAsync(notifier, attempt.Id, nameof(PaymentAttemptStatus.Expired), nowUtc, cancellationToken)
+                    .ConfigureAwait(false);
             }
         }
 
-        // 3. Transition domain aggregate to Expired and persist
-        var transitionResult = attempt.MarkExpired(nowUtc);
-        if (transitionResult.IsFailure)
-        {
-            return;
-        }
-
-        await attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
-
-        // 4. Broadcast real-time status change via SignalR
-        await SafeNotifyAsync(notifier, attempt.Id, nameof(PaymentAttemptStatus.Expired), nowUtc, cancellationToken)
-            .ConfigureAwait(false);
+        return transitionedCount;
     }
 
-    private async Task SafeNotifyAsync(
+    private async Task NotifyFrontendAsync(
         IPaymentStatusNotifier? notifier,
         string attemptId,
         string status,

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
@@ -14,6 +15,9 @@ namespace Rge.Payments.Infrastructure.PayMongo;
 /// </summary>
 public sealed class PayMongoClient : IPaymentGateway
 {
+    private static readonly ConcurrentDictionary<string, GatewayPaymentStatusResult> OfflineSessions =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private readonly HttpClient _httpClient;
     private readonly PayMongoOptions _options;
     private readonly ILogger<PayMongoClient> _logger;
@@ -34,6 +38,10 @@ public sealed class PayMongoClient : IPaymentGateway
         ConfigureHttpClient();
     }
 
+    private bool IsOfflineMode =>
+        string.IsNullOrWhiteSpace(_options.SecretKey) ||
+        _options.SecretKey.StartsWith("sk_test_offline", StringComparison.OrdinalIgnoreCase);
+
     private void ConfigureHttpClient()
     {
         _httpClient.BaseAddress = new Uri(_options.BaseUrl);
@@ -43,7 +51,6 @@ public sealed class PayMongoClient : IPaymentGateway
 
         if (!string.IsNullOrWhiteSpace(_options.SecretKey))
         {
-            // PayMongo Basic Auth uses the secret key as the username and an empty password ("sk_...:")
             byte[] authBytes = Encoding.UTF8.GetBytes($"{_options.SecretKey}:");
             string base64Auth = Convert.ToBase64String(authBytes);
             _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", base64Auth);
@@ -56,15 +63,24 @@ public sealed class PayMongoClient : IPaymentGateway
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (string.IsNullOrWhiteSpace(_options.SecretKey) ||
-            _options.SecretKey.StartsWith("sk_test_offline", StringComparison.OrdinalIgnoreCase))
+        if (IsOfflineMode)
         {
             string syntheticId = $"cs_offline_{Guid.NewGuid():N}";
+            DateTimeOffset offlineExpiry = DateTimeOffset.UtcNow.AddMinutes(30);
+
+            OfflineSessions[syntheticId] = new GatewayPaymentStatusResult(
+                ProviderPaymentId: syntheticId,
+                Status: "active",
+                PaymentMethodUsed: request.RequestedPaymentMethod,
+                PaidAtUtc: null,
+                FailureCode: null,
+                FailureMessage: null);
+
             return Result.Success(new CheckoutSessionResult(
                 ProviderPaymentId: syntheticId,
                 CheckoutUrl: $"https://checkout.paymongo.com/{syntheticId}",
                 Status: "active",
-                ExpiresAtUtc: DateTimeOffset.UtcNow.AddHours(24)));
+                ExpiresAtUtc: offlineExpiry));
         }
 
         IReadOnlyList<string> paymentMethodTypes = MapPaymentMethodTypes(request.RequestedPaymentMethod);
@@ -124,7 +140,7 @@ public sealed class PayMongoClient : IPaymentGateway
                     new Error("PayMongo.MalformedResponse", "PayMongo response did not contain a valid checkout_url."));
             }
 
-            DateTimeOffset? expiresAt = envelope.Data.Attributes.ExpiredAtUnix.HasValue
+            DateTimeOffset expiresAt = envelope.Data.Attributes.ExpiredAtUnix.HasValue
                 ? DateTimeOffset.FromUnixTimeSeconds(envelope.Data.Attributes.ExpiredAtUnix.Value)
                 : DateTimeOffset.UtcNow.AddMinutes(30);
 
@@ -152,6 +168,28 @@ public sealed class PayMongoClient : IPaymentGateway
         string providerPaymentId,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(providerPaymentId))
+        {
+            return Result.Failure<GatewayPaymentStatusResult>(
+                Error.Validation("PayMongo.MissingSessionId", "Provider payment ID is required."));
+        }
+
+        if (IsOfflineMode || providerPaymentId.StartsWith("cs_offline_", StringComparison.OrdinalIgnoreCase))
+        {
+            if (OfflineSessions.TryGetValue(providerPaymentId, out GatewayPaymentStatusResult? offlineStatus))
+            {
+                return Result.Success(offlineStatus);
+            }
+
+            return Result.Success(new GatewayPaymentStatusResult(
+                ProviderPaymentId: providerPaymentId,
+                Status: "active",
+                PaymentMethodUsed: null,
+                PaidAtUtc: null,
+                FailureCode: null,
+                FailureMessage: null));
+        }
+
         try
         {
             using HttpResponseMessage response = await _httpClient.GetAsync(
@@ -171,24 +209,7 @@ public sealed class PayMongoClient : IPaymentGateway
                     new Error("PayMongo.EmptySession", "Empty session payload returned by gateway."));
             }
 
-            var attrs = envelope.Data.Attributes;
-            var latestPayment = attrs.Payments?.LastOrDefault()?.Attributes;
-
-            DateTimeOffset? paidAt = attrs.PaidAtUnix.HasValue
-                ? DateTimeOffset.FromUnixTimeSeconds(attrs.PaidAtUnix.Value)
-                : latestPayment?.PaidAtUnix.HasValue == true
-                    ? DateTimeOffset.FromUnixTimeSeconds(latestPayment.PaidAtUnix.Value)
-                    : null;
-
-            string effectiveStatus = latestPayment?.Status ?? attrs.Status ?? "unknown";
-
-            return Result.Success(new GatewayPaymentStatusResult(
-                ProviderPaymentId: envelope.Data.Id,
-                Status: effectiveStatus,
-                PaymentMethodUsed: attrs.PaymentMethodUsed,
-                PaidAtUtc: paidAt,
-                FailureCode: latestPayment?.FailedCode,
-                FailureMessage: latestPayment?.FailedMessage));
+            return Result.Success(EvaluateCheckoutSessionStatus(envelope.Data));
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
@@ -198,10 +219,124 @@ public sealed class PayMongoClient : IPaymentGateway
         }
     }
 
+    /// <summary>
+    /// Evaluates the true status of a PayMongo Checkout Session by inspecting:
+    /// 1) Nested payments[] array
+    /// 2) Nested payment_intent (status + last_payment_error)
+    /// 3) Top-level Checkout Session status and expired_at timestamp
+    /// </summary>
+    public static GatewayPaymentStatusResult EvaluateCheckoutSessionStatus(PayMongoCheckoutSessionData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        var attrs = data.Attributes;
+        var latestPayment = attrs.Payments?.LastOrDefault()?.Attributes;
+        var paymentIntent = attrs.PaymentIntent?.Attributes;
+        var lastError = paymentIntent?.LastPaymentError;
+
+        DateTimeOffset? paidAt = attrs.PaidAtUnix.HasValue
+            ? DateTimeOffset.FromUnixTimeSeconds(attrs.PaidAtUnix.Value)
+            : latestPayment?.PaidAtUnix.HasValue == true
+                ? DateTimeOffset.FromUnixTimeSeconds(latestPayment.PaidAtUnix.Value)
+                : null;
+
+        string sessionStatus = (attrs.Status ?? string.Empty).Trim().ToLowerInvariant();
+        string paymentStatus = (latestPayment?.Status ?? string.Empty).Trim().ToLowerInvariant();
+        string intentStatus = (paymentIntent?.Status ?? string.Empty).Trim().ToLowerInvariant();
+
+        // Priority 1: Succeeded / Paid
+        if (paymentStatus is "paid" or "succeeded" ||
+            intentStatus is "succeeded" ||
+            sessionStatus is "paid" ||
+            paidAt.HasValue)
+        {
+            return new GatewayPaymentStatusResult(
+                ProviderPaymentId: data.Id,
+                Status: "paid",
+                PaymentMethodUsed: attrs.PaymentMethodUsed,
+                PaidAtUtc: paidAt ?? DateTimeOffset.UtcNow,
+                FailureCode: null,
+                FailureMessage: null);
+        }
+
+        // Priority 2: Failed payment (either in payments[] or in payment_intent.last_payment_error)
+        if (paymentStatus is "failed" || lastError is not null)
+        {
+            string failureCode = latestPayment?.FailedCode
+                ?? lastError?.FailedCode
+                ?? lastError?.Code
+                ?? attrs.FailedCode
+                ?? "payment_failed";
+
+            string failureMessage = latestPayment?.FailedMessage
+                ?? lastError?.FailedMessage
+                ?? lastError?.Detail
+                ?? attrs.FailedMessage
+                ?? "Payment failed at gateway.";
+
+            return new GatewayPaymentStatusResult(
+                ProviderPaymentId: data.Id,
+                Status: "failed",
+                PaymentMethodUsed: attrs.PaymentMethodUsed,
+                PaidAtUtc: null,
+                FailureCode: failureCode,
+                FailureMessage: failureMessage);
+        }
+
+        // Priority 3: Expired Checkout Session or Cancelled Payment Intent
+        bool isPastExpiredAtUnix = attrs.ExpiredAtUnix.HasValue &&
+            DateTimeOffset.FromUnixTimeSeconds(attrs.ExpiredAtUnix.Value) <= DateTimeOffset.UtcNow;
+
+        if (sessionStatus is "expired" || intentStatus is "cancelled" || isPastExpiredAtUnix)
+        {
+            return new GatewayPaymentStatusResult(
+                ProviderPaymentId: data.Id,
+                Status: "expired",
+                PaymentMethodUsed: attrs.PaymentMethodUsed,
+                PaidAtUtc: null,
+                FailureCode: "session_expired",
+                FailureMessage: "PayMongo checkout session has expired.");
+        }
+
+        // Priority 4: Processing / Awaiting Next Action / Active
+        string activeOrProcessing = !string.IsNullOrWhiteSpace(paymentStatus)
+            ? paymentStatus
+            : !string.IsNullOrWhiteSpace(intentStatus) && intentStatus is "processing"
+                ? "processing"
+                : !string.IsNullOrWhiteSpace(sessionStatus)
+                    ? sessionStatus
+                    : "active";
+
+        return new GatewayPaymentStatusResult(
+            ProviderPaymentId: data.Id,
+            Status: activeOrProcessing,
+            PaymentMethodUsed: attrs.PaymentMethodUsed,
+            PaidAtUtc: null,
+            FailureCode: null,
+            FailureMessage: null);
+    }
+
     public async Task<Result> ExpireCheckoutSessionAsync(
         string providerPaymentId,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(providerPaymentId))
+        {
+            return Result.Failure(Error.Validation("PayMongo.MissingSessionId", "Provider payment ID is required."));
+        }
+
+        if (IsOfflineMode || providerPaymentId.StartsWith("cs_offline_", StringComparison.OrdinalIgnoreCase))
+        {
+            OfflineSessions[providerPaymentId] = new GatewayPaymentStatusResult(
+                ProviderPaymentId: providerPaymentId,
+                Status: "expired",
+                PaymentMethodUsed: null,
+                PaidAtUtc: null,
+                FailureCode: "session_expired",
+                FailureMessage: "Checkout session expired.");
+            return Result.Success();
+        }
+
         try
         {
             using HttpResponseMessage response = await _httpClient.PostAsync(
@@ -241,9 +376,6 @@ public sealed class PayMongoClient : IPaymentGateway
         }
     }
 
-    /// <summary>
-    /// Maps R.G.E payment_method strings to PayMongo v1 Checkout Session payment_method_types.
-    /// </summary>
     private static IReadOnlyList<string> MapPaymentMethodTypes(string requestedMethod) =>
         requestedMethod.Trim().ToUpperInvariant() switch
         {
@@ -257,4 +389,3 @@ public sealed class PayMongoClient : IPaymentGateway
             "HOSTED_CHECKOUT" or _ => ["qrph", "card", "gcash", "paymaya", "dob", "dob_ubp"]
         };
 }
-

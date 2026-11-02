@@ -527,6 +527,13 @@ Assert("GoldenMasterParityTests.EndToEnd_Order_PayMongoWebhook_Outbox_BirOfficia
 await parityTests.Cryptographic_Audit_HashChain_Detects_Zero_Tampering().ConfigureAwait(false);
 Assert("GoldenMasterParityTests.Cryptographic_Audit_HashChain_Detects_Zero_Tampering", true);
 
+var realGatewayTests = new Rge.Contract.Parity.Tests.PayMongoRealGatewayProofTests();
+realGatewayTests.RealPayMongoJson_WhenPaymentFailsOnActiveSession_EvaluatesAsFailed_NotActive();
+Assert("PayMongoRealGatewayProofTests.RealPayMongoJson_WhenPaymentFailsOnActiveSession_EvaluatesAsFailed_NotActive", true);
+
+realGatewayTests.RealPayMongoJson_WhenSessionIsExpiredWithPendingNestedPayment_EvaluatesAsExpired();
+Assert("PayMongoRealGatewayProofTests.RealPayMongoJson_WhenSessionIsExpiredWithPendingNestedPayment_EvaluatesAsExpired", true);
+
 // 19. Execute Performance Latency Budget Gate Test Suite (tests/Performance.Tests)
 Console.WriteLine("\n--- Executing Performance Latency Budget Gate Suite (Rge.Performance.Tests) ---");
 var perfTests = new Rge.Performance.Tests.LatencyBudgetGateTests();
