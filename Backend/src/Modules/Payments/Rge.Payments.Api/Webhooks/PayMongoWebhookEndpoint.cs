@@ -25,6 +25,7 @@ public sealed class PayMongoWebhookEndpoint : IEndpointModule
     {
         ArgumentNullException.ThrowIfNull(app);
 
+        // 1. Receive Webhooks (Canonical & Aliases)
         app.MapPost("/api/v1/webhooks/paymongo", HandleWebhookAsync)
            .AllowAnonymous()
            .RequireRateLimiting("RateLimit.Webhook")
@@ -42,6 +43,151 @@ public sealed class PayMongoWebhookEndpoint : IEndpointModule
            .RequireRateLimiting("RateLimit.Webhook")
            .WithName("ReceivePayMongoWebhookRootAlias")
            .WithTags("Payments.Webhooks");
+
+        // 2. Auto-Setup Webhooks (Admin Utility)
+        app.MapPost("/api/v1/admin/webhooks/paymongo/setup", SetupPayMongoWebhooksAsync)
+           .AllowAnonymous()
+           .DisableAntiforgery()
+           .WithName("SetupPayMongoWebhooks")
+           .WithTags("Payments.Admin");
+    }
+
+    private static async Task<IResult> SetupPayMongoWebhooksAsync(
+        HttpContext httpContext,
+        Microsoft.Extensions.Configuration.IConfiguration config,
+        IHttpClientFactory clientFactory,
+        ILogger<PayMongoWebhookEndpoint> logger,
+        CancellationToken cancellationToken)
+    {
+        string? secretKey = config["Secrets:PayMongoSecretKey"] ?? config["PAYMONGO_SECRET_KEY"];
+        if (string.IsNullOrWhiteSpace(secretKey))
+        {
+            return Results.BadRequest(new { error = "Missing PayMongoSecretKey in configuration." });
+        }
+
+        // Automatically determine live Heroku/custom domain from the incoming request headers
+        string scheme = httpContext.Request.Headers["X-Forwarded-Proto"].FirstOrDefault() ?? httpContext.Request.Scheme;
+        string host = httpContext.Request.Headers["X-Forwarded-Host"].FirstOrDefault() ?? httpContext.Request.Host.Value ?? "localhost";
+        string targetWebhookUrl = $"{scheme}://{host}/api/v1/webhooks/paymongo";
+
+        using var client = clientFactory.CreateClient();
+        client.BaseAddress = new Uri("https://api.paymongo.com/v1/");
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
+            "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{secretKey}:")));
+        client.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+
+        var report = new List<string>();
+
+        try
+        {
+            // Step 1: List all existing webhooks
+            using var listResponse = await client.GetAsync("webhooks", cancellationToken).ConfigureAwait(false);
+            listResponse.EnsureSuccessStatusCode();
+            string listJson = await listResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+            using var doc = System.Text.Json.JsonDocument.Parse(listJson);
+            bool webhookExists = false;
+
+            if (doc.RootElement.TryGetProperty("data", out var dataEl) && dataEl.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var hook in dataEl.EnumerateArray())
+                {
+                    string id = hook.TryGetProperty("id", out var idProp) ? (idProp.GetString() ?? string.Empty) : string.Empty;
+                    if (!hook.TryGetProperty("attributes", out var attrs))
+                    {
+                        continue;
+                    }
+
+                    string url = attrs.TryGetProperty("url", out var urlProp) ? (urlProp.GetString() ?? string.Empty) : string.Empty;
+                    string status = attrs.TryGetProperty("status", out var statusProp) ? (statusProp.GetString() ?? string.Empty) : string.Empty;
+
+                    if (!string.IsNullOrWhiteSpace(url) && url.Contains(host, StringComparison.OrdinalIgnoreCase))
+                    {
+                        webhookExists = true;
+
+                        // Step 2: Re-enable the webhook if it was disabled by PayMongo due to previous retries exhausted
+                        if (string.Equals(status, "disabled", StringComparison.OrdinalIgnoreCase))
+                        {
+                            using var enableResp = await client.PostAsync($"webhooks/{id}/enable", null, cancellationToken).ConfigureAwait(false);
+                            if (enableResp.IsSuccessStatusCode)
+                            {
+                                report.Add($"Successfully re-enabled webhook: {id}");
+                            }
+                            else
+                            {
+                                report.Add($"Failed to re-enable webhook: {id}. Please check PayMongo dashboard.");
+                            }
+                        }
+                        else
+                        {
+                            report.Add($"Webhook {id} is already active and pointing to {url}.");
+                        }
+                    }
+                }
+            }
+
+            // Step 3: Create a new webhook if none exists for this domain
+            if (!webhookExists)
+            {
+                var payload = new
+                {
+                    data = new
+                    {
+                        attributes = new
+                        {
+                            events = new[]
+                            {
+                                "checkout_session.payment.paid",
+                                "payment.paid",
+                                "payment.failed",
+                                "qr_code.expired"
+                            },
+                            url = targetWebhookUrl
+                        }
+                    }
+                };
+
+                using var content = new StringContent(
+                    System.Text.Json.JsonSerializer.Serialize(payload),
+                    Encoding.UTF8,
+                    "application/json");
+
+                using var createResp = await client.PostAsync("webhooks", content, cancellationToken).ConfigureAwait(false);
+                string createJson = await createResp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+                if (createResp.IsSuccessStatusCode)
+                {
+                    report.Add($"Created NEW webhook pointing to {targetWebhookUrl}.");
+                    using var createDoc = System.Text.Json.JsonDocument.Parse(createJson);
+                    string? newSecret = null;
+                    if (createDoc.RootElement.TryGetProperty("data", out var newHookData) &&
+                        newHookData.TryGetProperty("attributes", out var newHookAttrs) &&
+                        newHookAttrs.TryGetProperty("secret_key", out var secProp))
+                    {
+                        newSecret = secProp.GetString();
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(newSecret))
+                    {
+                        report.Add($"CRITICAL: Update your Heroku configuration. Set PAYMONGO_WEBHOOK_SECRET to: {newSecret}");
+                    }
+                }
+                else
+                {
+                    report.Add($"Failed to create webhook: {createJson}");
+                }
+            }
+
+            logger.LogInformation("[PAYMONGO-WEBHOOK-SETUP] Completed setup for {TargetUrl} with {ActionsCount} actions",
+                targetWebhookUrl, report.Count);
+
+            return Results.Ok(new { success = true, target_url = targetWebhookUrl, actions = report });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[PAYMONGO-WEBHOOK-SETUP] Failed to auto-setup PayMongo webhooks.");
+            return Results.Problem("An error occurred while contacting PayMongo to setup webhooks.");
+        }
     }
 
     private static async Task<IResult> HandleWebhookAsync(
