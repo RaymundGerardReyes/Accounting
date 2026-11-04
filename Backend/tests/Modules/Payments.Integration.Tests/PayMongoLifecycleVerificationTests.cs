@@ -528,5 +528,64 @@ public sealed class PayMongoLifecycleVerificationTests
         Assert.Equal("expired", polled.Value.Status);
         Assert.Null(polled.Value.CheckoutUrl);
     }
+
+    // =========================================================================
+    // Scenario 9: Succeeded Payment Without Prior Receipt -> Just-In-Time Synthesis
+    // =========================================================================
+    [Fact]
+    public async Task Scenario09_PaidPaymentWithoutPriorReceipt_SynthesizesReceiptJustInTime()
+    {
+        var (sp, clock, _, _) = BuildTestHarness();
+        await using var _ = sp;
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var createOrder = scope.ServiceProvider.GetRequiredService<CreateOrderHandler>();
+        var attemptRepo = scope.ServiceProvider.GetRequiredService<IPaymentAttemptRepository>();
+        var orderRepo = scope.ServiceProvider.GetRequiredService<IOrderRepository>();
+        var receiptRepo = scope.ServiceProvider.GetRequiredService<Rge.Receipts.Application.Ports.IReceiptRepository>();
+        var getReceiptByPayment = scope.ServiceProvider.GetRequiredService<Rge.Receipts.Application.GetReceiptByPayment.GetReceiptByPaymentHandler>();
+        var getReceiptByOrder = scope.ServiceProvider.GetRequiredService<Rge.Receipts.Application.GetReceiptByOrder.GetReceiptByOrderHandler>();
+        var renderPdf = scope.ServiceProvider.GetRequiredService<Rge.Receipts.Application.RenderReceiptPdf.RenderReceiptPdfHandler>();
+
+        // 1. Create Order & mark payment attempt succeeded without running OutboxWorker
+        var ordRes = await createOrder.HandleAsync(new CreateOrderCommand("ADV-TAX-TEXT-2026", Quantity: 1));
+        var attempt = PaymentAttempt.CreatePending(
+            ordRes.Value.Id, "card", Rge.BuildingBlocks.SharedKernel.Money.Money.Php(ordRes.Value.AmountMinor), "idem-jit-receipt-1", clock.UtcNow);
+        attempt.AttachCheckoutSession("cs_paid_jit_test", "https://checkout.paymongo.com/cs_paid_jit_test", clock.UtcNow.AddMinutes(30), clock.UtcNow);
+        attempt.MarkSucceeded(clock.UtcNow, "card");
+        await attemptRepo.SaveAsync(attempt);
+
+        Order? order = await orderRepo.GetByIdAsync(ordRes.Value.Id);
+        order!.MarkPaid(clock.UtcNow);
+        await orderRepo.SaveAsync(order);
+
+        // 2. Verify NO receipt exists in repository before query
+        var existingBefore = await receiptRepo.GetByPaymentAttemptIdAsync(attempt.Id);
+        Assert.Null(existingBefore);
+
+        // 3. Query GET /receipt by payment attempt -> Triggers Just-In-Time synthesis!
+        var receiptResult = await getReceiptByPayment.HandleAsync(new Rge.Receipts.Application.GetReceiptByPayment.GetReceiptByPaymentQuery(attempt.Id));
+        Assert.True(receiptResult.IsSuccess);
+        Assert.NotNull(receiptResult.Value);
+        Assert.StartsWith("OR-", receiptResult.Value.OfficialReceiptNumber, StringComparison.Ordinal);
+        Assert.Equal(ordRes.Value.AmountMinor, receiptResult.Value.GrossAmountMinor);
+        Assert.False(string.IsNullOrWhiteSpace(receiptResult.Value.AuditDigest));
+
+        // 4. Verify receipt is now persisted in repository
+        var existingAfter = await receiptRepo.GetByPaymentAttemptIdAsync(attempt.Id);
+        Assert.NotNull(existingAfter);
+        Assert.Equal(receiptResult.Value.OfficialReceiptNumber, existingAfter.ReceiptNumber.Value);
+
+        // 5. Query GET /receipt by order ID -> Returns identical receipt
+        var orderReceiptResult = await getReceiptByOrder.HandleAsync(new Rge.Receipts.Application.GetReceiptByOrder.GetReceiptByOrderQuery(ordRes.Value.Id));
+        Assert.True(orderReceiptResult.IsSuccess);
+        Assert.Equal(receiptResult.Value.OfficialReceiptNumber, orderReceiptResult.Value.OfficialReceiptNumber);
+
+        // 6. Direct PDF rendering for payment ID succeeds
+        var pdfResult = await renderPdf.HandleAsync(new Rge.Receipts.Application.RenderReceiptPdf.RenderReceiptPdfQuery(PaymentId: attempt.Id));
+        Assert.True(pdfResult.IsSuccess);
+        Assert.True(pdfResult.Value.PdfBytes.Length > 0);
+        Assert.Equal("application/pdf", pdfResult.Value.ContentType);
+    }
 }
 

@@ -67,11 +67,18 @@ public sealed class ReceiptLookupAdapter : IReceiptLookup
 /// </summary>
 public sealed class OrderPaidReceiptOutboxHandler : IOutboxEventHandler
 {
-    private readonly IssueReceiptHandler _issueReceiptHandler;
-    private readonly RenderReceiptPdfHandler _renderPdfHandler;
-    private readonly ResendReceiptEmailHandler _emailHandler;
+    private readonly IServiceScopeFactory? _scopeFactory;
+    private readonly IssueReceiptHandler? _issueReceiptHandler;
+    private readonly RenderReceiptPdfHandler? _renderPdfHandler;
+    private readonly ResendReceiptEmailHandler? _emailHandler;
 
     public string EventType => "order.paid";
+
+    public OrderPaidReceiptOutboxHandler(IServiceScopeFactory scopeFactory)
+    {
+        ArgumentNullException.ThrowIfNull(scopeFactory);
+        _scopeFactory = scopeFactory;
+    }
 
     public OrderPaidReceiptOutboxHandler(
         IssueReceiptHandler issueReceiptHandler,
@@ -172,27 +179,53 @@ public sealed class OrderPaidReceiptOutboxHandler : IOutboxEventHandler
             Description: description,
             PaymentMethod: paymentMethod);
 
-        var issueResult = await _issueReceiptHandler
-            .HandleAsync(issueCommand, cancellationToken)
-            .ConfigureAwait(false);
+        IssueReceiptHandler issueHandler;
+        RenderReceiptPdfHandler renderHandler;
+        ResendReceiptEmailHandler emailHandler;
+        IServiceScope? scope = null;
 
-        if (issueResult.IsFailure)
+        if (_scopeFactory is not null)
         {
-            throw new InvalidOperationException(
-                $"Failed to issue BIR Official Receipt for Order '{orderId}': {issueResult.Error.Code} - {issueResult.Error.Message}");
+            scope = _scopeFactory.CreateScope();
+            issueHandler = scope.ServiceProvider.GetRequiredService<IssueReceiptHandler>();
+            renderHandler = scope.ServiceProvider.GetRequiredService<RenderReceiptPdfHandler>();
+            emailHandler = scope.ServiceProvider.GetRequiredService<ResendReceiptEmailHandler>();
+        }
+        else
+        {
+            issueHandler = _issueReceiptHandler!;
+            renderHandler = _renderPdfHandler!;
+            emailHandler = _emailHandler!;
         }
 
-        // Pre-warm the PDF into the in-memory cache off the request path so downloads stream in < 2 ms
-        await _renderPdfHandler
-            .HandleAsync(new RenderReceiptPdfQuery(PaymentId: paymentAttemptId), cancellationToken)
-            .ConfigureAwait(false);
-
-        // If a customer email is present, dispatch the receipt email asynchronously
-        if (!string.IsNullOrWhiteSpace(customerEmail))
+        try
         {
-            await _emailHandler
-                .HandleAsync(new ResendReceiptEmailCommand(paymentAttemptId, customerEmail), cancellationToken)
+            var issueResult = await issueHandler
+                .HandleAsync(issueCommand, cancellationToken)
                 .ConfigureAwait(false);
+
+            if (issueResult.IsFailure)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to issue BIR Official Receipt for Order '{orderId}': {issueResult.Error.Code} - {issueResult.Error.Message}");
+            }
+
+            // Pre-warm the PDF into the in-memory cache off the request path so downloads stream in < 2 ms
+            await renderHandler
+                .HandleAsync(new RenderReceiptPdfQuery(PaymentId: paymentAttemptId), cancellationToken)
+                .ConfigureAwait(false);
+
+            // If a customer email is present, dispatch the receipt email asynchronously
+            if (!string.IsNullOrWhiteSpace(customerEmail))
+            {
+                await emailHandler
+                    .HandleAsync(new ResendReceiptEmailCommand(paymentAttemptId, customerEmail), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            scope?.Dispose();
         }
     }
 

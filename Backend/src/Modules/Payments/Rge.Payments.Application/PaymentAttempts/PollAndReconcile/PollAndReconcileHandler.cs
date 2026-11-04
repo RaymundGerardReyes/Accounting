@@ -151,28 +151,12 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
                 else if (gwStatus is "expired" or "cancelled")
                 {
                     attempt.MarkExpired(nowUtc);
-                    if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId) &&
-                        attempt.ProviderPaymentId.StartsWith("cs_", StringComparison.OrdinalIgnoreCase))
-                    {
-                        try
-                        {
-                            await _paymentGateway.ExpireCheckoutSessionAsync(attempt.ProviderPaymentId, cancellationToken).ConfigureAwait(false);
-                        }
-                        catch { }
-                    }
+                    TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
                 }
                 else if (gwStatus is "failed")
                 {
                     attempt.MarkFailed(gw.FailureCode ?? "FAILED", gw.FailureMessage ?? "Payment failed", nowUtc);
-                    if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId) &&
-                        attempt.ProviderPaymentId.StartsWith("cs_", StringComparison.OrdinalIgnoreCase))
-                    {
-                        try
-                        {
-                            await _paymentGateway.ExpireCheckoutSessionAsync(attempt.ProviderPaymentId, cancellationToken).ConfigureAwait(false);
-                        }
-                        catch { }
-                    }
+                    TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
                 }
 
                 await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
@@ -204,15 +188,7 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
             attempt.ExpiresAt.Value <= nowUtc)
         {
             attempt.MarkExpired(nowUtc);
-            if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId) &&
-                attempt.ProviderPaymentId.StartsWith("cs_", StringComparison.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    await _paymentGateway.ExpireCheckoutSessionAsync(attempt.ProviderPaymentId, cancellationToken).ConfigureAwait(false);
-                }
-                catch { }
-            }
+            TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
             await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
 
             if (_notifier is not null)
@@ -251,5 +227,28 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
         }
 
         return Result.Success(attempt.ToDto(nowUtc));
+    }
+
+    private void TriggerBackgroundSessionExpire(string? providerPaymentId)
+    {
+        if (string.IsNullOrWhiteSpace(providerPaymentId) ||
+            !providerPaymentId.StartsWith("cs_", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        string sessionId = providerPaymentId;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await _paymentGateway.ExpireCheckoutSessionAsync(sessionId, timeoutCts.Token).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Background housekeeping failure ignored to avoid impacting client response latency
+            }
+        });
     }
 }
