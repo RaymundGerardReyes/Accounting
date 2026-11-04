@@ -46,13 +46,25 @@ export function usePaymentSignalR({
 
     let isMounted = true
 
-    const hubUrl = "/api/hubs/payments"
+    const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL
+    const isDirectBackend = Boolean(backendBase && backendBase.startsWith("http"))
+    const hubUrl = isDirectBackend
+      ? `${backendBase!.replace(/\/$/, "")}/api/hubs/payments`
+      : "/api/hubs/payments"
+
+    // When going through the Next.js API route proxy (/api/hubs/payments), WebSockets cannot upgrade HTTP 101.
+    // Use ServerSentEvents and LongPolling for proxied connections to prevent 503 handshake aborts.
+    // When connecting directly to the backend URL, WebSockets is fully supported.
+    const transport = isDirectBackend
+      ? signalR.HttpTransportType.WebSockets |
+        signalR.HttpTransportType.ServerSentEvents |
+        signalR.HttpTransportType.LongPolling
+      : signalR.HttpTransportType.ServerSentEvents |
+        signalR.HttpTransportType.LongPolling
+
     const connection = new signalR.HubConnectionBuilder()
       .withUrl(hubUrl, {
-        transport:
-          signalR.HttpTransportType.WebSockets |
-          signalR.HttpTransportType.ServerSentEvents |
-          signalR.HttpTransportType.LongPolling,
+        transport,
       })
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
       .configureLogging(signalR.LogLevel.Warning)
@@ -84,6 +96,8 @@ export function usePaymentSignalR({
         if (!isMounted) return
         setIsConnected(false)
         setConnectionError(err?.message || "Failed to connect to real-time payment hub")
+        // Silently activate polling fallback immediately so UI keeps updating seamlessly
+        pollCallbackRef.current?.()
       }
     }
 
