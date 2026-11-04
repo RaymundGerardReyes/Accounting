@@ -63,6 +63,8 @@ export default function PaymentResultPage({ params }: PageProps) {
   const [isReconciling, setIsReconciling] = useState(false)
   const [pollCount, setPollCount] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [receiptRetries, setReceiptRetries] = useState(0)
+  const [receiptLoadingError, setReceiptLoadingError] = useState<string | null>(null)
 
   // Resend email state
   const [emailInput, setEmailInput] = useState("")
@@ -199,6 +201,55 @@ export default function PaymentResultPage({ params }: PageProps) {
       clearInterval(timer)
     }
   }, [paymentId, payment?.status, isSignalRConnected, pollCount])
+
+  // Dedicated receipt polling loop when payment has succeeded but receipt is not yet loaded
+  useEffect(() => {
+    if (payment?.status !== "succeeded" || receipt) {
+      return
+    }
+
+    let active = true
+    let attempt = 0
+    const maxAttempts = 12
+
+    const fetchReceiptLoop = async () => {
+      while (active && attempt < maxAttempts) {
+        attempt++
+        setReceiptRetries(attempt)
+        try {
+          const rData = await fetchPaymentReceipt(paymentId)
+          if (!active) return
+          setReceipt(rData)
+          setReceiptLoadingError(null)
+          return
+        } catch (err: any) {
+          if (!active) return
+          if (attempt >= maxAttempts) {
+            setReceiptLoadingError(err.message || "Official Receipt is still processing. Click Retry to refresh.")
+            return
+          }
+          await new Promise((resolve) => setTimeout(resolve, Math.min(2000 + attempt * 250, 4000)))
+        }
+      }
+    }
+
+    fetchReceiptLoop()
+
+    return () => {
+      active = false
+    }
+  }, [paymentId, payment?.status, receipt])
+
+  const handleRetryReceipt = async () => {
+    setReceiptLoadingError(null)
+    setReceiptRetries(0)
+    try {
+      const rData = await fetchPaymentReceipt(paymentId)
+      setReceipt(rData)
+    } catch (err: any) {
+      setReceiptLoadingError(err.message || "Unable to retrieve receipt. Please check back shortly.")
+    }
+  }
 
   const handleManualReconcile = async () => {
     setIsReconciling(true)
@@ -422,9 +473,33 @@ export default function PaymentResultPage({ params }: PageProps) {
       {status === "succeeded" && !receipt && (
         <Card className="border-border bg-card shadow-sm text-center p-8">
           <div className="flex flex-col items-center gap-3">
-            <Loader2 className="w-8 h-8 animate-spin text-accent" />
-            <p className="text-sm font-semibold text-foreground">Generating Official Receipt & Treasury Acknowledgement Report...</p>
-            <p className="text-xs text-muted-foreground font-mono">Synthesizing ISO-32000-1 vector PDF and recording cryptographic audit digest.</p>
+            {!receiptLoadingError ? (
+              <>
+                <Loader2 className="w-8 h-8 animate-spin text-accent" />
+                <p className="text-sm font-semibold text-foreground">Generating Official Receipt & Treasury Acknowledgement Report...</p>
+                <p className="text-xs text-muted-foreground font-mono">
+                  Synthesizing ISO-32000-1 vector PDF and recording cryptographic audit digest.
+                  {receiptRetries > 0 && ` (Attempt ${receiptRetries}/12)`}
+                </p>
+              </>
+            ) : (
+              <>
+                <AlertTriangle className="w-8 h-8 text-amber-500" />
+                <p className="text-sm font-semibold text-foreground">Official Receipt Processing</p>
+                <p className="text-xs text-muted-foreground font-mono max-w-md">
+                  {receiptLoadingError}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRetryReceipt}
+                  className="mt-2 text-xs font-mono gap-1.5 border-border"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Retry Receipt Generation</span>
+                </Button>
+              </>
+            )}
           </div>
         </Card>
       )}

@@ -46,8 +46,14 @@ export function usePaymentSignalR({
 
     let isMounted = true
 
+    const hubUrl = "/api/hubs/payments"
     const connection = new signalR.HubConnectionBuilder()
-      .withUrl("/hubs/payment")
+      .withUrl(hubUrl, {
+        transport:
+          signalR.HttpTransportType.WebSockets |
+          signalR.HttpTransportType.ServerSentEvents |
+          signalR.HttpTransportType.LongPolling,
+      })
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
       .configureLogging(signalR.LogLevel.Warning)
       .build()
