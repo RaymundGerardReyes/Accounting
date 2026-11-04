@@ -4,6 +4,34 @@ function patch(target) {
   if (!target) return;
 
   // Patch realpath
+  if (target.realpathSync) {
+    const origRealpathSync = target.realpathSync;
+    const patchedRealpathSync = function (p, opts) {
+      try {
+        return origRealpathSync.call(this, p, opts);
+      } catch (err) {
+        if (err && (err.code === "EPERM" || err.code === "EACCES")) {
+          return p;
+        }
+        throw err;
+      }
+    };
+    if (origRealpathSync.native) {
+      const origNative = origRealpathSync.native;
+      patchedRealpathSync.native = function (p, opts) {
+        try {
+          return origNative.call(this, p, opts);
+        } catch (err) {
+          if (err && (err.code === "EPERM" || err.code === "EACCES")) {
+            return p;
+          }
+          throw err;
+        }
+      };
+    }
+    target.realpathSync = patchedRealpathSync;
+  }
+
   if (target.promises && target.promises.realpath) {
     const origRealpath = target.promises.realpath;
     target.promises.realpath = async function (p, opts) {
@@ -11,7 +39,7 @@ function patch(target) {
         return await origRealpath.call(this, p, opts);
       } catch (err) {
         if (err && (err.code === "EPERM" || err.code === "EACCES")) {
-          return target.realpathSync(p);
+          return p;
         }
         throw err;
       }
