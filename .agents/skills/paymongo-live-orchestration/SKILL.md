@@ -114,6 +114,36 @@ PayMongo sends `Paymongo-Signature: t=<timestamp>,te=<test_signature>,li=<live_s
   - Apps Script writes `Order Number` and `PayMongo Checkout URL` back to the Google Sheet row and sends a branded email to the user with the payment link.
   - Live PayMongo webhooks (`checkout_session.payment.paid`) update backend state, triggering instant synchronization in `payments-hub.tsx`.
 
+## 12. UI Polling Guards & Deterministic Navigation
+- **Unstable Callback Re-render Loops**:
+  - Guard components (`PayMongoCheckoutGuard`) polling for payment outcomes must never accept anonymous parent callbacks like `onPaymentSucceeded={() => { fetchParentState(); }}` inside their `useEffect` dependency arrays.
+  - Doing so creates an infinite re-render loop: status changes to `succeeded` -> callback fires -> parent updates state -> new closure created -> effect fires again.
+- **In-Component Direct Navigation**:
+  - Render terminal states (`succeeded`, `failed`, `expired`) with self-contained, accessible action controls:
+    ```tsx
+    <Button asChild className="w-full bg-emerald-600 hover:bg-emerald-700 text-white">
+      <Link href={`/payment/result/${encodeURIComponent(attemptId)}`}>
+        <FileText className="mr-2 h-4 w-4" />
+        View Official Receipt
+      </Link>
+    </Button>
+    ```
+
+## 13. Baseline Seed Orders Fallback & Hermetic In-Memory Testing
+- **Avoid Empty Ledger Bugs on Cold Start**:
+  - In `OrderRepository.cs`, when database tables or in-memory dictionaries are unpopulated, pre-seed baseline corporate records (`ORD-2026-000001` through `000004`) across product orders and department invoices with diverse statuses (Pending, Paid, Cancelled).
+  - This ensures `GET /api/v1/orders` returns visible records immediately, preventing confusion from empty filter messages.
+  - Dynamically generated order sequences must begin above seed boundaries (e.g. `10+`) to avoid ID collisions.
+- **Self-Contained `AccountingWebApplicationFactory`**:
+  - Boot the complete ASP.NET Core host in-memory using `OfflineFallbackDbDataSource` and mock `IPaymentGateway` to allow all 20+ integration tests to execute cleanly without requiring external PostgreSQL instances.
+
+## 14. Windows Node v24 `fs.realpathSync` EPERM Patching
+- **Synchronous & Native Realpath Protection**:
+  - In `Frontend/patch-fs.cjs`, wrap `target.realpathSync` and `target.realpathSync.native` so that when `err.code === "EPERM"` or `err.code === "EACCES"` occurs during pnpm junction/symlink resolution, the function safely returns the input path `p`.
+- **Preload in Vitest & Next.js**:
+  - Ensure `require('./patch-fs.cjs')` is executed at the entry of `vitest.config.ts` and in Next.js build scripts (`node --require ./patch-fs.cjs ... next build`) to prevent Vite/Rollup crashes on Windows.
+
+
 
 
 
