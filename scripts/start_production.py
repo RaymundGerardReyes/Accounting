@@ -87,6 +87,19 @@ def remediate_production_secrets(env: dict) -> None:
     elif "PAYMONGO_WEBHOOK_SECRET" in env and "Secrets__PayMongoWebhookSecret" not in env:
         env["Secrets__PayMongoWebhookSecret"] = env["PAYMONGO_WEBHOOK_SECRET"]
 
+    # 2b. PayMongo return and cancel URLs
+    app_url = (
+        env.get("NEXT_PUBLIC_APP_URL")
+        or env.get("APP_URL")
+        or (f"https://{env.get('HEROKU_APP_NAME')}.herokuapp.com" if env.get("HEROKU_APP_NAME") else None)
+        or ""
+    ).strip().rstrip("/")
+    if app_url:
+        if "PayMongo__SuccessUrl" not in env and "PAYMONGO_SUCCESS_URL" not in env:
+            env["PayMongo__SuccessUrl"] = f"{app_url}/payment/return"
+        if "PayMongo__CancelUrl" not in env and "PAYMONGO_CANCEL_URL" not in env:
+            env["PayMongo__CancelUrl"] = f"{app_url}/checkout"
+
     # 3. Google Forms secret auto-rotation & remediation
     current_gforms_secret = (
         env.get("Secrets__GoogleFormsSecret")
