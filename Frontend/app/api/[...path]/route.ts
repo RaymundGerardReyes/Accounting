@@ -123,13 +123,26 @@ async function proxyRequest(
       }
     }
 
+    const contentType = backendRes.headers.get("content-type") || ""
+
+    // Handle streaming responses (e.g. Server-Sent Events text/event-stream)
+    if (contentType.includes("text/event-stream") && backendRes.body) {
+      const streamResponse = new NextResponse(backendRes.body, {
+        status: backendRes.status,
+        statusText: backendRes.statusText,
+      })
+      streamResponse.headers.set("content-type", contentType)
+      streamResponse.headers.set("cache-control", "no-cache, no-transform")
+      streamResponse.headers.set("connection", "keep-alive")
+      return streamResponse
+    }
+
     const responseBody = await backendRes.arrayBuffer()
     const response = new NextResponse(responseBody, {
       status: backendRes.status,
       statusText: backendRes.statusText,
     })
 
-    const contentType = backendRes.headers.get("content-type")
     if (contentType) {
       response.headers.set("content-type", contentType)
     }

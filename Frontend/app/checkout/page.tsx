@@ -158,6 +158,17 @@ function CheckoutPageContent() {
 
     try {
       const idempotencyKey = `idem-${orderId}-${Date.now()}`;
+      const origin =
+        typeof window !== "undefined" && window.location.origin
+          ? window.location.origin
+          : "";
+      const successUrl = origin
+        ? `${origin}/payment/return?order_id=${encodeURIComponent(orderId)}`
+        : undefined;
+      const cancelUrl = origin
+        ? `${origin}/checkout?order_id=${encodeURIComponent(orderId)}&cancelled=true`
+        : undefined;
+
       const response = await fetch(
         `/api/v1/orders/${encodeURIComponent(orderId)}/payment-attempts`,
         {
@@ -169,6 +180,8 @@ function CheckoutPageContent() {
           body: JSON.stringify({
             payment_method: selectedMethod,
             idempotency_key: idempotencyKey,
+            success_url: successUrl,
+            cancel_url: cancelUrl,
           }),
         }
       );

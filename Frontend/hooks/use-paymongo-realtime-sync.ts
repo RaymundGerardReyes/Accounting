@@ -356,7 +356,9 @@ export function usePayMongoRealtimeSync({
     if (!attemptId || isTerminal) return;
 
     const connection = new signalR.HubConnectionBuilder()
-      .withUrl(signalRHubUrl)
+      .withUrl(signalRHubUrl, {
+        transport: signalR.HttpTransportType.LongPolling,
+      })
       .withAutomaticReconnect([0, 3000, 10000])
       .configureLogging(signalR.LogLevel.None)
       .build();
@@ -403,11 +405,13 @@ export function usePayMongoRealtimeSync({
           ...prev,
           signalRState: "Connected",
         }));
-        connection.invoke("SubscribeToPayment", attemptId).catch(() => {});
+        connection.invoke("JoinPaymentGroupAsync", attemptId).catch(() => {
+          connection.invoke("SubscribeToPayment", attemptId).catch(() => {});
+        });
         if (providerPaymentId) {
-          connection
-            .invoke("SubscribeToPayment", providerPaymentId)
-            .catch(() => {});
+          connection.invoke("JoinPaymentGroupAsync", providerPaymentId).catch(() => {
+            connection.invoke("SubscribeToPayment", providerPaymentId).catch(() => {});
+          });
         }
       })
       .catch(() => {

@@ -55,6 +55,20 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  async redirects() {
+    return [
+      {
+        source: "/payments/success",
+        destination: "/payment/return",
+        permanent: false,
+      },
+      {
+        source: "/payments/cancel",
+        destination: "/checkout",
+        permanent: false,
+      },
+    ]
+  },
   webpack: (config) => {
     config.resolve.alias = {
       ...config.resolve.alias,
