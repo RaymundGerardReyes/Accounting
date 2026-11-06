@@ -12,8 +12,8 @@ public sealed class PayMongoOptions
     public string SecretKey { get; set; } = string.Empty;
     public string PublicKey { get; set; } = string.Empty;
     public string WebhookSecret { get; set; } = string.Empty;
-    public string SuccessUrl { get; set; } = "http://localhost:5173/payments/success";
-    public string CancelUrl { get; set; } = "http://localhost:5173/payments/cancel";
+    public string SuccessUrl { get; set; } = "http://localhost:3000/payment/return";
+    public string CancelUrl { get; set; } = "http://localhost:3000/checkout";
     public int RequestTimeoutSeconds { get; set; } = 10;
     public bool AllowTestWebhookSignatures { get; set; } = true;
 }

@@ -93,6 +93,16 @@ public sealed class PayMongoClient : IPaymentGateway
                 .ToList()
             : [new PayMongoLineItem(request.Description, 1, request.Amount.AmountMinor, request.Amount.CurrencyCode)];
 
+        string rawSuccess = !string.IsNullOrWhiteSpace(request.SuccessUrl)
+            ? request.SuccessUrl
+            : _options.SuccessUrl;
+        string rawCancel = !string.IsNullOrWhiteSpace(request.CancelUrl)
+            ? request.CancelUrl
+            : _options.CancelUrl;
+
+        string finalSuccessUrl = EnsureOrderIdQueryParam(rawSuccess, request.OrderId);
+        string finalCancelUrl = EnsureOrderIdQueryParam(rawCancel, request.OrderId);
+
         var payload = new PayMongoCreateCheckoutRequest(
             new PayMongoCreateCheckoutData(
                 new PayMongoCreateCheckoutAttributes(
@@ -101,8 +111,8 @@ public sealed class PayMongoClient : IPaymentGateway
                     SendEmailReceipt: false,
                     ShowDescription: true,
                     ShowLineItems: true,
-                    SuccessUrl: $"{_options.SuccessUrl}?order_id={Uri.EscapeDataString(request.OrderId)}",
-                    CancelUrl: $"{_options.CancelUrl}?order_id={Uri.EscapeDataString(request.OrderId)}",
+                    SuccessUrl: finalSuccessUrl,
+                    CancelUrl: finalCancelUrl,
                     PaymentMethodTypes: paymentMethodTypes,
                     LineItems: lineItems,
                     Billing: new PayMongoBillingInfo(request.CustomerName, request.CustomerEmail, request.CustomerPhone),
@@ -644,4 +654,20 @@ public sealed class PayMongoClient : IPaymentGateway
             "DOB_UBP" => ["dob_ubp"],
             "HOSTED_CHECKOUT" or _ => ["qrph", "card", "gcash", "paymaya", "dob", "dob_ubp"]
         };
+
+    private static string EnsureOrderIdQueryParam(string url, string orderId)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return url;
+        }
+
+        if (url.Contains("order_id=", StringComparison.OrdinalIgnoreCase))
+        {
+            return url;
+        }
+
+        string separator = url.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+        return $"{url}{separator}order_id={Uri.EscapeDataString(orderId)}";
+    }
 }

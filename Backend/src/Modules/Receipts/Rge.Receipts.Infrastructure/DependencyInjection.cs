@@ -80,6 +80,7 @@ public sealed class OrderPaidReceiptOutboxHandler : IOutboxEventHandler
         _scopeFactory = scopeFactory;
     }
 
+    [ActivatorUtilitiesConstructor]
     public OrderPaidReceiptOutboxHandler(
         IssueReceiptHandler issueReceiptHandler,
         RenderReceiptPdfHandler renderPdfHandler,
@@ -275,7 +276,11 @@ public static class DependencyInjection
         services.AddScoped<GetReceiptByOrderHandler>();
         services.AddScoped<RenderReceiptPdfHandler>();
         services.AddScoped<ResendReceiptEmailHandler>();
-        services.AddScoped<OrderPaidReceiptOutboxHandler>();
+        services.AddScoped<OrderPaidReceiptOutboxHandler>(sp =>
+            new OrderPaidReceiptOutboxHandler(
+                sp.GetRequiredService<IssueReceiptHandler>(),
+                sp.GetRequiredService<RenderReceiptPdfHandler>(),
+                sp.GetRequiredService<ResendReceiptEmailHandler>()));
 
         return services;
     }

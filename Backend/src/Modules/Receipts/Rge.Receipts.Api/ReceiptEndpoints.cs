@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -102,7 +103,7 @@ public sealed class ReceiptEndpoints : IEndpointModule
         decimal vatExemptSales = receipt.VatExemptSalesMinor / 100m;
         decimal zeroRatedSales = receipt.ZeroRatedSalesMinor / 100m;
 
-        string formattedPaidAt = receipt.IssuedAtUtc.ToOffset(TimeSpan.FromHours(8)).ToString("MMM dd, yyyy hh:mm tt");
+        string formattedPaidAt = receipt.IssuedAtUtc.ToOffset(TimeSpan.FromHours(8)).ToString("MMM dd, yyyy hh:mm tt", CultureInfo.InvariantCulture);
         string pdfFilename = $"OR-{receipt.OfficialReceiptNumber}.pdf";
 
         return new
@@ -147,8 +148,8 @@ public sealed class ReceiptEndpoints : IEndpointModule
             category_label = "Department Invoice",
             reference_code = receipt.OrderNumber,
             quantity = 1,
-            unit_price_php = grossAmount.ToString("N2"),
-            amount_php = grossAmount.ToString("N2"),
+            unit_price_php = grossAmount.ToString("N2", CultureInfo.InvariantCulture),
+            amount_php = grossAmount.ToString("N2", CultureInfo.InvariantCulture),
             provider = "PayMongo",
             provider_payment_id = receipt.PaymentAttemptId,
             payment_method_code = (receipt.PaymentMethod ?? "card").ToLowerInvariant(),
@@ -168,10 +169,10 @@ public sealed class ReceiptEndpoints : IEndpointModule
             tax_classification = "vat_inclusive",
             tax_classification_label = "12% VAT Inclusive",
             tax_rate_label = "12%",
-            vatable_sales_php = vatableSales.ToString("N2"),
-            vat_amount_php = vatAmount.ToString("N2"),
-            vat_exempt_sales_php = vatExemptSales.ToString("N2"),
-            zero_rated_sales_php = zeroRatedSales.ToString("N2"),
+            vatable_sales_php = vatableSales.ToString("N2", CultureInfo.InvariantCulture),
+            vat_amount_php = vatAmount.ToString("N2", CultureInfo.InvariantCulture),
+            vat_exempt_sales_php = vatExemptSales.ToString("N2", CultureInfo.InvariantCulture),
+            zero_rated_sales_php = zeroRatedSales.ToString("N2", CultureInfo.InvariantCulture),
             non_vat_sales_minor = 0,
             non_vat_sales_php = "0.00",
             gateway_fee_php = "0.00",
@@ -205,8 +206,6 @@ public sealed class ReceiptEndpoints : IEndpointModule
                 email = receipt.CustomerEmail ?? "Not Provided",
                 phone = "Not Provided"
             },
-            customer_name = receipt.CustomerName,
-            customer_email = receipt.CustomerEmail,
             customer_phone = "Not Provided",
             line_items = new[]
             {
@@ -215,8 +214,8 @@ public sealed class ReceiptEndpoints : IEndpointModule
                     reference_code = receipt.OrderNumber,
                     title = receipt.Description ?? "Accounting & Corporate Advisory Services",
                     quantity = 1,
-                    unit_price_php = grossAmount.ToString("N2"),
-                    amount_php = grossAmount.ToString("N2"),
+                    unit_price_php = grossAmount.ToString("N2", CultureInfo.InvariantCulture),
+                    amount_php = grossAmount.ToString("N2", CultureInfo.InvariantCulture),
                     tax_classification = "12% VAT Inclusive"
                 }
             },
