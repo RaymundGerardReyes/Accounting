@@ -5,8 +5,8 @@ import { useAuth } from "@/lib/auth-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { ShieldCheck, Lock, AlertCircle, ArrowRight, Loader2 } from "lucide-react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { ShieldCheck, AlertCircle, ArrowRight, Loader2 } from "lucide-react"
 
 function GoogleIcon({ className }: { className?: string }) {
   return (
@@ -43,7 +43,7 @@ function MicrosoftIcon({ className }: { className?: string }) {
 }
 
 export default function LoginPage() {
-  const { loginWithCredentials, loginWithOAuth, allUsers, loading } = useAuth()
+  const { loginWithCredentials, loginWithOAuth, loading } = useAuth()
   const [identifier, setIdentifier] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -72,12 +72,6 @@ export default function LoginPage() {
     }
   }
 
-  const handleQuickSelect = (userEmail: string) => {
-    setIdentifier(userEmail)
-    setPassword("password123")
-    if (error) setError(null)
-  }
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4 py-12">
       <div className="w-full max-w-md space-y-6">
@@ -97,7 +91,7 @@ export default function LoginPage() {
           <CardHeader className="space-y-1 pb-4">
             <CardTitle className="text-lg">Sign In</CardTitle>
             <CardDescription className="text-xs">
-              Enter your corporate credentials or select a seeded persona below
+              Enter your corporate credentials to access your account
             </CardDescription>
           </CardHeader>
 
@@ -215,34 +209,6 @@ export default function LoginPage() {
               </Button>
             </div>
           </CardContent>
-
-          <CardFooter className="flex flex-col items-start border-t border-border pt-4 bg-muted/20">
-            <span className="text-[11px] font-medium text-muted-foreground mb-2 flex items-center gap-1">
-              <Lock className="w-3 h-3" /> Quick Persona Fill
-            </span>
-            <div className="flex flex-wrap gap-1.5 w-full">
-              {loading ? (
-                <span className="text-[11px] text-muted-foreground flex items-center gap-1.5 py-1">
-                  <Loader2 className="w-3 h-3 animate-spin text-primary" /> Loading personas...
-                </span>
-              ) : allUsers && allUsers.length > 0 ? (
-                allUsers.map((u) => (
-                  <button
-                    key={u.id}
-                    type="button"
-                    onClick={() => handleQuickSelect(u.email || u.id)}
-                    className="text-[10px] font-mono px-2 py-1 rounded bg-secondary hover:bg-secondary/80 text-secondary-foreground border border-border"
-                  >
-                    {u.full_name || u.id}
-                  </button>
-                ))
-              ) : (
-                <span className="text-[11px] text-muted-foreground italic py-1">
-                  No personas available
-                </span>
-              )}
-            </div>
-          </CardFooter>
         </Card>
       </div>
     </div>
