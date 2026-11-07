@@ -10,6 +10,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -108,6 +109,19 @@ def classify_file(filepath):
             if re.search(pat, filepath):
                 return scope
     return "other"
+
+
+def normalize_semver_tag(tag_str):
+    """Ensure the version segment of a tag string starts with 'v' (e.g. '0.5.9' -> 'v0.5.9', 'dotnet/0.5.9' -> 'dotnet/v0.5.9')."""
+    tag_str = tag_str.strip()
+    if "/" in tag_str:
+        prefix, ver = tag_str.split("/", 1)
+        if not ver.startswith("v"):
+            ver = "v" + ver
+        return f"{prefix}/{ver}"
+    if not tag_str.startswith("v"):
+        return "v" + tag_str
+    return tag_str
 
 
 def parse_semver(tag_str):
@@ -407,9 +421,7 @@ def cmd_bump(args):
     """Bump the semantic version in package.json, Frontend/package.json, and VERSION."""
     latest = get_latest_semver()
     if args.version:
-        new_version = args.version.strip()
-        if not new_version.startswith("v"):
-            new_version = "v" + new_version
+        new_version = normalize_semver_tag(args.version)
         if not parse_semver(new_version):
             sys.stderr.write(f"Error: '{new_version}' is not a valid Semantic Version (e.g. v0.9.31).\n")
             sys.exit(1)
@@ -433,14 +445,10 @@ def cmd_bump(args):
 
 def cmd_tag(args):
     """Create an annotated Semantic Versioning 2.0.0 release tag."""
-    tag_name = args.version.strip()
+    tag_name = normalize_semver_tag(args.version)
     if not parse_semver(tag_name):
         sys.stderr.write(f"Error: '{tag_name}' does not conform to Semantic Versioning 2.0.0 (expected e.g. v0.1.0, v1.0.0).\n")
         sys.exit(1)
-
-    # Normalize to include leading 'v'
-    if not tag_name.startswith("v"):
-        tag_name = "v" + tag_name
 
     existing_tags = run_git_cmd(["tag", "-l"]).splitlines()
     if tag_name in existing_tags:
@@ -464,9 +472,7 @@ def cmd_release(args):
     """
     latest = get_latest_semver()
     if args.version:
-        new_version = args.version.strip()
-        if not new_version.startswith("v"):
-            new_version = "v" + new_version
+        new_version = normalize_semver_tag(args.version)
         if not parse_semver(new_version):
             sys.stderr.write(f"Error: '{new_version}' is not a valid Semantic Version.\n")
             sys.exit(1)
