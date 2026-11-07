@@ -44,15 +44,17 @@ public sealed class PayMongoLifecycleVerificationTests
             string checkoutSessionId,
             string status,
             string? paymentMethodUsed = "qrph",
-            DateTimeOffset? paidAtUtc = null)
+            DateTimeOffset? paidAtUtc = null,
+            string? failureCode = null,
+            string? failureMessage = null)
         {
             _sessions[checkoutSessionId] = new GatewayPaymentStatusResult(
                 ProviderPaymentId: checkoutSessionId,
                 Status: status,
                 PaymentMethodUsed: paymentMethodUsed,
                 PaidAtUtc: paidAtUtc,
-                FailureCode: null,
-                FailureMessage: null);
+                FailureCode: failureCode,
+                FailureMessage: failureMessage);
         }
 
         public Task<Result<CheckoutSessionResult>> CreateCheckoutSessionAsync(
@@ -586,6 +588,49 @@ public sealed class PayMongoLifecycleVerificationTests
         Assert.True(pdfResult.IsSuccess);
         Assert.True(pdfResult.Value.PdfBytes.Length > 0);
         Assert.Equal("application/pdf", pdfResult.Value.ContentType);
+    }
+
+    // =========================================================================
+    // Scenario 10: Polling with Underlying Source Expired -> DB Expired, URL Locked, SignalR Dispatched
+    // =========================================================================
+    [Fact]
+    public async Task Scenario10_PollWithUnderlyingSourceExpired_UpdatesDb_CallsExpire_And_NotifiesSignalR()
+    {
+        PollAndReconcileHandler.ResetCooldowns();
+        var (sp, clock, gateway, notifier) = BuildTestHarness();
+        await using var _ = sp;
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var createOrder = scope.ServiceProvider.GetRequiredService<CreateOrderHandler>();
+        var initiateAttempt = scope.ServiceProvider.GetRequiredService<InitiateAttemptHandler>();
+        var pollHandler = scope.ServiceProvider.GetRequiredService<PollAndReconcileHandler>();
+
+        var ordRes = await createOrder.HandleAsync(new CreateOrderCommand("COST-ACC-TEXT-2026", Quantity: 1));
+        var attRes = await initiateAttempt.HandleAsync(new InitiateAttemptCommand(ordRes.Value.Id, "gcash", "idem-src-exp-test"));
+        string csId = attRes.Value.ProviderPaymentId!;
+        string attemptId = attRes.Value.Id;
+
+        // Simulate gateway returning status "expired" (as evaluated from underlying source inspection)
+        gateway.SetRemoteSessionStatus(csId, "expired", "gcash", failureCode: "source_expired", failureMessage: "Source expired");
+
+        // Act: Poll with auto_reconcile = true
+        var polled = await pollHandler.HandleAsync(new PollAndReconcileQuery(attemptId, AutoReconcile: true));
+
+        // Assert 1: Polled DTO reflects Expired and nullifies CheckoutUrl
+        Assert.True(polled.IsSuccess);
+        Assert.Equal("expired", polled.Value.Status.ToLowerInvariant());
+        Assert.Null(polled.Value.CheckoutUrl);
+
+        // Assert 2: Gateway session invalidation was triggered remotely
+        for (int i = 0; i < 50 && !gateway.ExpiredSessionCalls.Contains(csId); i++)
+        {
+            await Task.Delay(20);
+        }
+        Assert.Contains(csId, gateway.ExpiredSessionCalls);
+
+        // Assert 3: SignalR notification was dispatched for both attemptId and csId
+        Assert.Contains(notifier.PublishedEvents, e => e.AttemptId == attemptId && e.Status == "expired");
+        Assert.Contains(notifier.PublishedEvents, e => e.AttemptId == csId && e.Status == "expired");
     }
 }
 

@@ -289,18 +289,219 @@ public sealed class PayMongoClient : IPaymentGateway
     }
 
     /// <summary>
-    /// Guard against recursive secondary/tertiary source scraping during routine polling.
-    /// Status transitions are evaluated directly from the checkout session payload and incoming webhooks.
+    /// Inspects the underlying Source resource (src_...) and PaymentIntent (pi_...)
+    /// to detect if an e-wallet authorization has expired, failed, or cancelled while
+    /// the parent checkout session remains in 'awaiting_next_action'.
     /// </summary>
-    private static Task<GatewayPaymentStatusResult?> TryInspectUnderlyingSourceAsync(
+    private async Task<GatewayPaymentStatusResult?> TryInspectUnderlyingSourceAsync(
         PayMongoCheckoutSessionData sessionData,
         string checkoutSessionRawJson,
         CancellationToken cancellationToken)
     {
-        _ = sessionData;
-        _ = checkoutSessionRawJson;
-        _ = cancellationToken;
-        return Task.FromResult<GatewayPaymentStatusResult?>(null);
+        if (IsOfflineMode)
+        {
+            return null;
+        }
+
+        var attrs = sessionData.Attributes;
+        string? redirectUrl = attrs.PaymentIntent?.Attributes?.NextAction?.Redirect?.Url;
+        string? pmId = attrs.PaymentIntent?.Attributes?.PaymentMethodId;
+        string? piId = attrs.PaymentIntent?.Id ?? ExtractIdWithPrefix(checkoutSessionRawJson, "pi_");
+
+        // 1. Cascading extraction of src_ from redirect.url, payment_method_id, or raw checkout session JSON
+        string? srcId = ExtractIdWithPrefix(redirectUrl, "src_")
+            ?? ExtractIdWithPrefix(pmId, "src_")
+            ?? ExtractIdWithPrefix(checkoutSessionRawJson, "src_");
+
+        // 2. Fallback: If src_ was not embedded in the checkout session payload, query GET /v1/payment_intents/{pi_id}
+        if (string.IsNullOrWhiteSpace(srcId) && !string.IsNullOrWhiteSpace(piId) && piId.StartsWith("pi_", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                using HttpResponseMessage piResp = await _httpClient.GetAsync(
+                    $"payment_intents/{Uri.EscapeDataString(piId)}",
+                    cancellationToken).ConfigureAwait(false);
+
+                if (piResp.IsSuccessStatusCode)
+                {
+                    string piRawJson = await piResp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                    srcId = ExtractIdWithPrefix(piRawJson, "src_");
+
+                    var piEnvelope = JsonSerializer.Deserialize<PayMongoPaymentIntentEnvelope>(piRawJson);
+                    var piAttrs = piEnvelope?.Data?.Attributes;
+                    var piLastErr = piAttrs?.LastPaymentError;
+
+                    if (piLastErr is not null)
+                    {
+                        string errCode = piLastErr.FailedCode ?? piLastErr.Code ?? "payment_intent_error";
+                        string errMsg = piLastErr.FailedMessage ?? piLastErr.Detail ?? "Payment failed inside PayMongo.";
+
+                        _logger.LogWarning(
+                            "[PAYMONGO-PI-ERROR-DIAG] cs_id={CsId} | pi_id={PiId} | err_code={ErrCode} | msg={ErrMsg}",
+                            sessionData.Id,
+                            piId,
+                            errCode,
+                            errMsg);
+
+                        ObservedAwaitingNextActionSessions.TryRemove(sessionData.Id, out _);
+
+                        return new GatewayPaymentStatusResult(
+                            ProviderPaymentId: sessionData.Id,
+                            Status: "failed",
+                            PaymentMethodUsed: attrs.PaymentMethodUsed,
+                            PaidAtUtc: null,
+                            FailureCode: errCode,
+                            FailureMessage: errMsg);
+                    }
+
+                    string piEndpointStatus = (piAttrs?.Status ?? string.Empty).Trim().ToLowerInvariant();
+                    if (piEndpointStatus is "cancelled")
+                    {
+                        ObservedAwaitingNextActionSessions.TryRemove(sessionData.Id, out _);
+
+                        return new GatewayPaymentStatusResult(
+                            ProviderPaymentId: sessionData.Id,
+                            Status: "expired",
+                            PaymentMethodUsed: attrs.PaymentMethodUsed,
+                            PaidAtUtc: null,
+                            FailureCode: "payment_intent_cancelled",
+                            FailureMessage: "Payment intent was cancelled on PayMongo.");
+                    }
+
+                    if (piEndpointStatus is "failed")
+                    {
+                        ObservedAwaitingNextActionSessions.TryRemove(sessionData.Id, out _);
+
+                        return new GatewayPaymentStatusResult(
+                            ProviderPaymentId: sessionData.Id,
+                            Status: "failed",
+                            PaymentMethodUsed: attrs.PaymentMethodUsed,
+                            PaidAtUtc: null,
+                            FailureCode: "payment_intent_failed",
+                            FailureMessage: "Payment intent failed on PayMongo.");
+                    }
+
+                    if (piEndpointStatus is "succeeded")
+                    {
+                        ObservedAwaitingNextActionSessions.TryRemove(sessionData.Id, out _);
+
+                        return new GatewayPaymentStatusResult(
+                            ProviderPaymentId: sessionData.Id,
+                            Status: "paid",
+                            PaymentMethodUsed: attrs.PaymentMethodUsed,
+                            PaidAtUtc: DateTimeOffset.UtcNow,
+                            FailureCode: null,
+                            FailureMessage: null);
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "[PAYMONGO-PI-HTTP-ERR] cs_id={CsId} | pi_id={PiId} | HTTP={StatusCode}",
+                        sessionData.Id,
+                        piId,
+                        (int)piResp.StatusCode);
+                }
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+
+                _logger.LogWarning(ex, "[PAYMONGO-PI-POLL-WARN] Could not inspect PaymentIntent {PiId}", piId);
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(srcId))
+        {
+            _logger.LogInformation(
+                "[PAYMONGO-SOURCE-DIAG] cs_id={CsId} | pi_id={PiId} | next_action_url={NextUrl} | No src_ token found yet.",
+                sessionData.Id,
+                piId ?? "none",
+                redirectUrl ?? "none");
+            return null;
+        }
+
+        // 3. Query GET /v1/sources/{src_id} to inspect authentic e-wallet Source status
+        try
+        {
+            using HttpResponseMessage srcResp = await _httpClient.GetAsync(
+                $"sources/{Uri.EscapeDataString(srcId)}",
+                cancellationToken).ConfigureAwait(false);
+
+            if (!srcResp.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "[PAYMONGO-SOURCE-HTTP-ERR] cs_id={CsId} | src_id={SrcId} | HTTP={StatusCode}",
+                    sessionData.Id,
+                    srcId,
+                    (int)srcResp.StatusCode);
+                return null;
+            }
+
+            string srcRawJson = await srcResp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            var srcEnvelope = JsonSerializer.Deserialize<PayMongoSourceEnvelope>(srcRawJson);
+            string srcStatus = (srcEnvelope?.Data?.Attributes?.Status ?? "unknown").Trim().ToLowerInvariant();
+
+            _logger.LogInformation(
+                "[PAYMONGO-SOURCE-DIAG] cs_id={CsId} | pi_id={PiId} | src_id={SrcId} | src_status={SrcStatus}",
+                sessionData.Id,
+                piId ?? "none",
+                srcId,
+                srcStatus);
+
+            if (srcStatus is "expired" or "cancelled")
+            {
+                ObservedAwaitingNextActionSessions.TryRemove(sessionData.Id, out _);
+
+                return new GatewayPaymentStatusResult(
+                    ProviderPaymentId: sessionData.Id,
+                    Status: "expired",
+                    PaymentMethodUsed: attrs.PaymentMethodUsed ?? srcEnvelope?.Data?.Attributes?.SourceType,
+                    PaidAtUtc: null,
+                    FailureCode: $"source_{srcStatus}",
+                    FailureMessage: $"Source {srcId} has {srcStatus} status.");
+            }
+
+            if (srcStatus is "failed")
+            {
+                ObservedAwaitingNextActionSessions.TryRemove(sessionData.Id, out _);
+
+                return new GatewayPaymentStatusResult(
+                    ProviderPaymentId: sessionData.Id,
+                    Status: "failed",
+                    PaymentMethodUsed: attrs.PaymentMethodUsed ?? srcEnvelope?.Data?.Attributes?.SourceType,
+                    PaidAtUtc: null,
+                    FailureCode: "source_failed",
+                    FailureMessage: $"Source {srcId} failed authorization on PayMongo.");
+            }
+
+            if (srcStatus is "paid")
+            {
+                ObservedAwaitingNextActionSessions.TryRemove(sessionData.Id, out _);
+
+                return new GatewayPaymentStatusResult(
+                    ProviderPaymentId: sessionData.Id,
+                    Status: "paid",
+                    PaymentMethodUsed: attrs.PaymentMethodUsed ?? srcEnvelope?.Data?.Attributes?.SourceType,
+                    PaidAtUtc: DateTimeOffset.UtcNow,
+                    FailureCode: null,
+                    FailureMessage: null);
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+
+            _logger.LogWarning(ex, "[PAYMONGO-SOURCE-POLL-WARN] Failed querying Source {SrcId}", srcId);
+        }
+
+        return null;
     }
 
     /// <summary>
