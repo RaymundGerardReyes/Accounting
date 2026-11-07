@@ -131,8 +131,6 @@ public sealed class InitiateAttemptHandler : ICommandHandler<InitiateAttemptComm
             nowUtc: nowUtc,
             provider: "paymongo");
 
-        await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
-
         string? custName = command.CustomerName;
         string? custEmail = command.CustomerEmail;
         string? custPhone = command.CustomerPhone;

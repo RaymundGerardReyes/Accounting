@@ -267,6 +267,8 @@ public static class DependencyInjection
         services.AddSingleton<ICanonicalJsonSerializer, CanonicalJsonSerializer>();
         services.AddSingleton<IPdfRenderer, QuestPdfReceiptRenderer>();
         services.AddSingleton<SmtpReceiptOptions>();
+        services.AddSingleton<IReceiptEmailQueue, ChannelReceiptEmailQueue>();
+        services.AddHostedService<ReceiptEmailBackgroundWorker>();
         services.AddScoped<IReceiptMailer, SmtpReceiptMailer>();
         services.AddScoped<IReceiptRepository, ReceiptRepository>();
         services.AddScoped<IReceiptLookup, ReceiptLookupAdapter>();
@@ -275,7 +277,13 @@ public static class DependencyInjection
         services.AddScoped<GetReceiptByPaymentHandler>();
         services.AddScoped<GetReceiptByOrderHandler>();
         services.AddScoped<RenderReceiptPdfHandler>();
-        services.AddScoped<ResendReceiptEmailHandler>();
+        services.AddScoped<ResendReceiptEmailHandler>(sp =>
+            new ResendReceiptEmailHandler(
+                sp.GetRequiredService<IReceiptRepository>(),
+                sp.GetRequiredService<IPdfRenderer>(),
+                sp.GetRequiredService<IReceiptEmailQueue>(),
+                sp.GetService<IReceiptSourceResolver>(),
+                sp.GetService<IssueReceiptHandler>()));
         services.AddScoped<OrderPaidReceiptOutboxHandler>(sp =>
             new OrderPaidReceiptOutboxHandler(
                 sp.GetRequiredService<IssueReceiptHandler>(),

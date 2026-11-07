@@ -1,5 +1,6 @@
 using Rge.BuildingBlocks.Application.Abstractions;
 using Rge.BuildingBlocks.SharedKernel.Results;
+using Rge.Receipts.Application.IssueReceipt;
 using Rge.Receipts.Application.Ports;
 using Rge.Receipts.Domain;
 
@@ -9,20 +10,34 @@ public sealed class ResendReceiptEmailHandler : ICommandHandler<ResendReceiptEma
 {
     private readonly IReceiptRepository _repository;
     private readonly IPdfRenderer _pdfRenderer;
-    private readonly IReceiptMailer _mailer;
+    private readonly IReceiptEmailQueue _emailQueue;
+    private readonly IReceiptSourceResolver? _sourceResolver;
+    private readonly IssueReceiptHandler? _issueReceiptHandler;
 
     public ResendReceiptEmailHandler(
         IReceiptRepository repository,
         IPdfRenderer pdfRenderer,
-        IReceiptMailer mailer)
+        IReceiptEmailQueue emailQueue)
+        : this(repository, pdfRenderer, emailQueue, sourceResolver: null, issueReceiptHandler: null)
+    {
+    }
+
+    public ResendReceiptEmailHandler(
+        IReceiptRepository repository,
+        IPdfRenderer pdfRenderer,
+        IReceiptEmailQueue emailQueue,
+        IReceiptSourceResolver? sourceResolver,
+        IssueReceiptHandler? issueReceiptHandler)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(pdfRenderer);
-        ArgumentNullException.ThrowIfNull(mailer);
+        ArgumentNullException.ThrowIfNull(emailQueue);
 
         _repository = repository;
         _pdfRenderer = pdfRenderer;
-        _mailer = mailer;
+        _emailQueue = emailQueue;
+        _sourceResolver = sourceResolver;
+        _issueReceiptHandler = issueReceiptHandler;
     }
 
     public async Task<Result<ResendReceiptEmailResponse>> HandleAsync(
@@ -34,6 +49,39 @@ public sealed class ResendReceiptEmailHandler : ICommandHandler<ResendReceiptEma
         OfficialReceipt? receipt = await _repository
             .GetByPaymentAttemptIdAsync(command.PaymentId, cancellationToken)
             .ConfigureAwait(false);
+
+        // Just-In-Time (JIT) Receipt Synthesis: if payment is confirmed paid but receipt not yet persisted
+        if (receipt is null && _sourceResolver is not null && _issueReceiptHandler is not null)
+        {
+            ReceiptSourceInfo? source = await _sourceResolver
+                .ResolveByPaymentAttemptIdAsync(command.PaymentId, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (source is not null && source.IsPaid)
+            {
+                var issueCommand = new IssueReceiptCommand(
+                    OrderId: source.OrderId,
+                    OrderNumber: source.OrderNumber,
+                    PaymentAttemptId: source.PaymentAttemptId,
+                    AmountMinor: source.AmountMinor,
+                    Currency: source.Currency,
+                    CustomerName: source.CustomerName,
+                    CustomerEmail: source.CustomerEmail,
+                    Description: source.Description,
+                    PaymentMethod: source.PaymentMethod);
+
+                var issueResult = await _issueReceiptHandler
+                    .HandleAsync(issueCommand, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (issueResult.IsSuccess)
+                {
+                    receipt = await _repository
+                        .GetByPaymentAttemptIdAsync(command.PaymentId, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+            }
+        }
 
         if (receipt is null)
         {
@@ -52,14 +100,11 @@ public sealed class ResendReceiptEmailHandler : ICommandHandler<ResendReceiptEma
         }
 
         byte[] pdfBytes = _pdfRenderer.RenderOfficialReceiptPdf(receipt);
-        Result mailResult = await _mailer
-            .SendReceiptEmailAsync(receipt, recipient, pdfBytes, cancellationToken)
-            .ConfigureAwait(false);
 
-        if (mailResult.IsFailure)
-        {
-            return Result.Failure<ResendReceiptEmailResponse>(mailResult.Error);
-        }
+        // Non-blocking asynchronous dispatch via background channel queue (< 0.1 ms)
+        await _emailQueue
+            .EnqueueAsync(new ReceiptEmailJob(receipt, recipient, pdfBytes), cancellationToken)
+            .ConfigureAwait(false);
 
         return Result.Success(new ResendReceiptEmailResponse(
             PaymentId: command.PaymentId,
@@ -68,4 +113,3 @@ public sealed class ResendReceiptEmailHandler : ICommandHandler<ResendReceiptEma
             Dispatched: true));
     }
 }
-

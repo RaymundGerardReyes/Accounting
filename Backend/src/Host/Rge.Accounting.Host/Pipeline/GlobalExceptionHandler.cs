@@ -52,7 +52,16 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
 
         ArgumentNullException.ThrowIfNull(exception);
 
-
+        if (exception is OperationCanceledException or TaskCanceledException)
+        {
+            if (httpContext.RequestAborted.IsCancellationRequested ||
+                httpContext.Request.Path.StartsWithSegments("/api/hubs", StringComparison.OrdinalIgnoreCase) ||
+                httpContext.Request.Path.StartsWithSegments("/hubs", StringComparison.OrdinalIgnoreCase))
+            {
+                httpContext.Response.StatusCode = StatusCodes.Status204NoContent;
+                return true;
+            }
+        }
 
         _logger.LogError(
 

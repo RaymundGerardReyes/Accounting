@@ -32,7 +32,7 @@ public sealed class GetPaymentEndpoint : IEndpointModule
         ArgumentNullException.ThrowIfNull(httpContext);
         ArgumentNullException.ThrowIfNull(handler);
 
-        var query = new PollAndReconcileQuery(payment_id, auto_reconcile ?? true);
+        var query = new PollAndReconcileQuery(payment_id, auto_reconcile ?? false);
         var result = await handler.HandleAsync(query, cancellationToken).ConfigureAwait(false);
         return result.ToHttpResult(httpContext, attempt => Results.Ok(attempt));
     }

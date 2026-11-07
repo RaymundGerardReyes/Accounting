@@ -19,6 +19,7 @@ namespace Rge.Payments.Integration.Tests;
 /// server-authoritative pricing, order cancellation, and payment reconciliation/expiration operations
 /// using an in-memory ASP.NET Core test server without external database dependencies.
 /// </summary>
+[Collection("PaymentsIntegration")]
 public sealed class OrderCrudLifecycleIntegrationTests : IClassFixture<AccountingWebApplicationFactory>, IDisposable
 {
     private readonly AccountingWebApplicationFactory _factory;

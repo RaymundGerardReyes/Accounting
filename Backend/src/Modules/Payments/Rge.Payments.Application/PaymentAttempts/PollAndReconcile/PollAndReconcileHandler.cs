@@ -15,7 +15,7 @@ namespace Rge.Payments.Application.PaymentAttempts.PollAndReconcile;
 public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuery, PaymentAttemptDto>
 {
     private static readonly ConcurrentDictionary<string, DateTimeOffset> GatewayCheckCooldown = new(StringComparer.OrdinalIgnoreCase);
-    public static readonly TimeSpan CooldownWindow = TimeSpan.FromSeconds(3);
+    public static readonly TimeSpan CooldownWindow = TimeSpan.FromSeconds(10);
 
     private readonly IPaymentAttemptRepository _attemptRepository;
     private readonly IOrderRepository _orderRepository;
@@ -164,21 +164,26 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
                 if (priorStatus != attempt.Status && _notifier is not null)
                 {
                     string statusStr = attempt.Status.ToString().ToLowerInvariant();
-                    await _notifier.NotifyPaymentStatusChangedAsync(
-                        attempt.Id,
-                        statusStr,
-                        nowUtc,
-                        cancellationToken).ConfigureAwait(false);
+                    var notifyTasks = new List<Task>(2)
+                    {
+                        _notifier.NotifyPaymentStatusChangedAsync(
+                            attempt.Id,
+                            statusStr,
+                            nowUtc,
+                            cancellationToken)
+                    };
 
                     if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId) &&
                         !string.Equals(attempt.ProviderPaymentId, attempt.Id, StringComparison.OrdinalIgnoreCase))
                     {
-                        await _notifier.NotifyPaymentStatusChangedAsync(
+                        notifyTasks.Add(_notifier.NotifyPaymentStatusChangedAsync(
                             attempt.ProviderPaymentId,
                             statusStr,
                             nowUtc,
-                            cancellationToken).ConfigureAwait(false);
+                            cancellationToken));
                     }
+
+                    await Task.WhenAll(notifyTasks).ConfigureAwait(false);
                 }
             }
         }

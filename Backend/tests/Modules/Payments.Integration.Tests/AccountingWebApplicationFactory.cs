@@ -4,12 +4,38 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
 using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Payments.Application.Ports;
 using Rge.Payments.Infrastructure.Persistence.Repositories;
 
 namespace Rge.Payments.Integration.Tests;
+
+public record CapturedLog(LogLevel Level, string Category, EventId EventId, string Message, Exception? Exception);
+
+public sealed class TestLoggerProvider : ILoggerProvider
+{
+    private readonly ConcurrentBag<CapturedLog> _logs;
+
+    public TestLoggerProvider(ConcurrentBag<CapturedLog> logs) => _logs = logs;
+
+    public ILogger CreateLogger(string categoryName) => new TestLogger(categoryName, _logs);
+
+    public void Dispose() { }
+
+    private sealed class TestLogger(string category, ConcurrentBag<CapturedLog> logs) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            logs.Add(new CapturedLog(logLevel, category, eventId, formatter(state, exception), exception));
+        }
+    }
+}
 
 /// <summary>
 /// Controllable in-memory test payment gateway for integration test suites.
@@ -104,12 +130,18 @@ public sealed class TestPaymentGateway : IPaymentGateway
 public sealed class AccountingWebApplicationFactory : WebApplicationFactory<Program>
 {
     public TestPaymentGateway Gateway { get; } = new();
+    public ConcurrentBag<CapturedLog> CapturedLogs { get; } = [];
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
 
         builder.UseEnvironment("Development");
+
+        builder.ConfigureLogging(logging =>
+        {
+            logging.AddProvider(new TestLoggerProvider(CapturedLogs));
+        });
 
         builder.ConfigureAppConfiguration((_, configBuilder) =>
         {
@@ -137,4 +169,5 @@ public sealed class AccountingWebApplicationFactory : WebApplicationFactory<Prog
         OrderRepository.ResetToBaseline();
     }
 }
+
 
