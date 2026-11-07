@@ -95,6 +95,7 @@ async function proxyRequest(
       body: bodyBuffer && bodyBuffer.byteLength > 0 ? bodyBuffer : undefined,
       redirect: "manual",
       cache: "no-store",
+      signal: request.signal,
     })
 
     // Handle OAuth 2.0 and other HTTP redirects (301, 302, 303, 307, 308)
@@ -159,6 +160,16 @@ async function proxyRequest(
 
     return response
   } catch (err: any) {
+    const isHub = joinedPath.startsWith("hubs/")
+    const isAbort =
+      request.signal.aborted ||
+      err?.name === "AbortError" ||
+      err?.code === "UND_ERR_ABORTED"
+
+    if (isAbort || (isHub && err?.message?.includes("fetch failed"))) {
+      return new NextResponse(null, { status: 204 })
+    }
+
     return NextResponse.json(
       {
         error: "Backend proxy unreachable",
