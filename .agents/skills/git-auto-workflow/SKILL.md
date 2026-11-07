@@ -97,5 +97,6 @@ Inspect commit history and tags before pushing:
 ```powershell
 git log --oneline --graph -n 10
 git tag -l -n
-git push -u origin main --tags
+# Push current active branch (or use parameterless 'git push') and tags:
+git push origin HEAD --tags
 ```
