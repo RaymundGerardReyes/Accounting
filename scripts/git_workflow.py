@@ -504,8 +504,9 @@ def cmd_release(args):
 
     # 4. Optional Push
     if args.push:
-        print(f"\nPushing main branch and tags to origin...")
-        run_git_cmd(["push", "origin", "main", "--tags"], capture_output=False)
+        current_branch = run_git_cmd(["branch", "--show-current"]).strip() or "main"
+        print(f"\nPushing {current_branch} branch and tags to origin...")
+        run_git_cmd(["push", "origin", current_branch, "--tags"], capture_output=False)
         print("Successfully published release to origin!")
 
     print(f"\nRelease {new_version} successfully completed!\n")
