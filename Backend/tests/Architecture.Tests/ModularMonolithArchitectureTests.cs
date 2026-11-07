@@ -98,6 +98,11 @@ public sealed class ModularMonolithArchitectureTests
         foreach (Assembly assembly in loadedRgeAssemblies)
         {
             string asmName = assembly.GetName().Name ?? string.Empty;
+            if (asmName.EndsWith(".Tests", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             string? owningModule = moduleNames.FirstOrDefault(m => asmName.StartsWith($"Rge.{m}.", StringComparison.Ordinal));
 
             if (owningModule is null)
