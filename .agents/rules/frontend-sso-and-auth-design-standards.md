@@ -22,3 +22,8 @@ description: Enterprise SSO OAuth UI/UX standards, brand vector asset invariants
 
 ## 5. In-Flight Action Feedback
 - Display an animated spinner (`Loader2 className="animate-spin"`) and dynamic copy (e.g., `Connecting to Google Workspace...`) during the asynchronous PKCE authorization redirect sequence.
+
+## 6. Elimination of Hardcoded Personas & Demo Fillers
+- Authentication and login screens (`/login`) must never render hardcoded test personas, one-click persona autofill buttons (`Quick Persona Fill`), or static demo credentials in corporate client surfaces.
+- All authentication flows must proceed exclusively through genuine enterprise identity mechanisms (OAuth 2.0 PKCE or corporate credential verification against dynamic backend identity providers).
+- Login copy, titles, and card descriptions must remain clean, professional, and free of references to seeded test accounts, dev shortcuts, or synthetic persona pickers.
