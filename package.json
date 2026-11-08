@@ -4,7 +4,7 @@
   "private": true,
   "description": "Acme Cost Accounting & PayMongo Orchestrator Polyglot Monorepo",
   "engines": {
-    "node": "20.x",
+    "node": "22.x",
     "npm": ">=9.0.0"
   },
   "scripts": {
