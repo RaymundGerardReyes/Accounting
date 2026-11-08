@@ -159,6 +159,18 @@ description: Repository rules for Conventional Commits, scoped staging, secret p
     - **Commit Scope Separation & Quality Gates**:
       - Identity and RBAC changes touching backend APIs and frontend components must strictly maintain scope isolation across separate commits (`feat(backend)` vs `feat(frontend)`), preserving ADR 0011 `"0.0.0-managed"` and passing all 76 parity runner checks.
 
+18. **Heroku Cloud Native Buildpack (CNB) Upstream Asset Outage Invariant**:
+    - The `heroku/dotnet` buildpack relies on downloading pre-compiled `.cnb` assets from `https://github.com/heroku/buildpacks-dotnet/releases/download/vX.Y.Z/...` during slug compilation.
+    - When GitHub's release download redirection service experiences upstream degradation or returns `504 Gateway Time-out`:
+      1. This is an external infrastructure failure between Heroku build dynos and GitHub Releases, NOT an application compilation error.
+      2. **Primary Remediation**: Check [githubstatus.com](https://www.githubstatus.com) and retry deployment once the release asset CDN recovers.
+      3. **Fallback Remediation**: If an urgent deployment is required during an extended CDN outage, switch from the CNB shim to a git-cloned buildpack via the Heroku CLI:
+         ```bash
+         heroku buildpacks:remove heroku/dotnet -a <app-name>
+         heroku buildpacks:add --index 2 https://github.com/jincod/dotnetcore-buildpack.git -a <app-name>
+         ```
+
+
 
 
 
