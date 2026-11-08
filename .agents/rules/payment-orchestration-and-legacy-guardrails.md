@@ -81,3 +81,17 @@ description: Strict architectural guardrails for E:\Accounting legacy compatibil
   4. Environment-configured default (`DEFAULT_RECEIPT_EMAIL` or fallback)
   If no email is discovered across all sources, return a descriptive error (`Receipts.MissingRecipientEmail`) with clear details indicating the missing recipient rather than a silent failure.
 
+## 13. PayMongo Multi-Lifecycle Boundary Isolation & Three-Tier State Invariant
+- **Lifecycle Boundary Separation**: Do not conflate PayMongo API lifecycles:
+  - **Legacy Sources API (`src_...`)**: States transition `pending` -> `chargeable` / `expired` -> `paid`. Once expired, a Source cannot be charged via `POST /v1/payments`. Any attempt to charge an expired source produces runtime error `"Source src_... has expired status"`. An expired source is terminal for that attempt.
+  - **Dynamic QRPh / Payment Intents (`pi_...` + `pm_...`)**: States transition `awaiting_payment_method` <-> `awaiting_next_action` -> `processing` -> `succeeded`.
+  - **Hosted Checkout Sessions (`cs_...`)**: Manage high-level customer redirects and encapsulate underlying payment intents or sources.
+- **Three-Tier Domain Separation**:
+  - **Commercial Order**: Remains in `Pending`/`Unpaid` when an individual payment attempt or instrument expires or fails. An expired payment attempt does NOT cancel or permanently fail the Order. Customers are immediately eligible to initiate a new payment attempt.
+  - **Payment Attempt**: Represents a distinct checkout attempt and maintains optimistic concurrency versions.
+  - **Payment Instrument**: Represents the physical or digital token (`src_...`, `pm_...`, QR code). Once expired or failed, that specific instrument ID is dead and must never be recharged.
+- **Authoritative Provider Verification**:
+  - The frontend must never fabricate provider webhook events (`source.chargeable`, `qrph.expired`) to drive UI transitions.
+  - When countdown timers reach `00:00`, the frontend must trigger authoritative backend reconciliation (`onExpired` / `reconcilePayment()`) rather than declaring client-side failure.
+  - Webhooks must be verified cryptographically (`PayMongoSignatureVerifier` / `HmacVerifier`), while internal sandbox simulations remain isolated in sandbox endpoints (`/api/v1/sandbox/*`).
+

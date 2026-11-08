@@ -4,6 +4,16 @@ using Rge.Payments.Domain.Errors;
 namespace Rge.Payments.Domain.PaymentAttempts;
 
 /// <summary>
+/// Identifies which PayMongo API workflow a PaymentAttempt is using so lifecycle rules are never mixed.
+/// </summary>
+public enum PayMongoWorkflowKind
+{
+    HostedCheckoutSession = 1,
+    QrPhPaymentIntent = 2,
+    LegacySource = 3
+}
+
+/// <summary>
 /// Enforces valid state transitions for PaymentAttempt and guarantees terminal state immutability.
 /// </summary>
 public static class PaymentAttemptStateMachine
@@ -13,6 +23,102 @@ public static class PaymentAttemptStateMachine
             or PaymentAttemptStatus.Failed
             or PaymentAttemptStatus.Cancelled
             or PaymentAttemptStatus.Expired;
+
+    public static PayMongoWorkflowKind DetectWorkflow(string? providerResourceId)
+    {
+        if (string.IsNullOrWhiteSpace(providerResourceId))
+        {
+            return PayMongoWorkflowKind.HostedCheckoutSession;
+        }
+
+        string trimmed = providerResourceId.Trim();
+        if (trimmed.StartsWith("src_", StringComparison.OrdinalIgnoreCase))
+        {
+            return PayMongoWorkflowKind.LegacySource;
+        }
+        if (trimmed.StartsWith("pi_", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("pm_", StringComparison.OrdinalIgnoreCase))
+        {
+            return PayMongoWorkflowKind.QrPhPaymentIntent;
+        }
+
+        return PayMongoWorkflowKind.HostedCheckoutSession;
+    }
+
+    public static bool CanTransitionAttempt(
+        PaymentAttemptStatus current,
+        PaymentAttemptStatus next,
+        PayMongoWorkflowKind workflowKind = PayMongoWorkflowKind.HostedCheckoutSession)
+    {
+        if (current == next)
+        {
+            return false;
+        }
+
+        if (IsTerminal(current))
+        {
+            return false;
+        }
+
+        // For Legacy Sources (src_...), Expired is strictly terminal for that attempt;
+        // retrying requires creating a new PaymentAttempt with a new src_... ID.
+        if (workflowKind == PayMongoWorkflowKind.LegacySource && current == PaymentAttemptStatus.Expired)
+        {
+            return false;
+        }
+
+        return (current, next) switch
+        {
+            (PaymentAttemptStatus.Pending, PaymentAttemptStatus.RequiresAction) => true,
+            (PaymentAttemptStatus.Pending, PaymentAttemptStatus.Processing) => true,
+            (PaymentAttemptStatus.Pending, PaymentAttemptStatus.Succeeded) => true,
+            (PaymentAttemptStatus.Pending, PaymentAttemptStatus.Failed) => true,
+            (PaymentAttemptStatus.Pending, PaymentAttemptStatus.Expired) => true,
+            (PaymentAttemptStatus.Pending, PaymentAttemptStatus.Cancelled) => true,
+            (PaymentAttemptStatus.Pending, PaymentAttemptStatus.Unknown) => true,
+
+            (PaymentAttemptStatus.RequiresAction, PaymentAttemptStatus.Processing) => true,
+            (PaymentAttemptStatus.RequiresAction, PaymentAttemptStatus.Succeeded) => true,
+            (PaymentAttemptStatus.RequiresAction, PaymentAttemptStatus.Failed) => true,
+            (PaymentAttemptStatus.RequiresAction, PaymentAttemptStatus.Expired) => true,
+            (PaymentAttemptStatus.RequiresAction, PaymentAttemptStatus.Cancelled) => true,
+            (PaymentAttemptStatus.RequiresAction, PaymentAttemptStatus.Unknown) => true,
+
+            (PaymentAttemptStatus.Processing, PaymentAttemptStatus.Succeeded) => true,
+            (PaymentAttemptStatus.Processing, PaymentAttemptStatus.Failed) => true,
+            (PaymentAttemptStatus.Processing, PaymentAttemptStatus.Unknown) => true,
+
+            (PaymentAttemptStatus.Unknown, PaymentAttemptStatus.Succeeded) => true,
+            (PaymentAttemptStatus.Unknown, PaymentAttemptStatus.Failed) => true,
+            (PaymentAttemptStatus.Unknown, PaymentAttemptStatus.Expired) => true,
+
+            _ => false
+        };
+    }
+
+    public static PaymentAttemptStatus MapFromPaymentIntentStatus(string providerStatus) =>
+        (providerStatus ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "awaiting_payment_method" => PaymentAttemptStatus.RequiresAction,
+            "awaiting_next_action" => PaymentAttemptStatus.RequiresAction,
+            "processing" => PaymentAttemptStatus.Processing,
+            "succeeded" => PaymentAttemptStatus.Succeeded,
+            "cancelled" => PaymentAttemptStatus.Cancelled,
+            "failed" => PaymentAttemptStatus.Failed,
+            _ => PaymentAttemptStatus.RequiresAction
+        };
+
+    public static PaymentAttemptStatus MapFromLegacySourceStatus(string sourceStatus) =>
+        (sourceStatus ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "pending" => PaymentAttemptStatus.RequiresAction,
+            "chargeable" => PaymentAttemptStatus.Processing,
+            "paid" => PaymentAttemptStatus.Succeeded,
+            "expired" => PaymentAttemptStatus.Expired,
+            "cancelled" => PaymentAttemptStatus.Cancelled,
+            "failed" => PaymentAttemptStatus.Failed,
+            _ => PaymentAttemptStatus.RequiresAction
+        };
 
     public static Result<PaymentAttemptStatus> Transition(
         string attemptId,

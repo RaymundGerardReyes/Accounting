@@ -150,7 +150,7 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
                 }
                 else if (gwStatus is "expired" or "cancelled")
                 {
-                    attempt.MarkExpired(nowUtc);
+                    attempt.MarkExpired(nowUtc, gw.FailureCode, gw.FailureMessage);
                     TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
                 }
                 else if (gwStatus is "failed")

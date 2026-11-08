@@ -211,6 +211,18 @@ public sealed class PayMongoClient : IPaymentGateway
                 FailureMessage: null));
         }
 
+        // Direct inspection for Legacy Sources (src_...)
+        if (providerPaymentId.StartsWith("src_", StringComparison.OrdinalIgnoreCase))
+        {
+            return await InspectDirectSourceAsync(providerPaymentId, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Direct inspection for Payment Intents (pi_...)
+        if (providerPaymentId.StartsWith("pi_", StringComparison.OrdinalIgnoreCase))
+        {
+            return await InspectDirectPaymentIntentAsync(providerPaymentId, cancellationToken).ConfigureAwait(false);
+        }
+
         try
         {
             using HttpResponseMessage response = await _httpClient.GetAsync(
@@ -502,6 +514,184 @@ public sealed class PayMongoClient : IPaymentGateway
         }
 
         return null;
+    }
+
+    private async Task<Result<GatewayPaymentStatusResult>> InspectDirectSourceAsync(
+        string sourceId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using HttpResponseMessage srcResp = await _httpClient.GetAsync(
+                $"sources/{Uri.EscapeDataString(sourceId)}",
+                cancellationToken).ConfigureAwait(false);
+
+            if (!srcResp.IsSuccessStatusCode)
+            {
+                return Result.Failure<GatewayPaymentStatusResult>(
+                    Error.NotFound("PayMongo.SourceNotFound", $"Source '{sourceId}' could not be retrieved."));
+            }
+
+            string srcRawJson = await srcResp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            var srcEnvelope = JsonSerializer.Deserialize<PayMongoSourceEnvelope>(srcRawJson);
+            string srcStatus = (srcEnvelope?.Data?.Attributes?.Status ?? "unknown").Trim().ToLowerInvariant();
+
+            _logger.LogInformation(
+                "[PAYMONGO-DIRECT-SRC] src_id={SrcId} | src_status={SrcStatus}",
+                sourceId,
+                srcStatus);
+
+            if (srcStatus is "expired" or "cancelled")
+            {
+                return Result.Success(new GatewayPaymentStatusResult(
+                    ProviderPaymentId: sourceId,
+                    Status: "expired",
+                    PaymentMethodUsed: srcEnvelope?.Data?.Attributes?.SourceType,
+                    PaidAtUtc: null,
+                    FailureCode: $"source_{srcStatus}",
+                    FailureMessage: $"Source {sourceId} has {srcStatus} status."));
+            }
+
+            if (srcStatus is "failed")
+            {
+                return Result.Success(new GatewayPaymentStatusResult(
+                    ProviderPaymentId: sourceId,
+                    Status: "failed",
+                    PaymentMethodUsed: srcEnvelope?.Data?.Attributes?.SourceType,
+                    PaidAtUtc: null,
+                    FailureCode: "source_failed",
+                    FailureMessage: $"Source {sourceId} failed authorization on PayMongo."));
+            }
+
+            if (srcStatus is "paid")
+            {
+                return Result.Success(new GatewayPaymentStatusResult(
+                    ProviderPaymentId: sourceId,
+                    Status: "paid",
+                    PaymentMethodUsed: srcEnvelope?.Data?.Attributes?.SourceType,
+                    PaidAtUtc: DateTimeOffset.UtcNow,
+                    FailureCode: null,
+                    FailureMessage: null));
+            }
+
+            if (srcStatus is "chargeable")
+            {
+                return Result.Success(new GatewayPaymentStatusResult(
+                    ProviderPaymentId: sourceId,
+                    Status: "processing",
+                    PaymentMethodUsed: srcEnvelope?.Data?.Attributes?.SourceType,
+                    PaidAtUtc: null,
+                    FailureCode: null,
+                    FailureMessage: null));
+            }
+
+            return Result.Success(new GatewayPaymentStatusResult(
+                ProviderPaymentId: sourceId,
+                Status: "awaiting_next_action",
+                PaymentMethodUsed: srcEnvelope?.Data?.Attributes?.SourceType,
+                PaidAtUtc: null,
+                FailureCode: null,
+                FailureMessage: null));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _logger.LogError(ex, "[PAYMONGO-SRC-POLL-EX] Failed to poll PayMongo source {SourceId}", sourceId);
+            return Result.Failure<GatewayPaymentStatusResult>(
+                new Error("PayMongo.PollFailed", "Gateway status poll failed due to network or timeout error."));
+        }
+    }
+
+    private async Task<Result<GatewayPaymentStatusResult>> InspectDirectPaymentIntentAsync(
+        string paymentIntentId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using HttpResponseMessage piResp = await _httpClient.GetAsync(
+                $"payment_intents/{Uri.EscapeDataString(paymentIntentId)}",
+                cancellationToken).ConfigureAwait(false);
+
+            if (!piResp.IsSuccessStatusCode)
+            {
+                return Result.Failure<GatewayPaymentStatusResult>(
+                    Error.NotFound("PayMongo.PaymentIntentNotFound", $"Payment intent '{paymentIntentId}' could not be retrieved."));
+            }
+
+            string rawJson = await piResp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            var piEnvelope = JsonSerializer.Deserialize<PayMongoPaymentIntentEnvelope>(rawJson);
+            var piAttrs = piEnvelope?.Data?.Attributes;
+            string piStatus = (piAttrs?.Status ?? "unknown").Trim().ToLowerInvariant();
+
+            if (piAttrs?.LastPaymentError is not null)
+            {
+                var err = piAttrs.LastPaymentError;
+                return Result.Success(new GatewayPaymentStatusResult(
+                    ProviderPaymentId: paymentIntentId,
+                    Status: "failed",
+                    PaymentMethodUsed: null,
+                    PaidAtUtc: null,
+                    FailureCode: err.FailedCode ?? err.Code ?? "payment_intent_error",
+                    FailureMessage: err.FailedMessage ?? err.Detail ?? "Payment failed inside PayMongo."));
+            }
+
+            if (piStatus is "succeeded")
+            {
+                return Result.Success(new GatewayPaymentStatusResult(
+                    ProviderPaymentId: paymentIntentId,
+                    Status: "paid",
+                    PaymentMethodUsed: null,
+                    PaidAtUtc: DateTimeOffset.UtcNow,
+                    FailureCode: null,
+                    FailureMessage: null));
+            }
+
+            if (piStatus is "cancelled")
+            {
+                return Result.Success(new GatewayPaymentStatusResult(
+                    ProviderPaymentId: paymentIntentId,
+                    Status: "expired",
+                    PaymentMethodUsed: null,
+                    PaidAtUtc: null,
+                    FailureCode: "payment_intent_cancelled",
+                    FailureMessage: "Payment intent was cancelled on PayMongo."));
+            }
+
+            if (piStatus is "failed")
+            {
+                return Result.Success(new GatewayPaymentStatusResult(
+                    ProviderPaymentId: paymentIntentId,
+                    Status: "failed",
+                    PaymentMethodUsed: null,
+                    PaidAtUtc: null,
+                    FailureCode: "payment_intent_failed",
+                    FailureMessage: "Payment intent failed on PayMongo."));
+            }
+
+            if (piStatus is "processing")
+            {
+                return Result.Success(new GatewayPaymentStatusResult(
+                    ProviderPaymentId: paymentIntentId,
+                    Status: "processing",
+                    PaymentMethodUsed: null,
+                    PaidAtUtc: null,
+                    FailureCode: null,
+                    FailureMessage: null));
+            }
+
+            return Result.Success(new GatewayPaymentStatusResult(
+                ProviderPaymentId: paymentIntentId,
+                Status: "awaiting_next_action",
+                PaymentMethodUsed: null,
+                PaidAtUtc: null,
+                FailureCode: null,
+                FailureMessage: null));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _logger.LogError(ex, "[PAYMONGO-PI-POLL-EX] Failed to poll PayMongo payment intent {PaymentIntentId}", paymentIntentId);
+            return Result.Failure<GatewayPaymentStatusResult>(
+                new Error("PayMongo.PollFailed", "Gateway status poll failed due to network or timeout error."));
+        }
     }
 
     /// <summary>
