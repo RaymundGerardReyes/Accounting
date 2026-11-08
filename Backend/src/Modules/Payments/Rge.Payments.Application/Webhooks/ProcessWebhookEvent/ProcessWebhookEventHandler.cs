@@ -96,6 +96,9 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
 
         string? resourceId = null;
         string? checkoutSessionId = null;
+        string? extractedSourceId = null;
+        string? extractedPaymentIntentId = null;
+        string? extractedReferenceNumber = null;
         string? metadataAttemptId = null;
         string? metadataIdempotencyKey = null;
         string? metadataOrderId = null;
@@ -125,6 +128,27 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
                     if (innerAttrs.TryGetProperty("checkout_session_id", out JsonElement csIdEl))
                     {
                         checkoutSessionId ??= csIdEl.GetString();
+                    }
+
+                    if (innerAttrs.TryGetProperty("source", out JsonElement srcEl) &&
+                        srcEl.ValueKind == JsonValueKind.Object &&
+                        srcEl.TryGetProperty("id", out JsonElement srcIdEl))
+                    {
+                        extractedSourceId = srcIdEl.GetString();
+                    }
+
+                    if (innerAttrs.TryGetProperty("payment_intent_id", out JsonElement piiEl))
+                    {
+                        extractedPaymentIntentId = piiEl.GetString();
+                    }
+
+                    if (innerAttrs.TryGetProperty("external_reference_number", out JsonElement ernEl))
+                    {
+                        extractedReferenceNumber = ernEl.GetString();
+                    }
+                    else if (innerAttrs.TryGetProperty("description", out JsonElement descEl))
+                    {
+                        extractedReferenceNumber = descEl.GetString();
                     }
 
                     if (innerAttrs.TryGetProperty("failed_code", out JsonElement fcEl))
@@ -194,7 +218,7 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
             attempt = await _attemptRepository.GetByIdAsync(metadataAttemptId, cancellationToken).ConfigureAwait(false);
         }
 
-        // 2. Direct provider payment ID matching (cs_... or pay_...)
+        // 2. Direct provider payment ID matching (cs_..., src_..., pi_..., pay_...)
         if (attempt is null && !string.IsNullOrWhiteSpace(resourceId))
         {
             attempt = await _attemptRepository.GetByProviderPaymentIdAsync(resourceId, cancellationToken).ConfigureAwait(false);
@@ -206,16 +230,38 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
             attempt = await _attemptRepository.GetByProviderPaymentIdAsync(checkoutSessionId, cancellationToken).ConfigureAwait(false);
         }
 
-        // 4. Idempotency Key matching from metadata
+        // 4. Extracted source ID (src_...) from payment resource
+        if (attempt is null && !string.IsNullOrWhiteSpace(extractedSourceId))
+        {
+            attempt = await _attemptRepository.GetByProviderPaymentIdAsync(extractedSourceId, cancellationToken).ConfigureAwait(false);
+        }
+
+        // 5. Extracted payment intent ID (pi_...) from payment resource
+        if (attempt is null && !string.IsNullOrWhiteSpace(extractedPaymentIntentId))
+        {
+            attempt = await _attemptRepository.GetByProviderPaymentIdAsync(extractedPaymentIntentId, cancellationToken).ConfigureAwait(false);
+        }
+
+        // 6. Idempotency Key matching from metadata
         if (attempt is null && !string.IsNullOrWhiteSpace(metadataIdempotencyKey))
         {
             attempt = await _attemptRepository.GetByIdempotencyKeyAsync(metadataIdempotencyKey, cancellationToken).ConfigureAwait(false);
         }
 
-        // 5. Order ID matching from metadata
+        // 7. Order ID matching from metadata
         if (attempt is null && !string.IsNullOrWhiteSpace(metadataOrderId))
         {
             attempt = await _attemptRepository.GetLatestByOrderIdAsync(metadataOrderId, cancellationToken).ConfigureAwait(false);
+        }
+
+        // 8. Order Number reference matching from external_reference_number / description
+        if (attempt is null && !string.IsNullOrWhiteSpace(extractedReferenceNumber))
+        {
+            Order? refOrder = await _orderRepository.GetByOrderNumberAsync(extractedReferenceNumber.Trim(), cancellationToken).ConfigureAwait(false);
+            if (refOrder is not null)
+            {
+                attempt = await _attemptRepository.GetLatestByOrderIdAsync(refOrder.Id, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         if (attempt is null)
@@ -253,7 +299,11 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
                 await _outboxWriter.EnqueueAsync(paidEvent, cancellationToken).ConfigureAwait(false);
             }
         }
-        else if (command.EventType is "checkout_session.expired" or "qr_code.expired")
+        else if (command.EventType is "source.chargeable")
+        {
+            attempt.MarkProcessing(nowUtc);
+        }
+        else if (command.EventType is "checkout_session.expired" or "qrph.expired" or "qr_code.expired")
         {
             attempt.MarkExpired(nowUtc);
 

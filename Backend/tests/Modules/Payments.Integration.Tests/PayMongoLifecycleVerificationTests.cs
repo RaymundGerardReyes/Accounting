@@ -35,10 +35,16 @@ public sealed class PayMongoLifecycleVerificationTests
 
     private sealed class FakePayMongoGateway : IPaymentGateway
     {
+        private readonly IClock _clock;
         private readonly ConcurrentDictionary<string, GatewayPaymentStatusResult> _sessions = new(StringComparer.OrdinalIgnoreCase);
         public ConcurrentBag<string> ExpiredSessionCalls { get; } = [];
         public ConcurrentBag<string> StatusCalls { get; } = [];
         public bool RejectNextExpireCallWith400 { get; set; }
+
+        public FakePayMongoGateway(IClock clock)
+        {
+            _clock = clock;
+        }
 
         public void SetRemoteSessionStatus(
             string checkoutSessionId,
@@ -62,7 +68,7 @@ public sealed class PayMongoLifecycleVerificationTests
             CancellationToken cancellationToken = default)
         {
             string csId = $"cs_test_{Guid.NewGuid():N}"[..24];
-            DateTimeOffset expiresAt = DateTimeOffset.UtcNow.AddMinutes(30);
+            DateTimeOffset expiresAt = _clock.UtcNow.AddMinutes(30);
 
             _sessions[csId] = new GatewayPaymentStatusResult(
                 ProviderPaymentId: csId,
@@ -133,7 +139,7 @@ public sealed class PayMongoLifecycleVerificationTests
         BuildTestHarness()
     {
         var clock = new FakeClock(new DateTimeOffset(2026, 11, 1, 10, 0, 0, TimeSpan.Zero));
-        var gateway = new FakePayMongoGateway();
+        var gateway = new FakePayMongoGateway(clock);
         var notifier = new SpyPaymentStatusNotifier();
 
         var config = new ConfigurationBuilder()
@@ -631,6 +637,170 @@ public sealed class PayMongoLifecycleVerificationTests
         // Assert 3: SignalR notification was dispatched for both attemptId and csId
         Assert.Contains(notifier.PublishedEvents, e => e.AttemptId == attemptId && e.Status == "expired");
         Assert.Contains(notifier.PublishedEvents, e => e.AttemptId == csId && e.Status == "expired");
+    }
+
+    // =========================================================================
+    // Scenario 11: Official PayMongo qrph.expired Webhook -> Invalidation & SignalR
+    // =========================================================================
+    [Fact]
+    public async Task Scenario11_QrphExpiredWebhook_MatchesOfficialPayMongoEvent_And_MarksExpired()
+    {
+        var (sp, clock, gateway, notifier) = BuildTestHarness();
+        await using var _ = sp;
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var createOrder = scope.ServiceProvider.GetRequiredService<CreateOrderHandler>();
+        var initiateAttempt = scope.ServiceProvider.GetRequiredService<InitiateAttemptHandler>();
+        var receiveWebhook = scope.ServiceProvider.GetRequiredService<ReceivePayMongoWebhookHandler>();
+        var attemptRepo = scope.ServiceProvider.GetRequiredService<IPaymentAttemptRepository>();
+
+        var ordRes = await createOrder.HandleAsync(new CreateOrderCommand("ADV-TAX-TEXT-2026", Quantity: 1));
+        var attRes = await initiateAttempt.HandleAsync(new InitiateAttemptCommand(ordRes.Value.Id, "qrph", "idem-qrph-exp"));
+        string csId = attRes.Value.ProviderPaymentId!;
+        string attemptId = attRes.Value.Id;
+
+        long unixNow = clock.UtcNow.ToUnixTimeSeconds();
+        string rawPayload = $$"""
+            {
+              "data": {
+                "id": "evt_qrph_exp_official_001",
+                "type": "event",
+                "attributes": {
+                  "type": "qrph.expired",
+                  "data": {
+                    "id": "{{csId}}",
+                    "type": "checkout_session",
+                    "attributes": {
+                      "status": "expired",
+                      "metadata": {
+                        "payment_attempt_id": "{{attemptId}}"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        string sigHeader = WebhookSigner.CreateSignatureHeader(rawPayload, WebhookSecret, unixNow);
+        var webhookRes = await receiveWebhook.HandleAsync(new ReceivePayMongoWebhookCommand(sigHeader, rawPayload, "corr-qrph-exp"));
+        Assert.True(webhookRes.IsSuccess);
+
+        PaymentAttempt? attempt = await attemptRepo.GetByIdAsync(attemptId);
+        Assert.NotNull(attempt);
+        Assert.Equal(PaymentAttemptStatus.Expired, attempt.Status);
+
+        for (int i = 0; i < 50 && !gateway.ExpiredSessionCalls.Contains(csId); i++)
+        {
+            await Task.Delay(20);
+        }
+        Assert.Contains(csId, gateway.ExpiredSessionCalls);
+        Assert.Contains(notifier.PublishedEvents, e => e.AttemptId == attemptId && e.Status == "expired");
+    }
+
+    // =========================================================================
+    // Scenario 12: payment.paid with pay_... correlates via source.id
+    // =========================================================================
+    [Fact]
+    public async Task Scenario12_PaymentPaidWebhook_WithPayResourceId_CorrelatesViaSourceId()
+    {
+        var (sp, clock, _, notifier) = BuildTestHarness();
+        await using var _ = sp;
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var createOrder = scope.ServiceProvider.GetRequiredService<CreateOrderHandler>();
+        var attemptRepo = scope.ServiceProvider.GetRequiredService<IPaymentAttemptRepository>();
+        var orderRepo = scope.ServiceProvider.GetRequiredService<IOrderRepository>();
+        var receiveWebhook = scope.ServiceProvider.GetRequiredService<ReceivePayMongoWebhookHandler>();
+
+        var ordRes = await createOrder.HandleAsync(new CreateOrderCommand("COST-ACC-TEXT-2026", Quantity: 1));
+        var attempt = PaymentAttempt.CreatePending(
+            ordRes.Value.Id, "gcash", Rge.BuildingBlocks.SharedKernel.Money.Money.Php(ordRes.Value.AmountMinor), "idem-src-correlate", clock.UtcNow);
+        string srcId = "src_paymongo_source_9999";
+        attempt.AttachCheckoutSession(srcId, "https://checkout.paymongo.com/src_9999", clock.UtcNow.AddMinutes(30), clock.UtcNow);
+        await attemptRepo.SaveAsync(attempt);
+
+        long unixNow = clock.UtcNow.ToUnixTimeSeconds();
+        string rawPayload = $$"""
+            {
+              "data": {
+                "id": "evt_pay_src_rel_001",
+                "type": "event",
+                "attributes": {
+                  "type": "payment.paid",
+                  "data": {
+                    "id": "pay_live_settled_555",
+                    "type": "payment",
+                    "attributes": {
+                      "status": "paid",
+                      "payment_method_used": "gcash",
+                      "source": {
+                        "id": "{{srcId}}",
+                        "type": "source"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        string sigHeader = WebhookSigner.CreateSignatureHeader(rawPayload, WebhookSecret, unixNow);
+        var webhookRes = await receiveWebhook.HandleAsync(new ReceivePayMongoWebhookCommand(sigHeader, rawPayload, "corr-src-rel"));
+        Assert.True(webhookRes.IsSuccess);
+
+        PaymentAttempt? updatedAttempt = await attemptRepo.GetByIdAsync(attempt.Id);
+        Assert.NotNull(updatedAttempt);
+        Assert.Equal(PaymentAttemptStatus.Succeeded, updatedAttempt.Status);
+
+        Order? updatedOrder = await orderRepo.GetByIdAsync(ordRes.Value.Id);
+        Assert.NotNull(updatedOrder);
+        Assert.Equal("paid", updatedOrder.Status);
+
+        Assert.Contains(notifier.PublishedEvents, e => e.AttemptId == attempt.Id && e.Status == "succeeded");
+    }
+
+    // =========================================================================
+    // Scenario 13: Polling at deadline bypasses cooldown and authoritatively verifies paid status
+    // =========================================================================
+    [Fact]
+    public async Task Scenario13_PollingAtDeadline_BypassesCooldown_And_DetectsLatePayment()
+    {
+        PollAndReconcileHandler.ResetCooldowns();
+        var (sp, clock, gateway, notifier) = BuildTestHarness();
+        await using var _ = sp;
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var createOrder = scope.ServiceProvider.GetRequiredService<CreateOrderHandler>();
+        var initiateAttempt = scope.ServiceProvider.GetRequiredService<InitiateAttemptHandler>();
+        var pollHandler = scope.ServiceProvider.GetRequiredService<PollAndReconcileHandler>();
+        var attemptRepo = scope.ServiceProvider.GetRequiredService<IPaymentAttemptRepository>();
+
+        var ordRes = await createOrder.HandleAsync(new CreateOrderCommand("COST-ACC-TEXT-2026", Quantity: 1));
+        var attRes = await initiateAttempt.HandleAsync(new InitiateAttemptCommand(ordRes.Value.Id, "qrph", "idem-deadline-cd"));
+        string csId = attRes.Value.ProviderPaymentId!;
+        string attemptId = attRes.Value.Id;
+
+        // 1. Advance to 1 second before deadline (T+29m59s) and poll to trigger cooldown
+        clock.Advance(TimeSpan.FromMinutes(29) + TimeSpan.FromSeconds(59));
+        gateway.SetRemoteSessionStatus(csId, "active");
+        var prePoll = await pollHandler.HandleAsync(new PollAndReconcileQuery(attemptId, AutoReconcile: true));
+        Assert.True(prePoll.IsSuccess);
+        Assert.Equal("requiresaction", prePoll.Value.Status.ToLowerInvariant());
+
+        // 2. Advance 2 seconds (now at T+30m01s, past the 30-min deadline, but within 3-sec cooldown!)
+        clock.Advance(TimeSpan.FromSeconds(2));
+        gateway.SetRemoteSessionStatus(csId, "paid", "qrph", clock.UtcNow);
+
+        // 3. Poll at deadline: Even though within 3-sec cooldown window, deadline check forces authoritative gateway query!
+        var deadlinePoll = await pollHandler.HandleAsync(new PollAndReconcileQuery(attemptId, AutoReconcile: true));
+        Assert.True(deadlinePoll.IsSuccess);
+        Assert.Equal("succeeded", deadlinePoll.Value.Status.ToLowerInvariant());
+
+        PaymentAttempt? attempt = await attemptRepo.GetByIdAsync(attemptId);
+        Assert.NotNull(attempt);
+        Assert.Equal(PaymentAttemptStatus.Succeeded, attempt.Status);
+        Assert.Contains(notifier.PublishedEvents, e => e.AttemptId == attemptId && e.Status == "succeeded");
     }
 }
 

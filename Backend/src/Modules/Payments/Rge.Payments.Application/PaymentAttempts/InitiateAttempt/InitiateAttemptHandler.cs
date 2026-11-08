@@ -169,7 +169,8 @@ public sealed class InitiateAttemptHandler : ICommandHandler<InitiateAttemptComm
             CustomerPhone: custPhone,
             LineItems: [new CheckoutLineItemDto(order.Title, 1, order.Amount.AmountMinor, order.Amount.CurrencyCode)],
             SuccessUrl: command.SuccessUrl,
-            CancelUrl: command.CancelUrl);
+            CancelUrl: command.CancelUrl,
+            PaymentAttemptId: attempt.Id);
 
         Result<CheckoutSessionResult> gatewayResult = await _paymentGateway
             .CreateCheckoutSessionAsync(checkoutReq, cancellationToken)

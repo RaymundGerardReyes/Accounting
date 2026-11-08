@@ -120,7 +120,8 @@ public sealed class PayMongoClient : IPaymentGateway
                     {
                         ["order_id"] = request.OrderId,
                         ["order_number"] = request.OrderNumber,
-                        ["idempotency_key"] = request.IdempotencyKey
+                        ["idempotency_key"] = request.IdempotencyKey,
+                        ["payment_attempt_id"] = request.PaymentAttemptId ?? string.Empty
                     })));
 
         try

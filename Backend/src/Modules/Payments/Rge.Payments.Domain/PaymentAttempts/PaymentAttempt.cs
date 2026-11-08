@@ -126,6 +126,20 @@ public sealed class PaymentAttempt : Entity<string>
         return Result.Success();
     }
 
+    public Result MarkProcessing(DateTimeOffset nowUtc)
+    {
+        var transition = PaymentAttemptStateMachine.Transition(Id, Status, PaymentAttemptStatus.Processing);
+        if (transition.IsFailure)
+        {
+            return transition;
+        }
+
+        Status = transition.Value;
+        UpdatedAt = nowUtc;
+
+        return Result.Success();
+    }
+
     public Result MarkSucceeded(DateTimeOffset paidAtUtc, string? actualPaymentMethod = null)
     {
         var transition = PaymentAttemptStateMachine.Transition(Id, Status, PaymentAttemptStatus.Succeeded);

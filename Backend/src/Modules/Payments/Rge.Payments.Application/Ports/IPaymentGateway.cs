@@ -15,7 +15,8 @@ public sealed record CreateCheckoutSessionRequest(
     string? CustomerPhone,
     IReadOnlyList<CheckoutLineItemDto> LineItems,
     string? SuccessUrl = null,
-    string? CancelUrl = null);
+    string? CancelUrl = null,
+    string? PaymentAttemptId = null);
 
 public sealed record CheckoutLineItemDto(
     string Name,

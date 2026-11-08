@@ -192,15 +192,74 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
             attempt.ExpiresAt.HasValue &&
             attempt.ExpiresAt.Value <= nowUtc)
         {
-            attempt.MarkExpired(nowUtc);
-            TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
+            // Authoritative Provider Verification at Deadline:
+            // Never declare local expiration without verifying whether PayMongo settled the payment
+            bool shouldExpire = true;
+            string? expireFailureCode = null;
+            string? expireFailureMsg = null;
+
+            if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId))
+            {
+                var finalCheck = await _paymentGateway
+                    .GetCheckoutSessionStatusAsync(attempt.ProviderPaymentId, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (finalCheck.IsSuccess)
+                {
+                    string finalStatus = finalCheck.Value.Status.ToLowerInvariant();
+                    if (finalStatus is "paid" or "succeeded")
+                    {
+                        shouldExpire = false;
+                        DateTimeOffset paidAt = finalCheck.Value.PaidAtUtc ?? nowUtc;
+                        attempt.MarkSucceeded(paidAt, finalCheck.Value.PaymentMethodUsed);
+
+                        if (order is not null && order.Status != OrderStatus.Paid)
+                        {
+                            order.MarkPaid(paidAt);
+                            await _orderRepository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
+
+                            var paidEvent = OrderPaidIntegrationEvent.Create(
+                                orderId: order.Id,
+                                orderNumber: order.OrderNumber,
+                                paymentAttemptId: attempt.Id,
+                                amountMinor: order.Amount.AmountMinor,
+                                currency: order.Amount.CurrencyCode,
+                                paymentMethod: attempt.PaymentMethod,
+                                customerName: "Valued Customer",
+                                customerEmail: string.Empty,
+                                paidAtUtc: paidAt);
+
+                            await _outboxWriter.EnqueueAsync(paidEvent, cancellationToken).ConfigureAwait(false);
+                        }
+                    }
+                    else if (finalStatus is "failed")
+                    {
+                        shouldExpire = false;
+                        attempt.MarkFailed(finalCheck.Value.FailureCode ?? "FAILED", finalCheck.Value.FailureMessage ?? "Payment failed", nowUtc);
+                        TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
+                    }
+                    else
+                    {
+                        expireFailureCode = finalCheck.Value.FailureCode;
+                        expireFailureMsg = finalCheck.Value.FailureMessage;
+                    }
+                }
+            }
+
+            if (shouldExpire)
+            {
+                attempt.MarkExpired(nowUtc, expireFailureCode, expireFailureMsg);
+                TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
+            }
+
             await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
 
             if (_notifier is not null)
             {
+                string statusStr = attempt.Status.ToString().ToLowerInvariant();
                 await _notifier.NotifyPaymentStatusChangedAsync(
                     attempt.Id,
-                    "expired",
+                    statusStr,
                     nowUtc,
                     cancellationToken).ConfigureAwait(false);
 
@@ -209,7 +268,7 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
                 {
                     await _notifier.NotifyPaymentStatusChangedAsync(
                         attempt.ProviderPaymentId,
-                        "expired",
+                        statusStr,
                         nowUtc,
                         cancellationToken).ConfigureAwait(false);
                 }
