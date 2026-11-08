@@ -190,6 +190,24 @@ public sealed class PayMongoWebhookEndpoint : IEndpointModule
         }
     }
 
+    private static string? ExtractSignatureHeader(IHeaderDictionary headers)
+    {
+        if (headers.TryGetValue(SignatureHeaderName, out var values) && !string.IsNullOrWhiteSpace(values))
+        {
+            return values.ToString();
+        }
+
+        foreach (var (key, value) in headers)
+        {
+            if (string.Equals(key, SignatureHeaderName, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value.ToString();
+            }
+        }
+
+        return null;
+    }
+
     private static async Task<IResult> HandleWebhookAsync(
         HttpContext httpContext,
         PayMongoSignatureVerifier signatureVerifier,
@@ -198,10 +216,15 @@ public sealed class PayMongoWebhookEndpoint : IEndpointModule
         CancellationToken cancellationToken)
     {
         string path = httpContext.Request.Path.Value ?? "/";
-        string? signatureHeader = httpContext.Request.Headers[SignatureHeaderName];
+        string? signatureHeader = ExtractSignatureHeader(httpContext.Request.Headers);
         bool hasSig = !string.IsNullOrWhiteSpace(signatureHeader);
 
         httpContext.Request.EnableBuffering();
+
+        if (httpContext.Request.Body.CanSeek)
+        {
+            httpContext.Request.Body.Position = 0;
+        }
 
         if (httpContext.Request.ContentLength > MaxWebhookBodyBytes)
         {
@@ -228,13 +251,40 @@ public sealed class PayMongoWebhookEndpoint : IEndpointModule
             rawBody = await reader.ReadToEndAsync(cancellationToken);
         }
 
+        if (httpContext.Request.Body.CanSeek)
+        {
+            httpContext.Request.Body.Position = 0;
+        }
+
         logger.LogInformation(
             "[PAYMONGO-WEBHOOK-INBOUND] Path={Path} | HasSignature={HasSig} | PayloadBytes={Bytes}",
             path,
             hasSig,
             Encoding.UTF8.GetByteCount(rawBody));
 
-        if (!signatureVerifier.IsValidSignature(signatureHeader, rawBody))
+        bool isValidSignature;
+        try
+        {
+            isValidSignature = signatureVerifier.IsValidSignature(signatureHeader, rawBody);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "[PAYMONGO-WEBHOOK-REJECTED] Path={Path} | Reason=SignatureVerificationException | HasSig={HasSig}",
+                path,
+                hasSig);
+            return Results.Json(
+                data: new
+                {
+                    received = false,
+                    error = "InvalidSignature",
+                    message = "Paymongo-Signature HMAC-SHA256 verification failed or timestamp expired."
+                },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (!isValidSignature)
         {
             logger.LogWarning(
                 "[PAYMONGO-WEBHOOK-REJECTED] Path={Path} | Reason=InvalidSignature | HasSig={HasSig}",

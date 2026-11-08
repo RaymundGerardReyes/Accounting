@@ -98,6 +98,7 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
         string? checkoutSessionId = null;
         string? extractedSourceId = null;
         string? extractedPaymentIntentId = null;
+        string? extractedPaymentId = null;
         string? extractedReferenceNumber = null;
         string? metadataAttemptId = null;
         string? metadataIdempotencyKey = null;
@@ -130,6 +131,11 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
                         checkoutSessionId ??= csIdEl.GetString();
                     }
 
+                    if (innerAttrs.TryGetProperty("payment_id", out JsonElement payIdEl))
+                    {
+                        extractedPaymentId = payIdEl.GetString();
+                    }
+
                     if (innerAttrs.TryGetProperty("source", out JsonElement srcEl) &&
                         srcEl.ValueKind == JsonValueKind.Object &&
                         srcEl.TryGetProperty("id", out JsonElement srcIdEl))
@@ -140,6 +146,16 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
                     if (innerAttrs.TryGetProperty("payment_intent_id", out JsonElement piiEl))
                     {
                         extractedPaymentIntentId = piiEl.GetString();
+                    }
+
+                    if (string.IsNullOrWhiteSpace(metadataOrderId) && innerAttrs.TryGetProperty("order_id", out JsonElement oidEl))
+                    {
+                        metadataOrderId = oidEl.GetString();
+                    }
+
+                    if (string.IsNullOrWhiteSpace(extractedReferenceNumber) && innerAttrs.TryGetProperty("order_number", out JsonElement onEl))
+                    {
+                        extractedReferenceNumber = onEl.GetString();
                     }
 
                     if (innerAttrs.TryGetProperty("external_reference_number", out JsonElement ernEl))
@@ -171,6 +187,11 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
                     {
                         foreach (JsonElement payEl in paymentsEl.EnumerateArray())
                         {
+                            if (payEl.TryGetProperty("id", out JsonElement pid))
+                            {
+                                extractedPaymentId ??= pid.GetString();
+                            }
+
                             if (payEl.TryGetProperty("attributes", out JsonElement payAttrs))
                             {
                                 if (payAttrs.TryGetProperty("failed_code", out JsonElement pfc))
@@ -230,6 +251,12 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
             attempt = await _attemptRepository.GetByProviderPaymentIdAsync(checkoutSessionId, cancellationToken).ConfigureAwait(false);
         }
 
+        // 3b. Extracted payment_id from refund/payment event
+        if (attempt is null && !string.IsNullOrWhiteSpace(extractedPaymentId))
+        {
+            attempt = await _attemptRepository.GetByProviderPaymentIdAsync(extractedPaymentId, cancellationToken).ConfigureAwait(false);
+        }
+
         // 4. Extracted source ID (src_...) from payment resource
         if (attempt is null && !string.IsNullOrWhiteSpace(extractedSourceId))
         {
@@ -276,6 +303,14 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
         }
 
         Order? order = await _orderRepository.GetByIdAsync(attempt.OrderId, cancellationToken).ConfigureAwait(false);
+        if (order is null && !string.IsNullOrWhiteSpace(metadataOrderId))
+        {
+            order = await _orderRepository.GetByIdAsync(metadataOrderId, cancellationToken).ConfigureAwait(false);
+        }
+        if (order is null && !string.IsNullOrWhiteSpace(extractedReferenceNumber))
+        {
+            order = await _orderRepository.GetByOrderNumberAsync(extractedReferenceNumber.Trim(), cancellationToken).ConfigureAwait(false);
+        }
 
         if (command.EventType is "checkout_session.payment.paid" or "payment.paid")
         {
@@ -308,6 +343,8 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
             attempt.MarkExpired(nowUtc);
 
             if (_paymentGateway is not null &&
+                attempt.Status != PaymentAttemptStatus.Succeeded &&
+                order?.Status != OrderStatus.Paid &&
                 !string.IsNullOrWhiteSpace(attempt.ProviderPaymentId) &&
                 attempt.ProviderPaymentId.StartsWith("cs_", StringComparison.OrdinalIgnoreCase))
             {
@@ -326,6 +363,8 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
             attempt.MarkFailed(failureCode ?? FailureCode.CardDeclined, failureMessage ?? "Payment failed", nowUtc);
 
             if (_paymentGateway is not null &&
+                attempt.Status != PaymentAttemptStatus.Succeeded &&
+                order?.Status != OrderStatus.Paid &&
                 !string.IsNullOrWhiteSpace(attempt.ProviderPaymentId) &&
                 attempt.ProviderPaymentId.StartsWith("cs_", StringComparison.OrdinalIgnoreCase))
             {
@@ -338,6 +377,24 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
                     // Best-effort gateway lock
                 }
             }
+        }
+        else if (command.EventType is "payment.refunded" or "payment.refund.updated")
+        {
+            if (order is not null && order.Status != OrderStatus.Refunded)
+            {
+                order.MarkRefunded(nowUtc);
+                await _orderRepository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        else
+        {
+            webhookEvent.MarkIgnored(nowUtc);
+            await _webhookStore.SaveAsync(webhookEvent, cancellationToken).ConfigureAwait(false);
+            return Result.Success(new ProcessWebhookEventResponse(
+                Success: true,
+                ProviderEventId: command.ProviderEventId,
+                ProcessingStatus: WebhookProcessingStatus.Ignored,
+                Message: $"Unhandled event type '{command.EventType}' safely ignored."));
         }
 
         await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
@@ -396,6 +453,10 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
         if (string.IsNullOrWhiteSpace(orderId) && metaEl.TryGetProperty("order_id", out JsonElement oEl))
         {
             orderId = oEl.GetString();
+        }
+        if (string.IsNullOrWhiteSpace(orderId) && metaEl.TryGetProperty("orderId", out JsonElement oiEl))
+        {
+            orderId = oiEl.GetString();
         }
     }
 }

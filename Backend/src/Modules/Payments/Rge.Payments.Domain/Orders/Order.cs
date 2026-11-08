@@ -3,6 +3,7 @@ using Rge.BuildingBlocks.SharedKernel.Money;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
 using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Payments.Domain.Errors;
+using Rge.Payments.Domain.Orders.Events;
 
 namespace Rge.Payments.Domain.Orders;
 
@@ -97,6 +98,19 @@ public sealed class Order : AggregateRoot<string>
 
         Status = "paid";
         UpdatedAt = paidAtUtc;
+        return Result.Success();
+    }
+
+    public Result MarkRefunded(DateTimeOffset refundedAtUtc)
+    {
+        if (Status == OrderStatus.Refunded)
+        {
+            return Result.Success();
+        }
+
+        Status = OrderStatus.Refunded;
+        UpdatedAt = refundedAtUtc;
+        RaiseDomainEvent(new OrderRefunded(Id, OrderNumber, Amount, "PayMongo Webhook Refund", refundedAtUtc));
         return Result.Success();
     }
 

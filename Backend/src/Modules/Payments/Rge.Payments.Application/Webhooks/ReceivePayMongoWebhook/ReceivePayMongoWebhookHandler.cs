@@ -19,7 +19,9 @@ public sealed class ReceivePayMongoWebhookHandler : ICommandHandler<ReceivePayMo
         "checkout_session.expired",
         "qr_code.expired",
         "qrph.expired",
-        "source.chargeable"
+        "source.chargeable",
+        "payment.refunded",
+        "payment.refund.updated"
     };
 
     private readonly ProcessWebhookEventHandler? _processHandler;
