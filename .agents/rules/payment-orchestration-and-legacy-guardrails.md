@@ -70,3 +70,14 @@ description: Strict architectural guardrails for E:\Accounting legacy compatibil
 - **Composite State Incompleteness**: Third-party checkout sessions (such as PayMongo Checkout Sessions) frequently report `cs_status=active` and `pi_status=awaiting_next_action` even after an attached e-wallet source (`src_...`) has expired, failed, or been canceled by the user.
 - **Mandatory Terminal Resolution**: When `awaiting_next_action` is encountered and an underlying source token (`src_...`) is attached, the system must inspect the Source resource to detect terminal states (`expired`, `failed`, `cancelled`) and immediately transition the local `PaymentAttempt` to its corresponding terminal state (`Expired` / `Failed`).
 - **Latency Protection Without Feature Elimination**: Latency goals must be achieved via concurrency, rate-limit cooldowns, and non-blocking background workers—NEVER by removing necessary gateway validation calls.
+
+## 12. Dual-Naming Contract Parity & Resilient Notification Dispatch Invariant
+- **Contract Aliasing**: Any API endpoint receiving email notification overrides must support both `email` and `to_email` JSON properties using explicit `[JsonPropertyName]` or custom property binding to prevent frontend/backend serialization drift.
+- **Permissive Optional Bodies**: Minimal API endpoints that accept optional request payloads (e.g. `POST .../receipt/email`) must allow empty bodies, null payloads, and empty JSON objects (`{}`) without throwing 400 model binding errors (`[FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)]`).
+- **Graceful Recipient Resolution**: When no override email is supplied in the request body, the backend must cascade from:
+  1. `request.Email` / `request.ToEmail`
+  2. `receipt.CustomerEmail` (persisted receipt record)
+  3. Associated `PaymentAttempt.CustomerEmail` or `Order.CustomerEmail` (via `IReceiptSourceResolver`)
+  4. Environment-configured default (`DEFAULT_RECEIPT_EMAIL` or fallback)
+  If no email is discovered across all sources, return a descriptive error (`Receipts.MissingRecipientEmail`) with clear details indicating the missing recipient rather than a silent failure.
+

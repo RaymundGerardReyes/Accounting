@@ -223,4 +223,115 @@ public sealed class ReceiptEmailPerformanceTests : IClassFixture<AccountingWebAp
         Assert.Equal("jit-client@rge.ph", body.RecipientEmail);
         Assert.True(body.Dispatched);
     }
+
+    [Fact]
+    public async Task ResendReceiptEmail_WithToEmailProperty_SucceedsEvenWhenReceiptLacksEmail()
+    {
+        using HttpClient client = _baseFactory.CreateClient();
+        await WarmupAsync(_baseFactory, client);
+
+        string paymentAttemptId = $"pay_toemail_{Guid.NewGuid():N}";
+        string orderId = $"ord_toemail_{Guid.NewGuid():N}";
+        string orderNumber = $"ORD-TOEMAIL-{Guid.NewGuid():N}"[..16].ToUpperInvariant();
+
+        using (IServiceScope scope = _baseFactory.Services.CreateScope())
+        {
+            var issueHandler = scope.ServiceProvider.GetRequiredService<IssueReceiptHandler>();
+            var issueCommand = new IssueReceiptCommand(
+                OrderId: orderId,
+                OrderNumber: orderNumber,
+                PaymentAttemptId: paymentAttemptId,
+                AmountMinor: 10000,
+                Currency: "PHP",
+                CustomerName: "Customer Without Email",
+                CustomerEmail: "", // Empty customer email
+                Description: "ToEmail Binding Test",
+                PaymentMethod: "qrph");
+
+            var issueResult = await issueHandler.HandleAsync(issueCommand);
+            Assert.True(issueResult.IsSuccess);
+        }
+
+        // Post using snake_case 'to_email' matching Frontend/lib/payment-api.ts:503
+        var requestPayload = new { to_email = "override-recipient@rge.ph" };
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/payments/{paymentAttemptId}/receipt/email",
+            requestPayload,
+            JsonDefaults.Options);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        string rawJson = await response.Content.ReadAsStringAsync();
+        var body = System.Text.Json.JsonSerializer.Deserialize<ResendReceiptEmailResponse>(rawJson, JsonDefaults.Options);
+        Assert.NotNull(body);
+        Assert.Equal(paymentAttemptId, body.PaymentId);
+        Assert.StartsWith("OR-", body.OfficialReceiptNumber, StringComparison.Ordinal);
+        Assert.Equal("override-recipient@rge.ph", body.RecipientEmail);
+        Assert.True(body.Dispatched);
+        Assert.True(body.Success);
+        Assert.Equal("override-recipient@rge.ph", body.Recipient);
+        Assert.NotNull(body.Receipt);
+
+        // Verify JSON response has presentation parity for TypeScript frontend
+        using var rawDoc = System.Text.Json.JsonDocument.Parse(rawJson);
+        Assert.True(rawDoc.RootElement.TryGetProperty("receipt", out var receiptProp));
+        Assert.True(receiptProp.TryGetProperty("document_title", out var titleProp));
+        Assert.Equal("BIR Official Receipt & Treasury Acknowledgement", titleProp.GetString());
+        Assert.True(receiptProp.TryGetProperty("issuer", out var issuerProp));
+        Assert.True(issuerProp.TryGetProperty("company_name", out _));
+    }
+
+    [Fact]
+    public async Task ResendReceiptEmail_WithEmptyBody_And_DefaultEmail_CascadesGracefully()
+    {
+        using HttpClient client = _baseFactory.CreateClient();
+        await WarmupAsync(_baseFactory, client);
+
+        string paymentAttemptId = $"pay_fallback_{Guid.NewGuid():N}";
+        string orderId = $"ord_fallback_{Guid.NewGuid():N}";
+        string orderNumber = $"ORD-FALLBACK-{Guid.NewGuid():N}"[..16].ToUpperInvariant();
+
+        using (IServiceScope scope = _baseFactory.Services.CreateScope())
+        {
+            var issueHandler = scope.ServiceProvider.GetRequiredService<IssueReceiptHandler>();
+            var issueCommand = new IssueReceiptCommand(
+                OrderId: orderId,
+                OrderNumber: orderNumber,
+                PaymentAttemptId: paymentAttemptId,
+                AmountMinor: 10000,
+                Currency: "PHP",
+                CustomerName: "Customer Fallback",
+                CustomerEmail: "", // Empty customer email
+                Description: "Fallback Email Test",
+                PaymentMethod: "qrph");
+
+            var issueResult = await issueHandler.HandleAsync(issueCommand);
+            Assert.True(issueResult.IsSuccess);
+        }
+
+        string originalEnv = Environment.GetEnvironmentVariable("DEFAULT_RECEIPT_EMAIL") ?? string.Empty;
+        try
+        {
+            Environment.SetEnvironmentVariable("DEFAULT_RECEIPT_EMAIL", "treasury-fallback@rge.ph");
+
+            // Client sends empty JSON object: {}
+            var emptyJson = new { };
+            var response = await client.PostAsJsonAsync(
+                $"/api/v1/payments/{paymentAttemptId}/receipt/email",
+                emptyJson,
+                JsonDefaults.Options);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var body = await response.Content.ReadFromJsonAsync<ResendReceiptEmailResponse>(JsonDefaults.Options);
+            Assert.NotNull(body);
+            Assert.Equal("treasury-fallback@rge.ph", body.RecipientEmail);
+            Assert.True(body.Dispatched);
+            Assert.True(body.Success);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DEFAULT_RECEIPT_EMAIL", string.IsNullOrEmpty(originalEnv) ? null : originalEnv);
+        }
+    }
 }

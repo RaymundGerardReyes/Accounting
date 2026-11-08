@@ -101,11 +101,19 @@ public sealed class ReceiptSourceResolver : IReceiptSourceResolver
             try
             {
                 using var doc = JsonDocument.Parse(order.MetadataJson);
-                if (doc.RootElement.TryGetProperty("customer_name", out var n) && n.ValueKind == JsonValueKind.String)
+                var root = doc.RootElement;
+                if ((root.TryGetProperty("customer_name", out var n) ||
+                     root.TryGetProperty("customerName", out n) ||
+                     root.TryGetProperty("buyer_name", out n) ||
+                     root.TryGetProperty("name", out n)) && n.ValueKind == JsonValueKind.String)
                 {
                     customerName = n.GetString() ?? customerName;
                 }
-                if (doc.RootElement.TryGetProperty("customer_email", out var e) && e.ValueKind == JsonValueKind.String)
+                if ((root.TryGetProperty("customer_email", out var e) ||
+                     root.TryGetProperty("customerEmail", out e) ||
+                     root.TryGetProperty("buyer_email", out e) ||
+                     root.TryGetProperty("email", out e) ||
+                     root.TryGetProperty("billing_email", out e)) && e.ValueKind == JsonValueKind.String)
                 {
                     customerEmail = e.GetString() ?? customerEmail;
                 }
