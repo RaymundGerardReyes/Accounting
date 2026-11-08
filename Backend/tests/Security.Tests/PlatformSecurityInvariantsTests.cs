@@ -62,6 +62,56 @@ public sealed class PlatformSecurityInvariantsTests
         Assert.False(HmacVerifier.VerifyPayMongoSignature(header, body, secret, now.AddMinutes(10)));
     }
 
+    [Theory]
+    [InlineData("9223372036854775807")] // long.MaxValue
+    [InlineData("-9223372036854775808")] // long.MinValue
+    [InlineData("253402300800")] // MaxUnixSeconds + 1 (Year 10000 overflow)
+    [InlineData("-62135596801")] // MinUnixSeconds - 1 (Year 0000 underflow)
+    [InlineData("999999999999999")]
+    [InlineData("-999999999999999")]
+    [InlineData("9999999999999999999999999999999999999999999")] // Exceeds Int64 range
+    [InlineData("invalid_timestamp")]
+    [InlineData("NaN")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void PayMongo_HmacVerifier_Rejects_TimestampBoundaryAndOverflow_WithoutThrowing(string timestampPart)
+    {
+        const string secret = "whsec_live_test_secret_key_2026";
+        const string body = "{\"data\":{\"id\":\"evt_123\"}}";
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        string header = $"t={timestampPart},te=0000000000000000000000000000000000000000000000000000000000000000,li=0000000000000000000000000000000000000000000000000000000000000000";
+
+        bool result = false;
+        Exception? exception = Record.Exception(() =>
+        {
+            result = HmacVerifier.VerifyPayMongoSignature(header, body, secret, now);
+        });
+
+        Assert.Null(exception);
+        Assert.False(result);
+    }
+
+    [Theory]
+    [InlineData(253402300799L)] // MaxUnixSeconds (Year 9999-12-31T23:59:59Z)
+    [InlineData(-62135596800L)] // MinUnixSeconds (Year 0001-01-01T00:00:00Z)
+    [InlineData(0L)]            // Unix Epoch (1970-01-01T00:00:00Z)
+    public void PayMongo_HmacVerifier_ValidBoundaryTimestamps_DoNotThrow_And_FailSkewCheck(long unixSeconds)
+    {
+        const string secret = "whsec_live_test_secret_key_2026";
+        const string body = "{\"data\":{\"id\":\"evt_123\"}}";
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        string header = $"t={unixSeconds},te=0000000000000000000000000000000000000000000000000000000000000000,li=0000000000000000000000000000000000000000000000000000000000000000";
+
+        bool result = false;
+        Exception? exception = Record.Exception(() =>
+        {
+            result = HmacVerifier.VerifyPayMongoSignature(header, body, secret, now);
+        });
+
+        Assert.Null(exception);
+        Assert.False(result);
+    }
+
     [Fact]
     public void DocumentUpload_Enforces_MagicBytes_SizeCap_Antivirus_And_PathTraversal_Defense()
     {

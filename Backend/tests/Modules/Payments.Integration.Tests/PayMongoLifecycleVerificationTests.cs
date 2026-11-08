@@ -25,6 +25,7 @@ namespace Rge.Payments.Integration.Tests;
 /// Proves the end-to-end PayMongo Checkout Session lifecycle, server-side expiration,
 /// missed-webhook reconciliation, state-machine immutability, and SignalR notifications.
 /// </summary>
+[Collection("PaymentsIntegration")]
 public sealed class PayMongoLifecycleVerificationTests
 {
     private const string WebhookSecret = "whsec_lifecycle_proof_secret_2026";
