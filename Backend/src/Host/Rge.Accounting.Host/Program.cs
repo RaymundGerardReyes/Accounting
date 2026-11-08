@@ -51,6 +51,8 @@ var cachedVersionPayload = new
 
 app.UseForwardedHeaders();
 
+app.UseMiddleware<PathNormalizationMiddleware>();
+
 app.UseMiddleware<CorrelationIdMiddleware>();
 
 app.UseMiddleware<SecurityHeadersMiddleware>();
@@ -58,6 +60,8 @@ app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseExceptionHandler();
 
 app.UseMiddleware<RequestSizeLimitPolicy>();
+
+app.UseRouting();
 
 app.UseCors(CorsConfiguration.PolicyName);
 

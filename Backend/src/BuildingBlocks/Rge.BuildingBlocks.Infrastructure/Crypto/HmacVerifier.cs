@@ -106,9 +106,47 @@ public static class HmacVerifier
 
 
 
+        // DateTimeOffset valid Unix timestamp range in seconds:
+
+        // Min: -62,135,596,800 (0001-01-01T00:00:00Z)
+
+        // Max: 253,402,300,799 (9999-12-31T23:59:59Z)
+
+        const long MinUnixSeconds = -62_135_596_800L;
+
+        const long MaxUnixSeconds = 253_402_300_799L;
+
+        if (unixSeconds < MinUnixSeconds || unixSeconds > MaxUnixSeconds)
+
+        {
+
+            return false;
+
+        }
+
+
+
         TimeSpan maxSkew = tolerance ?? TimeSpan.FromMinutes(5);
 
-        DateTimeOffset signatureTime = DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
+        DateTimeOffset signatureTime;
+
+        try
+
+        {
+
+            signatureTime = DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
+
+        }
+
+        catch (ArgumentOutOfRangeException)
+
+        {
+
+            return false;
+
+        }
+
+
 
         if (Math.Abs((nowUtc - signatureTime).TotalSeconds) > maxSkew.TotalSeconds)
 

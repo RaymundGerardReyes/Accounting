@@ -46,7 +46,7 @@ public sealed class PayMongoClient : IPaymentGateway
 
     private void ConfigureHttpClient()
     {
-        _httpClient.BaseAddress = new Uri(_options.BaseUrl);
+        _httpClient.BaseAddress = new Uri(_options.BaseUrl.TrimEnd('/') + "/");
         _httpClient.Timeout = TimeSpan.FromSeconds(Math.Clamp(_options.RequestTimeoutSeconds, 2, 30));
         _httpClient.DefaultRequestHeaders.Accept.Clear();
         _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
