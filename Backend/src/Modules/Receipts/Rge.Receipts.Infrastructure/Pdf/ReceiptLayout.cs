@@ -1,40 +1,45 @@
-using System.Globalization;
 using Rge.Receipts.Domain;
-using Rge.Receipts.Domain.Policies;
 
 namespace Rge.Receipts.Infrastructure.Pdf;
 
 /// <summary>
-/// Builds the structured text lines for a Philippine BIR RMC No. 77-2024 Official Receipt PDF.
+/// Builds the structured text lines and view-model for a Philippine BIR RMC No. 77-2024 Official Receipt.
 /// </summary>
 public static class ReceiptLayout
 {
-    public static IReadOnlyList<string> BuildReceiptLines(OfficialReceipt receipt)
+    public static ReceiptDocumentViewModel ToViewModel(OfficialReceipt receipt) =>
+        ReceiptDocumentViewModel.FromReceipt(receipt);
+
+    public static IReadOnlyList<string> BuildLines(OfficialReceipt receipt)
     {
         ArgumentNullException.ThrowIfNull(receipt);
+        var vm = ToViewModel(receipt);
 
         return
         [
-            BirRmc77_2024Policy.IssuerRegisteredName,
-            $"VAT Reg. TIN: {BirRmc77_2024Policy.IssuerTin} | BIR Permit: {BirRmc77_2024Policy.BirPermitNumber}",
+            vm.IssuerRegisteredName,
+            $"VAT Reg. TIN: {vm.IssuerTin} | BIR Permit: {vm.BirPermitNumber}",
             "------------------------------------------------------------------------",
-            $"OFFICIAL RECEIPT NO : {receipt.ReceiptNumber.Value}",
-            $"TREASURY ACK NO     : {receipt.Acknowledgement.AcknowledgementNumber}",
-            $"DATE ISSUED (UTC)   : {receipt.IssuedAtUtc.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture)}",
-            $"ORDER NUMBER        : {receipt.OrderNumber}",
-            $"RECEIVED FROM       : {receipt.CustomerName}",
-            $"PARTICULARS         : {receipt.Description}",
-            $"PAYMENT METHOD      : {receipt.PaymentMethod.ToUpperInvariant()}",
+            $"OFFICIAL RECEIPT NO : {vm.OfficialReceiptNumber}",
+            $"TREASURY ACK NO     : {vm.TreasuryAcknowledgementNumber}",
+            $"DATE ISSUED (PST)   : {vm.FormattedIssuedAtPst}",
+            $"DATE ISSUED (UTC)   : {vm.FormattedIssuedAtUtc}",
+            $"ORDER NUMBER        : {vm.OrderNumber}",
+            $"RECEIVED FROM       : {vm.CustomerName}",
+            $"PARTICULARS         : {vm.Description}",
+            $"PAYMENT METHOD      : {vm.PaymentMethod.ToUpperInvariant()}",
             "------------------------------------------------------------------------",
-            $"VATable Sales       : {receipt.VatBreakdown.VatableSales}",
-            $"12% Value-Added Tax : {receipt.VatBreakdown.VatAmount}",
-            $"VAT-Exempt Sales    : {receipt.VatBreakdown.VatExemptSales}",
-            $"Zero-Rated Sales    : {receipt.VatBreakdown.ZeroRatedSales}",
-            $"TOTAL AMOUNT PAID   : {receipt.VatBreakdown.GrossAmount}",
+            $"VATable Sales       : {vm.FormattedVatableSales}",
+            $"12% Value-Added Tax : {vm.FormattedVatAmount}",
+            $"VAT-Exempt Sales    : {vm.FormattedVatExemptSales}",
+            $"Zero-Rated Sales    : {vm.FormattedZeroRatedSales}",
+            $"TOTAL AMOUNT PAID   : {vm.FormattedGrossAmount}",
             "------------------------------------------------------------------------",
-            $"Cryptographic Digest: {receipt.Digest.Value}",
-            "Compliant with BIR RMC No. 77-2024 & RA 11976 (Ease of Paying Taxes Act)"
+            $"Cryptographic Digest: {vm.AuditDigest}",
+            vm.LegalComplianceNote
         ];
     }
-}
 
+    public static IReadOnlyList<string> BuildReceiptLines(OfficialReceipt receipt) =>
+        BuildLines(receipt);
+}

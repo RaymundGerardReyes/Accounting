@@ -179,9 +179,10 @@ public sealed class PaymentExpirationWorker : BackgroundService
                                     amountMinor: attempt.Amount.AmountMinor,
                                     currency: attempt.Amount.CurrencyCode,
                                     paymentMethod: methodUsed,
-                                    customerName: "Valued Customer",
+                                    customerName: string.Empty,
                                     customerEmail: string.Empty,
-                                    paidAtUtc: paidAt);
+                                    paidAtUtc: paidAt,
+                                    metadataJson: order.MetadataJson);
 
                                 await outboxPublisher.PublishOrderPaidAsync(
                                     paidEvent,

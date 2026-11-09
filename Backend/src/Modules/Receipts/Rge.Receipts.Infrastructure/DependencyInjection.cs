@@ -283,7 +283,8 @@ public static class DependencyInjection
                 sp.GetRequiredService<IPdfRenderer>(),
                 sp.GetRequiredService<IReceiptEmailQueue>(),
                 sp.GetService<IReceiptSourceResolver>(),
-                sp.GetService<IssueReceiptHandler>()));
+                sp.GetService<IssueReceiptHandler>(),
+                sp.GetService<IReceiptMailer>()));
         services.AddScoped<OrderPaidReceiptOutboxHandler>(sp =>
             new OrderPaidReceiptOutboxHandler(
                 sp.GetRequiredService<IssueReceiptHandler>(),

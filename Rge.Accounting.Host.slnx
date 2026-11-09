@@ -35,6 +35,12 @@
     <Project Path="Backend/src/Modules/Payments/Rge.Payments.Domain/Rge.Payments.Domain.csproj" />
     <Project Path="Backend/src/Modules/Payments/Rge.Payments.Infrastructure/Rge.Payments.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/Backend/src/Modules/Receipts/">
+    <Project Path="Backend/src/Modules/Receipts/Rge.Receipts.Application/Rge.Receipts.Application.csproj" />
+    <Project Path="Backend/src/Modules/Receipts/Rge.Receipts.Contracts/Rge.Receipts.Contracts.csproj" />
+    <Project Path="Backend/src/Modules/Receipts/Rge.Receipts.Domain/Rge.Receipts.Domain.csproj" />
+    <Project Path="Backend/src/Modules/Receipts/Rge.Receipts.Infrastructure/Rge.Receipts.Infrastructure.csproj" />
+  </Folder>
   <Project Path="Backend/src/Host/Rge.Accounting.Host/Rge.Accounting.Host.csproj" />
 </Solution>
 

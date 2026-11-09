@@ -5,7 +5,8 @@ namespace Rge.Receipts.Application.ResendReceiptEmail;
 
 public sealed record ResendReceiptEmailCommand(
     string PaymentId,
-    string? OverrideRecipientEmail = null) : ICommand<ResendReceiptEmailResponse>;
+    string? OverrideRecipientEmail = null,
+    bool AwaitAcceptance = false) : ICommand<ResendReceiptEmailResponse>;
 
 public sealed record ResendReceiptEmailResponse(
     string PaymentId,
@@ -17,4 +18,3 @@ public sealed record ResendReceiptEmailResponse(
     string? Recipient = null,
     object? SmtpDelivery = null,
     ReceiptDto? Receipt = null);
-

@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Rge.BuildingBlocks.SharedKernel.Money;
 
 /// <summary>
@@ -65,6 +67,19 @@ public readonly record struct Money : IComparable<Money>
             throw new InvalidOperationException(
                 $"Currency mismatch: cannot combine '{left.CurrencyCode}' and '{right.CurrencyCode}'.");
         }
+    }
+
+    /// <summary>
+    /// Formats centavos as a Philippine Peso string (e.g., "₱1,234.56" or "-₱1,234.56") using integer division only.
+    /// Satisfies BIR RMC No. 77-2024 and Zero-Float invariant.
+    /// </summary>
+    public string ToPhilippinePesoString()
+    {
+        long abs = Math.Abs(AmountMinor);
+        long whole = abs / 100;
+        long centavos = abs % 100;
+        string sign = AmountMinor < 0 ? "-" : string.Empty;
+        return $"{sign}₱{whole.ToString("#,##0", CultureInfo.InvariantCulture)}.{centavos.ToString("D2", CultureInfo.InvariantCulture)}";
     }
 
     /// <summary>

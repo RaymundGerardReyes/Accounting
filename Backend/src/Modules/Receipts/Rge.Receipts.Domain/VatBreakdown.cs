@@ -14,6 +14,12 @@ public sealed class VatBreakdown : ValueObject
     public Money ZeroRatedSales { get; }
     public Money GrossAmount { get; }
 
+    public string FormattedVatableSales => VatableSales.ToPhilippinePesoString();
+    public string FormattedVatAmount => VatAmount.ToPhilippinePesoString();
+    public string FormattedVatExemptSales => VatExemptSales.ToPhilippinePesoString();
+    public string FormattedZeroRatedSales => ZeroRatedSales.ToPhilippinePesoString();
+    public string FormattedGrossAmount => GrossAmount.ToPhilippinePesoString();
+
     public VatBreakdown(
         Money vatableSales,
         Money vatAmount,

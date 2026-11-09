@@ -327,9 +327,10 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
                     amountMinor: order.Amount.AmountMinor,
                     currency: order.Amount.CurrencyCode,
                     paymentMethod: attempt.PaymentMethod,
-                    customerName: "Valued Customer",
+                    customerName: string.Empty,
                     customerEmail: string.Empty,
-                    paidAtUtc: nowUtc);
+                    paidAtUtc: nowUtc,
+                    metadataJson: order.MetadataJson);
 
                 await _outboxWriter.EnqueueAsync(paidEvent, cancellationToken).ConfigureAwait(false);
             }

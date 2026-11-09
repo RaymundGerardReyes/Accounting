@@ -69,6 +69,18 @@ public sealed class AdversarialSpyGateway : IPaymentGateway
         Task.FromResult(Result.Success(true));
 }
 
+public sealed class AdversarialFailingResultMailer : IReceiptMailer
+{
+    private readonly Error _error;
+    public AdversarialFailingResultMailer(Error error) => _error = error;
+    public Task<Result> SendReceiptEmailAsync(
+        OfficialReceipt receipt,
+        string recipientEmail,
+        byte[] pdfBytes,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Result.Failure(_error));
+}
+
 public sealed class AdversarialFaultyMailer : IReceiptMailer
 {
     private readonly TimeSpan _delay;
@@ -382,6 +394,12 @@ public sealed class R2R3AdversarialStressTests
         Assert.Equal("override@rge.ph", resendRes.Value.RecipientEmail);
         Assert.True(resendRes.Value.Dispatched);
         Assert.StartsWith("OR-", resendRes.Value.OfficialReceiptNumber, StringComparison.Ordinal);
+
+        var smtpDelivery = resendRes.Value.SmtpDelivery;
+        Assert.NotNull(smtpDelivery);
+        var statusProp = smtpDelivery.GetType().GetProperty("status");
+        Assert.NotNull(statusProp);
+        Assert.Equal("pending", statusProp.GetValue(smtpDelivery));
     }
 
     [Fact]
@@ -475,5 +493,308 @@ public sealed class R2R3AdversarialStressTests
 
         _output.WriteLine($"[R3 Flood Stress] Dispatched {floodCount} jobs in {totalElapsed.TotalMilliseconds:F2} ms (avg {avgMs:F3} ms/job).");
         Assert.True(avgMs < 5.0, $"Average enqueue time per job was {avgMs:F2} ms, exceeding 5ms.");
+    }
+
+    [Fact]
+    public async Task R3_ReceiptEmailQueue_HighThroughputConcurrentFlood_1000Jobs_NoDropsOrCrashes()
+    {
+        var queue = new ChannelReceiptEmailQueue(capacity: 10_000);
+        var mailer = new AdversarialFaultyMailer(TimeSpan.Zero);
+
+        await using ServiceProvider sp = BuildServiceProvider(services =>
+        {
+            services.AddSingleton<IReceiptEmailQueue>(queue);
+            services.AddSingleton<IReceiptMailer>(mailer);
+        });
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var issueHandler = scope.ServiceProvider.GetRequiredService<IssueReceiptHandler>();
+        var resendHandler = scope.ServiceProvider.GetRequiredService<ResendReceiptEmailHandler>();
+
+        string paymentId = $"pay_conc_flood_{Guid.NewGuid():N}";
+        var issueRes = await issueHandler.HandleAsync(new IssueReceiptCommand(
+            OrderId: $"ord_{paymentId}",
+            OrderNumber: "ORD-CONC-FLOOD-01",
+            PaymentAttemptId: paymentId,
+            AmountMinor: 50_000,
+            Currency: "PHP",
+            CustomerName: "Concurrent Flood Tester",
+            CustomerEmail: "concflood@rge.ph",
+            Description: "Stress Test Concurrent Flood",
+            PaymentMethod: "card"));
+        Assert.True(issueRes.IsSuccess);
+
+        const int totalJobs = 1_200;
+        const int concurrentTasks = 20;
+        int jobsPerTask = totalJobs / concurrentTasks;
+
+        var tasks = new Task[concurrentTasks];
+        var failureBag = new ConcurrentBag<string>();
+        long t0 = Stopwatch.GetTimestamp();
+
+        for (int t = 0; t < concurrentTasks; t++)
+        {
+            int taskIndex = t;
+            tasks[t] = Task.Run(async () =>
+            {
+                for (int j = 0; j < jobsPerTask; j++)
+                {
+                    int jobId = (taskIndex * jobsPerTask) + j;
+                    var res = await resendHandler.HandleAsync(new ResendReceiptEmailCommand(paymentId, $"concurrent_{jobId}@rge.ph"));
+                    if (res.IsFailure)
+                    {
+                        failureBag.Add($"Job {jobId} failed: {res.Error.Message}");
+                    }
+                }
+            });
+        }
+
+        await Task.WhenAll(tasks);
+        TimeSpan elapsed = Stopwatch.GetElapsedTime(t0);
+
+        Assert.Empty(failureBag);
+        double avgMs = elapsed.TotalMilliseconds / totalJobs;
+        _output.WriteLine($"[R3 Concurrent Flood] Dispatched {totalJobs} jobs across {concurrentTasks} parallel workers in {elapsed.TotalMilliseconds:F2} ms (avg {avgMs:F3} ms/job).");
+        Assert.True(avgMs < 2.0, $"Average enqueue time per job was {avgMs:F2} ms, exceeding 2ms.");
+    }
+
+    [Fact]
+    public async Task R3_ResendReceiptEmail_AwaitAcceptance_Success_AwaitsAndReturnsSentStatus()
+    {
+        var mailer = new AdversarialFaultyMailer(TimeSpan.FromMilliseconds(25));
+
+        await using ServiceProvider sp = BuildServiceProvider(services =>
+        {
+            services.AddSingleton<IReceiptMailer>(mailer);
+        });
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var issueHandler = scope.ServiceProvider.GetRequiredService<IssueReceiptHandler>();
+        var resendHandler = scope.ServiceProvider.GetRequiredService<ResendReceiptEmailHandler>();
+
+        string paymentId = $"pay_sync_ok_{Guid.NewGuid():N}";
+        var issueRes = await issueHandler.HandleAsync(new IssueReceiptCommand(
+            OrderId: $"ord_{paymentId}",
+            OrderNumber: "ORD-SYNC-OK-01",
+            PaymentAttemptId: paymentId,
+            AmountMinor: 10_000,
+            Currency: "PHP",
+            CustomerName: "Sync Success Tester",
+            CustomerEmail: "syncok@rge.ph",
+            Description: "Sync Success Test",
+            PaymentMethod: "qrph"));
+        Assert.True(issueRes.IsSuccess);
+
+        var resendRes = await resendHandler.HandleAsync(new ResendReceiptEmailCommand(paymentId, AwaitAcceptance: true));
+        Assert.True(resendRes.IsSuccess);
+        Assert.True(resendRes.Value.Dispatched);
+
+        var smtpDelivery = resendRes.Value.SmtpDelivery;
+        Assert.NotNull(smtpDelivery);
+        var statusProp = smtpDelivery.GetType().GetProperty("status");
+        Assert.NotNull(statusProp);
+        Assert.Equal("sent", statusProp.GetValue(smtpDelivery));
+    }
+
+    [Fact]
+    public async Task R3_ResendReceiptEmail_AwaitAcceptance_WhenMailerFails_ReturnsStructuredFailure()
+    {
+        var mockFailingMailer = new AdversarialFailingResultMailer(
+            new Error("Receipts.SmtpAuthFailed", "Authentication failed (535 5.7.8 Bad credentials)"));
+
+        await using ServiceProvider sp = BuildServiceProvider(services =>
+        {
+            services.AddSingleton<IReceiptMailer>(mockFailingMailer);
+        });
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var issueHandler = scope.ServiceProvider.GetRequiredService<IssueReceiptHandler>();
+        var resendHandler = scope.ServiceProvider.GetRequiredService<ResendReceiptEmailHandler>();
+
+        string paymentId = $"pay_sync_fail_{Guid.NewGuid():N}";
+        var issueRes = await issueHandler.HandleAsync(new IssueReceiptCommand(
+            OrderId: $"ord_{paymentId}",
+            OrderNumber: "ORD-SYNC-FAIL-01",
+            PaymentAttemptId: paymentId,
+            AmountMinor: 10_000,
+            Currency: "PHP",
+            CustomerName: "Sync Fail Tester",
+            CustomerEmail: "syncfail@rge.ph",
+            Description: "Sync Fail Test",
+            PaymentMethod: "qrph"));
+        Assert.True(issueRes.IsSuccess);
+
+        // When AwaitAcceptance is true, failure must return structured Failure, never false-positive Success
+        var resendRes = await resendHandler.HandleAsync(new ResendReceiptEmailCommand(paymentId, AwaitAcceptance: true));
+        Assert.True(resendRes.IsFailure);
+        Assert.Equal("Receipts.SmtpAuthFailed", resendRes.Error.Code);
+        Assert.Contains("Bad credentials", resendRes.Error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task R3_SmtpReceiptMailer_InvalidHost_RejectsWithValidation(string? invalidHost)
+    {
+        await using ServiceProvider sp = BuildServiceProvider();
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var issueHandler = scope.ServiceProvider.GetRequiredService<IssueReceiptHandler>();
+        var repo = scope.ServiceProvider.GetRequiredService<IReceiptRepository>();
+
+        string paymentId = $"pay_bad_host_{Guid.NewGuid():N}";
+        await issueHandler.HandleAsync(new IssueReceiptCommand(
+            OrderId: $"ord_{paymentId}",
+            OrderNumber: "ORD-BADHOST-01",
+            PaymentAttemptId: paymentId,
+            AmountMinor: 10_000,
+            Currency: "PHP",
+            CustomerName: "Bad Host Tester",
+            CustomerEmail: "badhost@rge.ph",
+            Description: "Bad Host Test",
+            PaymentMethod: "qrph"));
+
+        var receipt = await repo.GetByPaymentAttemptIdAsync(paymentId);
+        Assert.NotNull(receipt);
+
+        var options = new SmtpReceiptOptions
+        {
+            Host = invalidHost!,
+            Port = 587,
+            SenderEmail = "billing@rge.ph",
+            AppPassword = "password"
+        };
+        var mailer = new SmtpReceiptMailer(options);
+
+        var result = await mailer.SendReceiptEmailAsync(receipt, "recipient@rge.ph", [1, 2, 3]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Receipts.InvalidSmtpHost", result.Error.Code);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(65536)]
+    [InlineData(99999)]
+    public async Task R3_SmtpReceiptMailer_InvalidPort_RejectsWithValidation(int invalidPort)
+    {
+        await using ServiceProvider sp = BuildServiceProvider();
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var issueHandler = scope.ServiceProvider.GetRequiredService<IssueReceiptHandler>();
+        var repo = scope.ServiceProvider.GetRequiredService<IReceiptRepository>();
+
+        string paymentId = $"pay_bad_port_{Guid.NewGuid():N}";
+        await issueHandler.HandleAsync(new IssueReceiptCommand(
+            OrderId: $"ord_{paymentId}",
+            OrderNumber: "ORD-BADPORT-01",
+            PaymentAttemptId: paymentId,
+            AmountMinor: 10_000,
+            Currency: "PHP",
+            CustomerName: "Bad Port Tester",
+            CustomerEmail: "badport@rge.ph",
+            Description: "Bad Port Test",
+            PaymentMethod: "qrph"));
+
+        var receipt = await repo.GetByPaymentAttemptIdAsync(paymentId);
+        Assert.NotNull(receipt);
+
+        var options = new SmtpReceiptOptions
+        {
+            Host = "smtp.gmail.com",
+            Port = invalidPort,
+            SenderEmail = "billing@rge.ph",
+            AppPassword = "password"
+        };
+        var mailer = new SmtpReceiptMailer(options);
+
+        var result = await mailer.SendReceiptEmailAsync(receipt, "recipient@rge.ph", [1, 2, 3]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Receipts.InvalidSmtpPort", result.Error.Code);
+    }
+
+    [Theory]
+    [InlineData("not-an-email")]
+    [InlineData("@missing-user.ph")]
+    public async Task R3_SmtpReceiptMailer_InvalidSenderEmail_RejectsWithValidation(string invalidSenderEmail)
+    {
+        await using ServiceProvider sp = BuildServiceProvider();
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var issueHandler = scope.ServiceProvider.GetRequiredService<IssueReceiptHandler>();
+        var repo = scope.ServiceProvider.GetRequiredService<IReceiptRepository>();
+
+        string paymentId = $"pay_bad_sender_{Guid.NewGuid():N}";
+        await issueHandler.HandleAsync(new IssueReceiptCommand(
+            OrderId: $"ord_{paymentId}",
+            OrderNumber: "ORD-BADSENDER-01",
+            PaymentAttemptId: paymentId,
+            AmountMinor: 10_000,
+            Currency: "PHP",
+            CustomerName: "Bad Sender Tester",
+            CustomerEmail: "badsender@rge.ph",
+            Description: "Bad Sender Test",
+            PaymentMethod: "qrph"));
+
+        var receipt = await repo.GetByPaymentAttemptIdAsync(paymentId);
+        Assert.NotNull(receipt);
+
+        var options = new SmtpReceiptOptions
+        {
+            Host = "smtp.gmail.com",
+            Port = 587,
+            SenderEmail = invalidSenderEmail,
+            AppPassword = "password"
+        };
+        var mailer = new SmtpReceiptMailer(options);
+
+        var result = await mailer.SendReceiptEmailAsync(receipt, "recipient@rge.ph", [1, 2, 3]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Receipts.InvalidSenderEmail", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task R3_SmtpReceiptMailer_ConnectionRefused_CatchesExceptionSafely()
+    {
+        await using ServiceProvider sp = BuildServiceProvider();
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var issueHandler = scope.ServiceProvider.GetRequiredService<IssueReceiptHandler>();
+        var repo = scope.ServiceProvider.GetRequiredService<IReceiptRepository>();
+
+        string paymentId = $"pay_conn_refuse_{Guid.NewGuid():N}";
+        await issueHandler.HandleAsync(new IssueReceiptCommand(
+            OrderId: $"ord_{paymentId}",
+            OrderNumber: "ORD-CONNREFUSE-01",
+            PaymentAttemptId: paymentId,
+            AmountMinor: 10_000,
+            Currency: "PHP",
+            CustomerName: "Refusal Tester",
+            CustomerEmail: "refusal@rge.ph",
+            Description: "Refusal Test",
+            PaymentMethod: "qrph"));
+
+        var receipt = await repo.GetByPaymentAttemptIdAsync(paymentId);
+        Assert.NotNull(receipt);
+
+        var options = new SmtpReceiptOptions
+        {
+            Host = "127.0.0.1",
+            Port = 19999, // Closed port
+            SenderEmail = "billing@rge.ph",
+            AppPassword = "password",
+            EnableSsl = false,
+            TimeoutMilliseconds = 1000
+        };
+        var mailer = new SmtpReceiptMailer(options);
+
+        var result = await mailer.SendReceiptEmailAsync(receipt, "recipient@rge.ph", [1, 2, 3]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Receipts.SmtpSendFailed", result.Error.Code);
     }
 }

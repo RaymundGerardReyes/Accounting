@@ -1,32 +1,39 @@
 using System.Net;
 using System.Net.Mail;
+using System.Net.Mime;
+using System.Text;
 using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Receipts.Application.Ports;
 using Rge.Receipts.Domain;
 using Rge.Receipts.Domain.Policies;
+using Rge.Receipts.Infrastructure.Mail.EmailTemplates;
+using Rge.Receipts.Infrastructure.Pdf;
 
 namespace Rge.Receipts.Infrastructure.Mail;
 
 public sealed class SmtpReceiptOptions
 {
-    public string Host { get; set; } = "smtp.gmail.com";
-    public int Port { get; set; } = 587;
-    public string SenderEmail { get; set; } = string.Empty;
-    public string AppPassword { get; set; } = string.Empty;
-    public bool EnableSsl { get; set; } = true;
-    public int TimeoutMilliseconds { get; set; } = 10_000;
+    public string Host { get; set; } = Environment.GetEnvironmentVariable("SMTP_HOST") ?? "smtp.gmail.com";
+    public int Port { get; set; } = int.TryParse(Environment.GetEnvironmentVariable("SMTP_PORT"), out int p) ? p : 587;
+    public string SenderEmail { get; set; } = Environment.GetEnvironmentVariable("SMTP_USER") ?? Environment.GetEnvironmentVariable("SMTP_SENDER_EMAIL") ?? string.Empty;
+    public string AppPassword { get; set; } = Environment.GetEnvironmentVariable("SMTP_APP_PASSWORD") ?? string.Empty;
+    public bool EnableSsl { get; set; } = !string.Equals(Environment.GetEnvironmentVariable("SMTP_USE_TLS"), "false", StringComparison.OrdinalIgnoreCase);
+    public int TimeoutMilliseconds { get; set; } = int.TryParse(Environment.GetEnvironmentVariable("SMTP_TIMEOUT_MS"), out int t) ? t : 10_000;
 }
 
 /// <summary>
 /// Dispatches XSS-safe BIR Official Receipts with attached vector PDF via Google Workspace SMTP (STARTTLS 587).
+/// Pre-validates SMTP configuration prior to socket connection and awaits server acceptance.
 /// </summary>
 public sealed class SmtpReceiptMailer : IReceiptMailer
 {
     private readonly SmtpReceiptOptions _options;
+    private readonly IPdfRenderer _pdfRenderer;
 
-    public SmtpReceiptMailer(SmtpReceiptOptions? options = null)
+    public SmtpReceiptMailer(SmtpReceiptOptions? options = null, IPdfRenderer? pdfRenderer = null)
     {
         _options = options ?? new SmtpReceiptOptions();
+        _pdfRenderer = pdfRenderer ?? new QuestPdfReceiptRenderer();
     }
 
     public async Task<Result> SendReceiptEmailAsync(
@@ -43,44 +50,54 @@ public sealed class SmtpReceiptMailer : IReceiptMailer
             return Result.Failure(Error.Validation("Receipts.EmptyRecipient", "Recipient email cannot be empty."));
         }
 
+        if (!MailAddress.TryCreate(recipientEmail.Trim(), out MailAddress? parsedRecipient))
+        {
+            return Result.Failure(Error.Validation("Receipts.InvalidRecipient", "Recipient email address is invalid."));
+        }
+
+        // Configuration Pre-Validation
+        if (string.IsNullOrWhiteSpace(_options.Host))
+        {
+            return Result.Failure(Error.Validation("Receipts.InvalidSmtpHost", "SMTP host cannot be null or empty."));
+        }
+
+        if (_options.Port is < 1 or > 65535)
+        {
+            return Result.Failure(Error.Validation("Receipts.InvalidSmtpPort", "SMTP port must be within valid TCP range (1..65535)."));
+        }
+
+        if (!string.IsNullOrWhiteSpace(_options.SenderEmail) && !MailAddress.TryCreate(_options.SenderEmail, out _))
+        {
+            return Result.Failure(Error.Validation("Receipts.InvalidSenderEmail", "SMTP sender email is not a valid email address."));
+        }
+
+        // Dev/Test Unconfigured Bypass (Mandatory Invariant)
         if (string.IsNullOrWhiteSpace(_options.SenderEmail) || string.IsNullOrWhiteSpace(_options.AppPassword))
         {
             return Result.Success();
         }
 
-        string safeIssuer = WebUtility.HtmlEncode(BirRmc77_2024Policy.IssuerRegisteredName);
-        string safeOrNumber = WebUtility.HtmlEncode(receipt.ReceiptNumber.Value);
-        string safeAckNumber = WebUtility.HtmlEncode(receipt.Acknowledgement.AcknowledgementNumber);
-        string safeOrderNumber = WebUtility.HtmlEncode(receipt.OrderNumber);
-        string safeCustomerName = WebUtility.HtmlEncode(receipt.CustomerName);
-        string safeAmount = WebUtility.HtmlEncode(receipt.VatBreakdown.GrossAmount.ToString());
-        string safeDigest = WebUtility.HtmlEncode(receipt.Digest.Value);
-
         try
         {
+            var vm = ReceiptLayout.ToViewModel(receipt);
+            string htmlBody = ReceiptEmailHtmlBuilder.BuildReceiptHtml(vm);
+
             using var message = new MailMessage
             {
                 From = new MailAddress(_options.SenderEmail, BirRmc77_2024Policy.IssuerRegisteredName),
                 Subject = $"Official Receipt {receipt.ReceiptNumber.Value} - {BirRmc77_2024Policy.IssuerRegisteredName}",
                 IsBodyHtml = true,
-                Body = $"""
-                    <div style="font-family: Arial, sans-serif; color: #1e293b;">
-                      <h2>{safeIssuer}</h2>
-                      <p>Dear {safeCustomerName},</p>
-                      <p>Thank you for your payment. Attached is your BIR Official Receipt <strong>{safeOrNumber}</strong> and Treasury Acknowledgement <strong>{safeAckNumber}</strong>.</p>
-                      <ul>
-                        <li><strong>Order Number:</strong> {safeOrderNumber}</li>
-                        <li><strong>Total Paid:</strong> {safeAmount}</li>
-                        <li><strong>Digest:</strong> <code>{safeDigest}</code></li>
-                      </ul>
-                    </div>
-                    """
+                Body = htmlBody,
+                BodyEncoding = Encoding.UTF8,
+                BodyTransferEncoding = TransferEncoding.QuotedPrintable
             };
 
-            message.To.Add(new MailAddress(recipientEmail.Trim()));
+            message.To.Add(parsedRecipient);
 
-            using var pdfStream = new MemoryStream(pdfBytes, writable: false);
-            message.Attachments.Add(new Attachment(pdfStream, $"{receipt.ReceiptNumber.Value}.pdf", "application/pdf"));
+            using var pdfStream = new MemoryStream(pdfBytes.Length > 0 ? pdfBytes : _pdfRenderer.RenderOfficialReceiptPdf(receipt), writable: false);
+            string attachmentFilename = $"OfficialReceipt-{receipt.ReceiptNumber.Value}.pdf";
+            var attachment = new Attachment(pdfStream, attachmentFilename, "application/pdf");
+            message.Attachments.Add(attachment);
 
             using var client = new SmtpClient(_options.Host, _options.Port)
             {

@@ -440,10 +440,17 @@
       "rge.receipts.infrastructure": {
         "type": "Project",
         "dependencies": {
+          "QuestPDF": "[2025.7.0, )",
           "Rge.BuildingBlocks.Infrastructure": "[1.0.0, )",
           "Rge.Receipts.Application": "[1.0.0, )",
           "Rge.Receipts.Domain": "[1.0.0, )"
         }
+      },
+      "QuestPDF": {
+        "type": "CentralTransitive",
+        "requested": "[2025.7.0, )",
+        "resolved": "2025.7.0",
+        "contentHash": "yRjdm7p300eEuy4Mi9YdMuecl2cvTU/CV+IHHDzw22Uf43/0C2zeG4c+MthZqkpQNJPg0Agha1iBSmLBxX1vHA=="
       }
     }
   }

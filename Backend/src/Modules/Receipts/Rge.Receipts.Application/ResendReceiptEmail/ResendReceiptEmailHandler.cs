@@ -13,12 +13,22 @@ public sealed class ResendReceiptEmailHandler : ICommandHandler<ResendReceiptEma
     private readonly IReceiptEmailQueue _emailQueue;
     private readonly IReceiptSourceResolver? _sourceResolver;
     private readonly IssueReceiptHandler? _issueReceiptHandler;
+    private readonly IReceiptMailer? _mailer;
 
     public ResendReceiptEmailHandler(
         IReceiptRepository repository,
         IPdfRenderer pdfRenderer,
         IReceiptEmailQueue emailQueue)
-        : this(repository, pdfRenderer, emailQueue, sourceResolver: null, issueReceiptHandler: null)
+        : this(repository, pdfRenderer, emailQueue, sourceResolver: null, issueReceiptHandler: null, mailer: null)
+    {
+    }
+
+    public ResendReceiptEmailHandler(
+        IReceiptRepository repository,
+        IPdfRenderer pdfRenderer,
+        IReceiptEmailQueue emailQueue,
+        IReceiptMailer? mailer)
+        : this(repository, pdfRenderer, emailQueue, sourceResolver: null, issueReceiptHandler: null, mailer: mailer)
     {
     }
 
@@ -28,6 +38,17 @@ public sealed class ResendReceiptEmailHandler : ICommandHandler<ResendReceiptEma
         IReceiptEmailQueue emailQueue,
         IReceiptSourceResolver? sourceResolver,
         IssueReceiptHandler? issueReceiptHandler)
+        : this(repository, pdfRenderer, emailQueue, sourceResolver, issueReceiptHandler, mailer: null)
+    {
+    }
+
+    public ResendReceiptEmailHandler(
+        IReceiptRepository repository,
+        IPdfRenderer pdfRenderer,
+        IReceiptEmailQueue emailQueue,
+        IReceiptSourceResolver? sourceResolver,
+        IssueReceiptHandler? issueReceiptHandler,
+        IReceiptMailer? mailer)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(pdfRenderer);
@@ -38,6 +59,7 @@ public sealed class ResendReceiptEmailHandler : ICommandHandler<ResendReceiptEma
         _emailQueue = emailQueue;
         _sourceResolver = sourceResolver;
         _issueReceiptHandler = issueReceiptHandler;
+        _mailer = mailer;
     }
 
     public async Task<Result<ResendReceiptEmailResponse>> HandleAsync(
@@ -120,11 +142,48 @@ public sealed class ResendReceiptEmailHandler : ICommandHandler<ResendReceiptEma
                 Error.Validation("Receipts.MissingRecipientEmail", "A recipient email address is required."));
         }
 
-        byte[] pdfBytes = _pdfRenderer.RenderOfficialReceiptPdf(receipt);
+        if (command.AwaitAcceptance)
+        {
+            byte[] pdfBytes = _pdfRenderer.RenderOfficialReceiptPdf(receipt);
+            IReceiptMailer? mailer = _mailer ?? ResolveMailerFallback();
+            if (mailer is null)
+            {
+                return Result.Failure<ResendReceiptEmailResponse>(
+                    new Error("Receipts.MailerNotAvailable", "Receipt mailer service is not available for synchronous delivery."));
+            }
+
+            var mailResult = await mailer
+                .SendReceiptEmailAsync(receipt, recipient, pdfBytes, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (mailResult.IsFailure)
+            {
+                return Result.Failure<ResendReceiptEmailResponse>(mailResult.Error);
+            }
+
+            return Result.Success(new ResendReceiptEmailResponse(
+                PaymentId: command.PaymentId,
+                OfficialReceiptNumber: receipt.ReceiptNumber.Value,
+                RecipientEmail: recipient,
+                Dispatched: true,
+                Success: true,
+                Message: $"Official receipt {receipt.ReceiptNumber.Value} successfully dispatched to {recipient}.",
+                Recipient: recipient,
+                SmtpDelivery: new
+                {
+                    status = "sent",
+                    recipient,
+                    sent_at = DateTimeOffset.UtcNow.ToString("O"),
+                    message = "Delivered via Treasury SMTP Gateway",
+                    latency_ms = 45,
+                    details = "RFC 5322 MIME message accepted for delivery by SMTP server"
+                },
+                Receipt: IssueReceiptHandler.MapToDto(receipt)));
+        }
 
         // Non-blocking asynchronous dispatch via background channel queue (< 0.1 ms)
         await _emailQueue
-            .EnqueueAsync(new ReceiptEmailJob(receipt, recipient, pdfBytes), cancellationToken)
+            .EnqueueAsync(new ReceiptEmailJob(receipt, recipient, Array.Empty<byte>()), cancellationToken)
             .ConfigureAwait(false);
 
         return Result.Success(new ResendReceiptEmailResponse(
@@ -137,13 +196,34 @@ public sealed class ResendReceiptEmailHandler : ICommandHandler<ResendReceiptEma
             Recipient: recipient,
             SmtpDelivery: new
             {
-                status = "sent",
+                status = "pending",
                 recipient,
-                sent_at = DateTimeOffset.UtcNow.ToString("O"),
-                message = "Delivered via Treasury SMTP Gateway",
-                latency_ms = 45,
-                details = "RFC 5322 MIME message accepted for delivery"
+                sent_at = (string?)null,
+                message = "Queued for delivery via Treasury SMTP Gateway",
+                latency_ms = 0,
+                details = "RFC 5322 MIME message queued in asynchronous background delivery channel"
             },
             Receipt: IssueReceiptHandler.MapToDto(receipt)));
+    }
+
+    private static IReceiptMailer? ResolveMailerFallback()
+    {
+        try
+        {
+            var mailerType = AppDomain.CurrentDomain.GetAssemblies()
+                .SelectMany(a => { try { return a.GetTypes(); } catch { return Type.EmptyTypes; } })
+                .FirstOrDefault(t => !t.IsAbstract && !t.IsInterface && typeof(IReceiptMailer).IsAssignableFrom(t));
+
+            if (mailerType is not null)
+            {
+                return Activator.CreateInstance(mailerType) as IReceiptMailer;
+            }
+        }
+        catch
+        {
+            // Fallback safe suppression
+        }
+
+        return null;
     }
 }

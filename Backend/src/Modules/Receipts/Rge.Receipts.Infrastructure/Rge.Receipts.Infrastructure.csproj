@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="QuestPDF" />
     <ProjectReference Include="..\..\..\BuildingBlocks\Rge.BuildingBlocks.Infrastructure\Rge.BuildingBlocks.Infrastructure.csproj" />
     <ProjectReference Include="..\Rge.Receipts.Application\Rge.Receipts.Application.csproj" />
     <ProjectReference Include="..\Rge.Receipts.Domain\Rge.Receipts.Domain.csproj" />
