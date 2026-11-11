@@ -115,8 +115,7 @@ public static class PaymentAttemptStateMachine
             "chargeable" => PaymentAttemptStatus.Processing,
             "paid" => PaymentAttemptStatus.Succeeded,
             "expired" => PaymentAttemptStatus.Expired,
-            "cancelled" => PaymentAttemptStatus.Cancelled,
-            "failed" => PaymentAttemptStatus.Failed,
+            "cancelled" or "failed" => PaymentAttemptStatus.Failed,
             _ => PaymentAttemptStatus.RequiresAction
         };
 

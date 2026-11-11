@@ -465,7 +465,20 @@ public sealed class PayMongoClient : IPaymentGateway
                 srcId,
                 srcStatus);
 
-            if (srcStatus is "expired" or "cancelled")
+            if (srcStatus is "cancelled")
+            {
+                ObservedAwaitingNextActionSessions.TryRemove(sessionData.Id, out _);
+
+                return new GatewayPaymentStatusResult(
+                    ProviderPaymentId: sessionData.Id,
+                    Status: "failed",
+                    PaymentMethodUsed: attrs.PaymentMethodUsed ?? srcEnvelope?.Data?.Attributes?.SourceType,
+                    PaidAtUtc: null,
+                    FailureCode: "source_cancelled",
+                    FailureMessage: $"Source {srcId} has cancelled status.");
+            }
+
+            if (srcStatus is "expired")
             {
                 ObservedAwaitingNextActionSessions.TryRemove(sessionData.Id, out _);
 
@@ -474,8 +487,8 @@ public sealed class PayMongoClient : IPaymentGateway
                     Status: "expired",
                     PaymentMethodUsed: attrs.PaymentMethodUsed ?? srcEnvelope?.Data?.Attributes?.SourceType,
                     PaidAtUtc: null,
-                    FailureCode: $"source_{srcStatus}",
-                    FailureMessage: $"Source {srcId} has {srcStatus} status.");
+                    FailureCode: "source_expired",
+                    FailureMessage: $"Source {srcId} has expired status.");
             }
 
             if (srcStatus is "failed")
@@ -542,15 +555,26 @@ public sealed class PayMongoClient : IPaymentGateway
                 sourceId,
                 srcStatus);
 
-            if (srcStatus is "expired" or "cancelled")
+            if (srcStatus is "cancelled")
+            {
+                return Result.Success(new GatewayPaymentStatusResult(
+                    ProviderPaymentId: sourceId,
+                    Status: "failed",
+                    PaymentMethodUsed: srcEnvelope?.Data?.Attributes?.SourceType,
+                    PaidAtUtc: null,
+                    FailureCode: "source_cancelled",
+                    FailureMessage: $"Source {sourceId} has cancelled status."));
+            }
+
+            if (srcStatus is "expired")
             {
                 return Result.Success(new GatewayPaymentStatusResult(
                     ProviderPaymentId: sourceId,
                     Status: "expired",
                     PaymentMethodUsed: srcEnvelope?.Data?.Attributes?.SourceType,
                     PaidAtUtc: null,
-                    FailureCode: $"source_{srcStatus}",
-                    FailureMessage: $"Source {sourceId} has {srcStatus} status."));
+                    FailureCode: "source_expired",
+                    FailureMessage: $"Source {sourceId} has expired status."));
             }
 
             if (srcStatus is "failed")

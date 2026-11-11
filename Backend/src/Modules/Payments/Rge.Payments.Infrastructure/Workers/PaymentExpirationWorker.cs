@@ -87,6 +87,7 @@ public sealed class PaymentExpirationWorker : BackgroundService
 
         // Identify the newest attempt per OrderId so any older superseded attempt is automatically expired
         Dictionary<string, string> latestAttemptIdByOrder = nonTerminal
+            .Where(a => a.Status is not PaymentAttemptStatus.Processing && !PaymentAttemptStateMachine.IsTerminal(a.Status))
             .GroupBy(a => a.OrderId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 g => g.Key,
@@ -104,6 +105,17 @@ public sealed class PaymentExpirationWorker : BackgroundService
             }
 
             inspected++;
+
+            // Strict exclusion of Processing and Terminal states (F8 / R3)
+            if (attempt.Status is PaymentAttemptStatus.Processing ||
+                PaymentAttemptStateMachine.IsTerminal(attempt.Status))
+            {
+                _logger.LogInformation(
+                    "[PAYMONGO-WORKER-SKIP] Skipping attempt {AttemptId} in non-sweepable status {Status}",
+                    attempt.Id,
+                    attempt.Status);
+                continue;
+            }
 
             double remainingSeconds = attempt.ExpiresAt.HasValue
                 ? (attempt.ExpiresAt.Value - nowUtc).TotalSeconds

@@ -39,7 +39,8 @@ public sealed class PaymentAttemptWorkflowLifecycleTests
     [InlineData("chargeable", PaymentAttemptStatus.Processing)]
     [InlineData("paid", PaymentAttemptStatus.Succeeded)]
     [InlineData("expired", PaymentAttemptStatus.Expired)]
-    [InlineData("cancelled", PaymentAttemptStatus.Cancelled)]
+    [InlineData("cancelled", PaymentAttemptStatus.Failed)]
+    [InlineData("failed", PaymentAttemptStatus.Failed)]
     public void MapFromLegacySourceStatus_MapsCorrectly(string sourceStatus, PaymentAttemptStatus expected)
     {
         var mapped = PaymentAttemptStateMachine.MapFromLegacySourceStatus(sourceStatus);

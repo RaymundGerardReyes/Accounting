@@ -15,6 +15,7 @@ namespace Rge.Payments.Application.PaymentAttempts.PollAndReconcile;
 public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuery, PaymentAttemptDto>
 {
     private static readonly ConcurrentDictionary<string, DateTimeOffset> GatewayCheckCooldown = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, byte> SettledOrders = new(StringComparer.OrdinalIgnoreCase);
     public static readonly TimeSpan CooldownWindow = TimeSpan.FromSeconds(10);
 
     private readonly IPaymentAttemptRepository _attemptRepository;
@@ -56,7 +57,11 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
         _notifier = notifier;
     }
 
-    public static void ResetCooldowns() => GatewayCheckCooldown.Clear();
+    public static void ResetCooldowns()
+    {
+        GatewayCheckCooldown.Clear();
+        SettledOrders.Clear();
+    }
 
     public async Task<Result<PaymentAttemptDto>> HandleAsync(
         PollAndReconcileQuery query,
@@ -99,6 +104,19 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
 
         DateTimeOffset nowUtc = _clock.UtcNow;
 
+        if (attempt.Status == PaymentAttemptStatus.Succeeded)
+        {
+            if (order is not null && order.Status != OrderStatus.Paid)
+            {
+                DateTimeOffset paidAt = attempt.PaidAt ?? nowUtc;
+                order.MarkPaid(paidAt);
+                await _orderRepository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
+            }
+            return Result.Success(attempt.ToDto(nowUtc));
+        }
+
+        bool hasClientRedirect = !string.IsNullOrWhiteSpace(query.ClientReportedRedirectStatus);
+
         bool isWithinCooldown = false;
         if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId) &&
             GatewayCheckCooldown.TryGetValue(attempt.ProviderPaymentId, out DateTimeOffset lastCheck) &&
@@ -107,15 +125,18 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
             isWithinCooldown = true;
         }
 
-        if (query.AutoReconcile &&
-            !isWithinCooldown &&
+        bool shouldCheckGateway = (query.AutoReconcile || hasClientRedirect) &&
+            (!isWithinCooldown || hasClientRedirect) &&
             !string.IsNullOrWhiteSpace(attempt.ProviderPaymentId) &&
-            !PaymentAttemptStateMachine.IsTerminal(attempt.Status))
+            !PaymentAttemptStateMachine.IsTerminal(attempt.Status);
+
+        if (shouldCheckGateway && !string.IsNullOrWhiteSpace(attempt.ProviderPaymentId))
         {
-            GatewayCheckCooldown[attempt.ProviderPaymentId] = nowUtc;
+            string providerPaymentId = attempt.ProviderPaymentId;
+            GatewayCheckCooldown[providerPaymentId] = nowUtc;
 
             Result<GatewayPaymentStatusResult> statusResult = await _paymentGateway
-                .GetCheckoutSessionStatusAsync(attempt.ProviderPaymentId, cancellationToken)
+                .GetCheckoutSessionStatusAsync(providerPaymentId, cancellationToken)
                 .ConfigureAwait(false);
 
             if (statusResult.IsSuccess)
@@ -124,12 +145,25 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
                 string gwStatus = gw.Status.ToLowerInvariant();
                 PaymentAttemptStatus priorStatus = attempt.Status;
 
+                // Re-fetch latest attempt from repository to check if concurrent webhook settled it
+                PaymentAttempt? latestAttempt = await _attemptRepository.GetByIdAsync(attempt.Id, cancellationToken).ConfigureAwait(false);
+                if (latestAttempt?.Status == PaymentAttemptStatus.Succeeded)
+                {
+                    if (order is not null && order.Status != OrderStatus.Paid)
+                    {
+                        DateTimeOffset paidAt = latestAttempt.PaidAt ?? nowUtc;
+                        order.MarkPaid(paidAt);
+                        await _orderRepository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
+                    }
+                    return Result.Success(latestAttempt.ToDto(nowUtc));
+                }
+
                 if (gwStatus is "paid" or "succeeded")
                 {
                     DateTimeOffset paidAt = gw.PaidAtUtc ?? nowUtc;
                     attempt.MarkSucceeded(paidAt, gw.PaymentMethodUsed);
 
-                    if (order is not null && order.Status != OrderStatus.Paid)
+                    if (order is not null && order.Status != OrderStatus.Paid && SettledOrders.TryAdd(order.Id, 0))
                     {
                         order.MarkPaid(paidAt);
                         await _orderRepository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
@@ -149,15 +183,35 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
                         await _outboxWriter.EnqueueAsync(paidEvent, cancellationToken).ConfigureAwait(false);
                     }
                 }
-                else if (gwStatus is "expired" or "cancelled")
+                else if (gwStatus is "cancelled")
                 {
-                    attempt.MarkExpired(nowUtc, gw.FailureCode, gw.FailureMessage);
+                    attempt.MarkFailed("source_cancelled", gw.FailureMessage ?? "Payment source was cancelled.", nowUtc);
                     TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
                 }
                 else if (gwStatus is "failed")
                 {
-                    attempt.MarkFailed(gw.FailureCode ?? "FAILED", gw.FailureMessage ?? "Payment failed", nowUtc);
+                    attempt.MarkFailed(gw.FailureCode ?? "source_failed", gw.FailureMessage ?? "Payment failed", nowUtc);
                     TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
+                }
+                else if (gwStatus is "expired")
+                {
+                    attempt.MarkExpired(nowUtc, gw.FailureCode ?? "source_expired", gw.FailureMessage);
+                    TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
+                }
+                else if (hasClientRedirect)
+                {
+                    // Client reported redirect status, but gateway still shows active/awaiting_next_action
+                    string reported = query.ClientReportedRedirectStatus!.Trim().ToLowerInvariant();
+                    if (reported is "cancelled")
+                    {
+                        attempt.MarkFailed("source_cancelled", "Payment cancelled by customer during checkout redirect.", nowUtc);
+                        TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
+                    }
+                    else if (reported is "failed")
+                    {
+                        attempt.MarkFailed("customer_failed", "Payment failed during checkout redirect.", nowUtc);
+                        TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
+                    }
                 }
 
                 await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
@@ -187,6 +241,67 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
                     await Task.WhenAll(notifyTasks).ConfigureAwait(false);
                 }
             }
+            else
+            {
+                // Double-capture race recovery:
+                // 1. Check if concurrent webhook settled the attempt in the repository
+                PaymentAttempt? latestAttempt = await _attemptRepository.GetByIdAsync(attempt.Id, cancellationToken).ConfigureAwait(false);
+                if (latestAttempt?.Status == PaymentAttemptStatus.Succeeded)
+                {
+                    if (order is not null && order.Status != OrderStatus.Paid)
+                    {
+                        DateTimeOffset paidAt = latestAttempt.PaidAt ?? nowUtc;
+                        order.MarkPaid(paidAt);
+                        await _orderRepository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
+                    }
+                    return Result.Success(latestAttempt.ToDto(nowUtc));
+                }
+
+                // 2. If statusResult failed (e.g. HTTP 400 Bad Request: source already charged/captured),
+                // verify whether the source/session on PayMongo is actually paid
+                var recoveryCheck = await _paymentGateway
+                    .GetCheckoutSessionStatusAsync(providerPaymentId, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (recoveryCheck.IsSuccess && recoveryCheck.Value.Status.ToLowerInvariant() is "paid" or "succeeded")
+                {
+                    DateTimeOffset paidAt = recoveryCheck.Value.PaidAtUtc ?? nowUtc;
+                    attempt.MarkSucceeded(paidAt, recoveryCheck.Value.PaymentMethodUsed);
+
+                    if (order is not null && order.Status != OrderStatus.Paid && SettledOrders.TryAdd(order.Id, 0))
+                    {
+                        order.MarkPaid(paidAt);
+                        await _orderRepository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
+
+                        var paidEvent = OrderPaidIntegrationEvent.Create(
+                            orderId: order.Id,
+                            orderNumber: order.OrderNumber,
+                            paymentAttemptId: attempt.Id,
+                            amountMinor: order.Amount.AmountMinor,
+                            currency: order.Amount.CurrencyCode,
+                            paymentMethod: attempt.PaymentMethod,
+                            customerName: string.Empty,
+                            customerEmail: string.Empty,
+                            paidAtUtc: paidAt,
+                            metadataJson: order.MetadataJson);
+
+                        await _outboxWriter.EnqueueAsync(paidEvent, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
+
+                    if (_notifier is not null)
+                    {
+                        await _notifier.NotifyPaymentStatusChangedAsync(
+                            attempt.Id,
+                            "succeeded",
+                            nowUtc,
+                            cancellationToken).ConfigureAwait(false);
+                    }
+
+                    return Result.Success(attempt.ToDto(nowUtc));
+                }
+            }
         }
 
         if (!PaymentAttemptStateMachine.IsTerminal(attempt.Status) &&
@@ -214,7 +329,7 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
                         DateTimeOffset paidAt = finalCheck.Value.PaidAtUtc ?? nowUtc;
                         attempt.MarkSucceeded(paidAt, finalCheck.Value.PaymentMethodUsed);
 
-                        if (order is not null && order.Status != OrderStatus.Paid)
+                        if (order is not null && order.Status != OrderStatus.Paid && SettledOrders.TryAdd(order.Id, 0))
                         {
                             order.MarkPaid(paidAt);
                             await _orderRepository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
@@ -234,10 +349,16 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
                             await _outboxWriter.EnqueueAsync(paidEvent, cancellationToken).ConfigureAwait(false);
                         }
                     }
+                    else if (finalStatus is "cancelled")
+                    {
+                        shouldExpire = false;
+                        attempt.MarkFailed("source_cancelled", finalCheck.Value.FailureMessage ?? "Payment source was cancelled.", nowUtc);
+                        TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
+                    }
                     else if (finalStatus is "failed")
                     {
                         shouldExpire = false;
-                        attempt.MarkFailed(finalCheck.Value.FailureCode ?? "FAILED", finalCheck.Value.FailureMessage ?? "Payment failed", nowUtc);
+                        attempt.MarkFailed(finalCheck.Value.FailureCode ?? "source_failed", finalCheck.Value.FailureMessage ?? "Payment failed", nowUtc);
                         TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
                     }
                     else

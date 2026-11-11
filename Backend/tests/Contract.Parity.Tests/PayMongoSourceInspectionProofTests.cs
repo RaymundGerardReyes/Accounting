@@ -318,7 +318,7 @@ public sealed class PayMongoSourceInspectionProofTests
     }
 
     [Fact]
-    public async Task GetCheckoutSessionStatus_WhenUnderlyingSourceCancelled_OverridesStatusToExpired()
+    public async Task GetCheckoutSessionStatus_WhenUnderlyingSourceCancelled_OverridesStatusToFailed()
     {
         // Arrange
         const string csId = "cs_test_active_awaiting_action";
@@ -337,7 +337,7 @@ public sealed class PayMongoSourceInspectionProofTests
 
             // Assert
             Assert.True(result.IsSuccess);
-            Assert.Equal("expired", result.Value.Status);
+            Assert.Equal("failed", result.Value.Status);
             Assert.Equal("source_cancelled", result.Value.FailureCode);
         }
     }

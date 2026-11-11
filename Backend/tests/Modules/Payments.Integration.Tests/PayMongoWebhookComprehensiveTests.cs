@@ -1074,6 +1074,490 @@ public sealed class PayMongoWebhookComprehensiveTests : IClassFixture<Accounting
     }
 
     // =========================================================================
+    // Acceptance Criteria: Milestone M1 Step b Deep Webhook Correlation & State Locking
+    // =========================================================================
+
+    [Fact]
+    public async Task Webhook_Correlation_ViaMetadataAttemptId_ResolvesAndTransitionsToSucceeded()
+    {
+        string attemptId = $"att_meta_{Guid.NewGuid():N}";
+        string dummySessionId = $"cs_unrelated_{Guid.NewGuid():N}";
+        var (order, attempt) = await SeedOrderAndAttemptAsync(
+            attemptId: attemptId,
+            providerPaymentId: dummySessionId,
+            orderNumber: $"ORD-META-{Guid.NewGuid():N}",
+            initialOrderStatus: "pending",
+            initialAttemptStatus: PaymentAttemptStatus.RequiresAction);
+
+        string eventId = $"evt_meta_{Guid.NewGuid():N}";
+        string payload = $$"""
+        {
+          "data": {
+            "id": "{{eventId}}",
+            "type": "event",
+            "attributes": {
+              "type": "payment.paid",
+              "data": {
+                "id": "pay_unrelated_12345",
+                "attributes": {
+                  "status": "paid",
+                  "metadata": {
+                    "attempt_id": "{{attemptId}}"
+                  }
+                }
+              }
+            }
+          }
+        }
+        """;
+
+        long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        string signature = WebhookSigner.CreateSignatureHeader(payload, WebhookSecret, timestamp);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/webhooks/paymongo")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add("Paymongo-Signature", signature);
+
+        using HttpResponseMessage response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var jsonDoc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        JsonElement root = jsonDoc.RootElement;
+        Assert.True(root.GetProperty("received").GetBoolean());
+        Assert.Equal("processed", root.GetProperty("processing_status").GetString());
+
+        using var scope = _factory.Services.CreateScope();
+        var orderRepo = scope.ServiceProvider.GetRequiredService<IOrderRepository>();
+        var attemptRepo = scope.ServiceProvider.GetRequiredService<IPaymentAttemptRepository>();
+
+        PaymentAttempt? updatedAttempt = await attemptRepo.GetByIdAsync(attempt.Id);
+        Order? updatedOrder = await orderRepo.GetByIdAsync(order.Id);
+
+        Assert.NotNull(updatedAttempt);
+        Assert.Equal(PaymentAttemptStatus.Succeeded, updatedAttempt.Status);
+
+        Assert.NotNull(updatedOrder);
+        Assert.Equal(OrderStatus.Paid, updatedOrder.Status);
+
+        await DrainOutboxAsync();
+    }
+
+    [Fact]
+    public async Task Webhook_Correlation_ViaNestedPaymentIntentObjectId_ResolvesAndTransitionsToSucceeded()
+    {
+        string attemptId = $"att_pi_{Guid.NewGuid():N}";
+        string paymentIntentId = $"pi_nested_{Guid.NewGuid():N}";
+        var (order, attempt) = await SeedOrderAndAttemptAsync(
+            attemptId: attemptId,
+            providerPaymentId: paymentIntentId,
+            orderNumber: $"ORD-PI-{Guid.NewGuid():N}",
+            initialOrderStatus: "pending",
+            initialAttemptStatus: PaymentAttemptStatus.RequiresAction);
+
+        string eventId = $"evt_pi_{Guid.NewGuid():N}";
+        string payload = $$"""
+        {
+          "data": {
+            "id": "{{eventId}}",
+            "type": "event",
+            "attributes": {
+              "type": "payment.paid",
+              "data": {
+                "id": "pay_qr_999",
+                "attributes": {
+                  "status": "paid",
+                  "payment_intent": {
+                    "id": "{{paymentIntentId}}",
+                    "type": "payment_intent",
+                    "attributes": {
+                      "status": "succeeded"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """;
+
+        long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        string signature = WebhookSigner.CreateSignatureHeader(payload, WebhookSecret, timestamp);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/webhooks/paymongo")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add("Paymongo-Signature", signature);
+
+        using HttpResponseMessage response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var jsonDoc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        JsonElement root = jsonDoc.RootElement;
+        Assert.True(root.GetProperty("received").GetBoolean());
+        Assert.Equal("processed", root.GetProperty("processing_status").GetString());
+
+        using var scope = _factory.Services.CreateScope();
+        var attemptRepo = scope.ServiceProvider.GetRequiredService<IPaymentAttemptRepository>();
+        PaymentAttempt? updatedAttempt = await attemptRepo.GetByIdAsync(attempt.Id);
+
+        Assert.NotNull(updatedAttempt);
+        Assert.Equal(PaymentAttemptStatus.Succeeded, updatedAttempt.Status);
+
+        await DrainOutboxAsync();
+    }
+
+    [Fact]
+    public async Task Webhook_Correlation_ViaNestedSourceId_ResolvesAndTransitionsToSucceeded()
+    {
+        string attemptId = $"att_src_{Guid.NewGuid():N}";
+        string sourceId = $"src_nested_{Guid.NewGuid():N}";
+        var (order, attempt) = await SeedOrderAndAttemptAsync(
+            attemptId: attemptId,
+            providerPaymentId: sourceId,
+            orderNumber: $"ORD-SRC-{Guid.NewGuid():N}",
+            initialOrderStatus: "pending",
+            initialAttemptStatus: PaymentAttemptStatus.RequiresAction);
+
+        string eventId = $"evt_src_{Guid.NewGuid():N}";
+        string payload = $$"""
+        {
+          "data": {
+            "id": "{{eventId}}",
+            "type": "event",
+            "attributes": {
+              "type": "payment.paid",
+              "data": {
+                "id": "pay_source_888",
+                "attributes": {
+                  "status": "paid",
+                  "source": {
+                    "id": "{{sourceId}}",
+                    "type": "source"
+                  }
+                }
+              }
+            }
+          }
+        }
+        """;
+
+        long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        string signature = WebhookSigner.CreateSignatureHeader(payload, WebhookSecret, timestamp);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/webhooks/paymongo")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add("Paymongo-Signature", signature);
+
+        using HttpResponseMessage response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var jsonDoc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        JsonElement root = jsonDoc.RootElement;
+        Assert.True(root.GetProperty("received").GetBoolean());
+        Assert.Equal("processed", root.GetProperty("processing_status").GetString());
+
+        using var scope = _factory.Services.CreateScope();
+        var attemptRepo = scope.ServiceProvider.GetRequiredService<IPaymentAttemptRepository>();
+        PaymentAttempt? updatedAttempt = await attemptRepo.GetByIdAsync(attempt.Id);
+
+        Assert.NotNull(updatedAttempt);
+        Assert.Equal(PaymentAttemptStatus.Succeeded, updatedAttempt.Status);
+
+        await DrainOutboxAsync();
+    }
+
+    [Fact]
+    public async Task Webhook_Correlation_PaymentFailed_ViaNestedPaymentIntentError_TransitionsToFailed()
+    {
+        string attemptId = $"att_pifail_{Guid.NewGuid():N}";
+        string paymentIntentId = $"pi_failed_{Guid.NewGuid():N}";
+        var (order, attempt) = await SeedOrderAndAttemptAsync(
+            attemptId: attemptId,
+            providerPaymentId: paymentIntentId,
+            orderNumber: $"ORD-PIFAIL-{Guid.NewGuid():N}",
+            initialOrderStatus: "pending",
+            initialAttemptStatus: PaymentAttemptStatus.RequiresAction);
+
+        string eventId = $"evt_pifail_{Guid.NewGuid():N}";
+        string payload = $$"""
+        {
+          "data": {
+            "id": "{{eventId}}",
+            "type": "event",
+            "attributes": {
+              "type": "payment.failed",
+              "data": {
+                "id": "pay_failed_777",
+                "attributes": {
+                  "status": "failed",
+                  "payment_intent": {
+                    "id": "{{paymentIntentId}}",
+                    "type": "payment_intent",
+                    "attributes": {
+                      "status": "failed",
+                      "last_payment_error": {
+                        "code": "insufficient_funds",
+                        "message": "The account has insufficient funds."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """;
+
+        long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        string signature = WebhookSigner.CreateSignatureHeader(payload, WebhookSecret, timestamp);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/webhooks/paymongo")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add("Paymongo-Signature", signature);
+
+        using HttpResponseMessage response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var attemptRepo = scope.ServiceProvider.GetRequiredService<IPaymentAttemptRepository>();
+        PaymentAttempt? updatedAttempt = await attemptRepo.GetByIdAsync(attempt.Id);
+
+        Assert.NotNull(updatedAttempt);
+        Assert.Equal(PaymentAttemptStatus.Failed, updatedAttempt.Status);
+        Assert.Equal("insufficient_funds", updatedAttempt.FailureCode);
+        Assert.Equal("The account has insufficient funds.", updatedAttempt.FailureMessage);
+
+        await DrainOutboxAsync();
+    }
+
+    [Fact]
+    public async Task Webhook_TerminalStateImmutability_PaymentFailedOnAlreadySucceeded_PreservesSucceededStatus()
+    {
+        string attemptId = $"att_lock_{Guid.NewGuid():N}";
+        string providerSessionId = $"cs_lock_{Guid.NewGuid():N}";
+        var (order, attempt) = await SeedOrderAndAttemptAsync(
+            attemptId: attemptId,
+            providerPaymentId: providerSessionId,
+            orderNumber: $"ORD-LOCK-{Guid.NewGuid():N}",
+            initialOrderStatus: "paid",
+            initialAttemptStatus: PaymentAttemptStatus.Succeeded);
+
+        string eventId = $"evt_lock_fail_{Guid.NewGuid():N}";
+        string payload = $$"""
+        {
+          "data": {
+            "id": "{{eventId}}",
+            "type": "event",
+            "attributes": {
+              "type": "payment.failed",
+              "data": {
+                "id": "{{providerSessionId}}",
+                "attributes": {
+                  "status": "failed",
+                  "failed_code": "delayed_failure",
+                  "failed_message": "Delayed payment failure received out of order."
+                }
+              }
+            }
+          }
+        }
+        """;
+
+        long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        string signature = WebhookSigner.CreateSignatureHeader(payload, WebhookSecret, timestamp);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/webhooks/paymongo")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add("Paymongo-Signature", signature);
+
+        using HttpResponseMessage response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var attemptRepo = scope.ServiceProvider.GetRequiredService<IPaymentAttemptRepository>();
+        var orderRepo = scope.ServiceProvider.GetRequiredService<IOrderRepository>();
+
+        PaymentAttempt? updatedAttempt = await attemptRepo.GetByIdAsync(attempt.Id);
+        Order? updatedOrder = await orderRepo.GetByIdAsync(order.Id);
+
+        Assert.NotNull(updatedAttempt);
+        Assert.Equal(PaymentAttemptStatus.Succeeded, updatedAttempt.Status);
+        Assert.Null(updatedAttempt.FailureCode);
+
+        Assert.NotNull(updatedOrder);
+        Assert.Equal(OrderStatus.Paid, updatedOrder.Status);
+
+        await DrainOutboxAsync();
+    }
+
+    [Fact]
+    public async Task Webhook_TerminalStateImmutability_QrphExpiredOnAlreadySucceeded_PreservesSucceededStatus()
+    {
+        string attemptId = $"att_lock_exp_{Guid.NewGuid():N}";
+        string providerSessionId = $"cs_lock_exp_{Guid.NewGuid():N}";
+        var (order, attempt) = await SeedOrderAndAttemptAsync(
+            attemptId: attemptId,
+            providerPaymentId: providerSessionId,
+            orderNumber: $"ORD-LOCKEXP-{Guid.NewGuid():N}",
+            initialOrderStatus: "paid",
+            initialAttemptStatus: PaymentAttemptStatus.Succeeded);
+
+        string eventId = $"evt_lock_exp_{Guid.NewGuid():N}";
+        string payload = $$"""
+        {
+          "data": {
+            "id": "{{eventId}}",
+            "type": "event",
+            "attributes": {
+              "type": "qrph.expired",
+              "data": {
+                "id": "{{providerSessionId}}",
+                "attributes": {
+                  "status": "expired"
+                }
+              }
+            }
+          }
+        }
+        """;
+
+        long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        string signature = WebhookSigner.CreateSignatureHeader(payload, WebhookSecret, timestamp);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/webhooks/paymongo")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add("Paymongo-Signature", signature);
+
+        using HttpResponseMessage response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var attemptRepo = scope.ServiceProvider.GetRequiredService<IPaymentAttemptRepository>();
+
+        PaymentAttempt? updatedAttempt = await attemptRepo.GetByIdAsync(attempt.Id);
+
+        Assert.NotNull(updatedAttempt);
+        Assert.Equal(PaymentAttemptStatus.Succeeded, updatedAttempt.Status);
+        Assert.Null(updatedAttempt.FailureCode);
+
+        await DrainOutboxAsync();
+    }
+
+    [Fact]
+    public async Task Webhook_Lifecycle_SourceChargeable_TransitionsAttemptToProcessing()
+    {
+        string attemptId = $"att_src_chg_{Guid.NewGuid():N}";
+        string sourceId = $"src_chg_{Guid.NewGuid():N}";
+        var (order, attempt) = await SeedOrderAndAttemptAsync(
+            attemptId: attemptId,
+            providerPaymentId: sourceId,
+            orderNumber: $"ORD-CHG-{Guid.NewGuid():N}",
+            initialOrderStatus: "pending",
+            initialAttemptStatus: PaymentAttemptStatus.RequiresAction);
+
+        string eventId = $"evt_src_chg_{Guid.NewGuid():N}";
+        string payload = $$"""
+        {
+          "data": {
+            "id": "{{eventId}}",
+            "type": "event",
+            "attributes": {
+              "type": "source.chargeable",
+              "data": {
+                "id": "{{sourceId}}",
+                "attributes": {
+                  "status": "chargeable"
+                }
+              }
+            }
+          }
+        }
+        """;
+
+        long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        string signature = WebhookSigner.CreateSignatureHeader(payload, WebhookSecret, timestamp);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/webhooks/paymongo")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add("Paymongo-Signature", signature);
+
+        using HttpResponseMessage response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var attemptRepo = scope.ServiceProvider.GetRequiredService<IPaymentAttemptRepository>();
+
+        PaymentAttempt? updatedAttempt = await attemptRepo.GetByIdAsync(attempt.Id);
+
+        Assert.NotNull(updatedAttempt);
+        Assert.Equal(PaymentAttemptStatus.Processing, updatedAttempt.Status);
+
+        await DrainOutboxAsync();
+    }
+
+    [Fact]
+    public async Task Webhook_UnresolvableAttempt_Returns200OkWithIgnoredStatus()
+    {
+        string eventId = $"evt_unresolvable_{Guid.NewGuid():N}";
+        string payload = $$"""
+        {
+          "data": {
+            "id": "{{eventId}}",
+            "type": "event",
+            "attributes": {
+              "type": "payment.paid",
+              "data": {
+                "id": "pay_completely_unknown_99999",
+                "attributes": {
+                  "status": "paid",
+                  "checkout_session_id": "cs_nonexistent_99999"
+                }
+              }
+            }
+          }
+        }
+        """;
+
+        long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        string signature = WebhookSigner.CreateSignatureHeader(payload, WebhookSecret, timestamp);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/webhooks/paymongo")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add("Paymongo-Signature", signature);
+
+        using HttpResponseMessage response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var jsonDoc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        JsonElement root = jsonDoc.RootElement;
+        Assert.True(root.GetProperty("received").GetBoolean());
+        Assert.Equal("ignored", root.GetProperty("processing_status").GetString());
+    }
+
+    // =========================================================================
     // Helper Methods
     // =========================================================================
 

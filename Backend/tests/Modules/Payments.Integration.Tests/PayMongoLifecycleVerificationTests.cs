@@ -803,5 +803,228 @@ public sealed class PayMongoLifecycleVerificationTests
         Assert.Equal(PaymentAttemptStatus.Succeeded, attempt.Status);
         Assert.Contains(notifier.PublishedEvents, e => e.AttemptId == attemptId && e.Status == "succeeded");
     }
+
+    // =========================================================================
+    // Scenario 14: State Locking — Succeeded Attempt Locked Against Concurrent Poll or Late Webhook
+    // =========================================================================
+    [Fact]
+    public async Task Scenario14_SucceededAttempt_LockedAgainstConcurrentPollOrLateExpiredWebhook()
+    {
+        PollAndReconcileHandler.ResetCooldowns();
+        var (sp, clock, gateway, _) = BuildTestHarness();
+        await using var _ = sp;
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var createOrder = scope.ServiceProvider.GetRequiredService<CreateOrderHandler>();
+        var initiateAttempt = scope.ServiceProvider.GetRequiredService<InitiateAttemptHandler>();
+        var pollHandler = scope.ServiceProvider.GetRequiredService<PollAndReconcileHandler>();
+        var attemptRepo = scope.ServiceProvider.GetRequiredService<IPaymentAttemptRepository>();
+        var receiveWebhook = scope.ServiceProvider.GetRequiredService<ReceivePayMongoWebhookHandler>();
+
+        var ordRes = await createOrder.HandleAsync(new CreateOrderCommand("COST-ACC-TEXT-2026", Quantity: 1));
+        var attRes = await initiateAttempt.HandleAsync(new InitiateAttemptCommand(ordRes.Value.Id, "qrph", "idem-lock-001"));
+        string csId = attRes.Value.ProviderPaymentId!;
+        string attemptId = attRes.Value.Id;
+
+        // 1. Settle attempt to Succeeded
+        PaymentAttempt? attempt = await attemptRepo.GetByIdAsync(attemptId);
+        Assert.NotNull(attempt);
+        attempt.MarkSucceeded(clock.UtcNow, "qrph");
+        await attemptRepo.SaveAsync(attempt);
+
+        // 2. Set remote session status to expired
+        gateway.SetRemoteSessionStatus(csId, "expired", failureCode: "source_expired");
+
+        // 3. Poll and reconcile: must remain Succeeded
+        var pollRes = await pollHandler.HandleAsync(new PollAndReconcileQuery(attemptId, AutoReconcile: true));
+        Assert.True(pollRes.IsSuccess);
+        Assert.Equal("succeeded", pollRes.Value.Status.ToLowerInvariant());
+
+        PaymentAttempt? reloaded = await attemptRepo.GetByIdAsync(attemptId);
+        Assert.NotNull(reloaded);
+        Assert.Equal(PaymentAttemptStatus.Succeeded, reloaded.Status);
+        Assert.NotNull(reloaded.PaidAt);
+        Assert.Null(reloaded.FailureCode);
+
+        // 4. Late qrph.expired webhook arrives: must not flip Succeeded
+        long unixNow = clock.UtcNow.ToUnixTimeSeconds();
+        string rawPayload = $$"""
+            {
+              "data": {
+                "id": "evt_late_expired_001",
+                "type": "event",
+                "attributes": {
+                  "type": "qrph.expired",
+                  "data": {
+                    "id": "{{csId}}",
+                    "type": "checkout_session",
+                    "attributes": {
+                      "status": "expired"
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        string sigHeader = WebhookSigner.CreateSignatureHeader(rawPayload, WebhookSecret, unixNow);
+        var webhookRes = await receiveWebhook.HandleAsync(new ReceivePayMongoWebhookCommand(sigHeader, rawPayload, "late-webhook-rel"));
+        Assert.True(webhookRes.IsSuccess);
+
+        PaymentAttempt? postWebhook = await attemptRepo.GetByIdAsync(attemptId);
+        Assert.NotNull(postWebhook);
+        Assert.Equal(PaymentAttemptStatus.Succeeded, postWebhook.Status);
+    }
+
+    // =========================================================================
+    // Scenario 15: Double-Capture Race Protection & Verification Recovery
+    // =========================================================================
+    [Fact]
+    public async Task Scenario15_DoubleCaptureRace_SimultaneousWebhookAndPoll_RecoversToSucceededWithoutFlipping()
+    {
+        PollAndReconcileHandler.ResetCooldowns();
+        var (sp, clock, gateway, notifier) = BuildTestHarness();
+        await using var _ = sp;
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var createOrder = scope.ServiceProvider.GetRequiredService<CreateOrderHandler>();
+        var pollHandler = scope.ServiceProvider.GetRequiredService<PollAndReconcileHandler>();
+        var attemptRepo = scope.ServiceProvider.GetRequiredService<IPaymentAttemptRepository>();
+        var orderRepo = scope.ServiceProvider.GetRequiredService<IOrderRepository>();
+
+        var ordRes = await createOrder.HandleAsync(new CreateOrderCommand("COST-ACC-TEXT-2026", Quantity: 1));
+        string srcId = "src_dbl_capture_001";
+
+        var attempt = PaymentAttempt.CreatePending(
+            ordRes.Value.Id, "gcash", Rge.BuildingBlocks.SharedKernel.Money.Money.Php(ordRes.Value.AmountMinor), "idem-dbl-001", clock.UtcNow);
+        attempt.AttachCheckoutSession(srcId, $"https://checkout.paymongo.com/{srcId}", clock.UtcNow.AddMinutes(30), clock.UtcNow);
+        attempt.MarkProcessing(clock.UtcNow);
+        await attemptRepo.SaveAsync(attempt);
+
+        // Remote gateway shows paid (captured by concurrent webhook)
+        gateway.SetRemoteSessionStatus(srcId, "paid", "gcash", clock.UtcNow);
+
+        // Poll query executes
+        var pollRes = await pollHandler.HandleAsync(new PollAndReconcileQuery(attempt.Id, AutoReconcile: true));
+        Assert.True(pollRes.IsSuccess);
+        Assert.Equal("succeeded", pollRes.Value.Status.ToLowerInvariant());
+
+        PaymentAttempt? reloaded = await attemptRepo.GetByIdAsync(attempt.Id);
+        Assert.NotNull(reloaded);
+        Assert.Equal(PaymentAttemptStatus.Succeeded, reloaded.Status);
+
+        Order? updatedOrder = await orderRepo.GetByIdAsync(ordRes.Value.Id);
+        Assert.NotNull(updatedOrder);
+        Assert.Equal("paid", updatedOrder.Status);
+    }
+
+    // =========================================================================
+    // Scenario 16: Source Status Mapping Invariants (Cancelled -> Failed, Expired -> Expired)
+    // =========================================================================
+    [Fact]
+    public async Task Scenario16_PayMongoSourceStatusMapping_MapsCancelledToFailed_And_ExpiredToExpired()
+    {
+        PollAndReconcileHandler.ResetCooldowns();
+        var (sp, clock, gateway, _) = BuildTestHarness();
+        await using var _ = sp;
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var createOrder = scope.ServiceProvider.GetRequiredService<CreateOrderHandler>();
+        var pollHandler = scope.ServiceProvider.GetRequiredService<PollAndReconcileHandler>();
+        var attemptRepo = scope.ServiceProvider.GetRequiredService<IPaymentAttemptRepository>();
+
+        // Part A: Cancelled source maps to Failed
+        var ordRes1 = await createOrder.HandleAsync(new CreateOrderCommand("COST-ACC-TEXT-2026", Quantity: 1));
+        string srcCancelledId = "src_cancel_test_001";
+        var attempt1 = PaymentAttempt.CreatePending(
+            ordRes1.Value.Id, "gcash", Rge.BuildingBlocks.SharedKernel.Money.Money.Php(ordRes1.Value.AmountMinor), "idem-cancel-001", clock.UtcNow);
+        attempt1.AttachCheckoutSession(srcCancelledId, $"https://checkout.paymongo.com/{srcCancelledId}", clock.UtcNow.AddMinutes(30), clock.UtcNow);
+        await attemptRepo.SaveAsync(attempt1);
+
+        gateway.SetRemoteSessionStatus(srcCancelledId, "cancelled", failureCode: "source_cancelled", failureMessage: "Source cancelled by user.");
+        var pollCancelRes = await pollHandler.HandleAsync(new PollAndReconcileQuery(attempt1.Id, AutoReconcile: true, ClientReportedRedirectStatus: "cancelled"));
+        Assert.True(pollCancelRes.IsSuccess);
+        Assert.Equal("failed", pollCancelRes.Value.Status.ToLowerInvariant());
+
+        PaymentAttempt? reloaded1 = await attemptRepo.GetByIdAsync(attempt1.Id);
+        Assert.NotNull(reloaded1);
+        Assert.Equal(PaymentAttemptStatus.Failed, reloaded1.Status);
+        Assert.Equal("source_cancelled", reloaded1.FailureCode);
+
+        // Part B: Expired source maps to Expired
+        PollAndReconcileHandler.ResetCooldowns();
+        var ordRes2 = await createOrder.HandleAsync(new CreateOrderCommand("COST-ACC-TEXT-2026", Quantity: 1));
+        string srcExpiredId = "src_expire_test_001";
+        var attempt2 = PaymentAttempt.CreatePending(
+            ordRes2.Value.Id, "grab_pay", Rge.BuildingBlocks.SharedKernel.Money.Money.Php(ordRes2.Value.AmountMinor), "idem-exp-002", clock.UtcNow);
+        attempt2.AttachCheckoutSession(srcExpiredId, $"https://checkout.paymongo.com/{srcExpiredId}", clock.UtcNow.AddMinutes(30), clock.UtcNow);
+        await attemptRepo.SaveAsync(attempt2);
+
+        gateway.SetRemoteSessionStatus(srcExpiredId, "expired", failureCode: "source_expired", failureMessage: "Source expired.");
+        var pollExpireRes = await pollHandler.HandleAsync(new PollAndReconcileQuery(attempt2.Id, AutoReconcile: true));
+        Assert.True(pollExpireRes.IsSuccess);
+        Assert.Equal("expired", pollExpireRes.Value.Status.ToLowerInvariant());
+
+        PaymentAttempt? reloaded2 = await attemptRepo.GetByIdAsync(attempt2.Id);
+        Assert.NotNull(reloaded2);
+        Assert.Equal(PaymentAttemptStatus.Expired, reloaded2.Status);
+        Assert.Equal("source_expired", reloaded2.FailureCode);
+    }
+
+    // =========================================================================
+    // Scenario 17: Expiration Worker State Exclusions — Processing Attempts Are Never Swept
+    // =========================================================================
+    [Fact]
+    public async Task Scenario17_ExpirationWorker_ProcessingAttempts_AreNeverSweptOrExpired()
+    {
+        var (sp, clock, gateway, _) = BuildTestHarness();
+        await using var _ = sp;
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var attemptRepo = scope.ServiceProvider.GetRequiredService<IPaymentAttemptRepository>();
+        var worker = scope.ServiceProvider.GetRequiredService<PaymentExpirationWorker>();
+
+        // 1. Attempt 1: In Processing status, deadline reached 30 minutes ago
+        var attempt1 = PaymentAttempt.CreatePending(
+            "ord-proc-001", "qrph", Rge.BuildingBlocks.SharedKernel.Money.Money.Php(1000_00), "idem-proc-001", clock.UtcNow.AddHours(-1));
+        attempt1.AttachCheckoutSession("cs_proc_001", "https://checkout.paymongo.com/cs_proc_001", clock.UtcNow.AddMinutes(-30), clock.UtcNow.AddHours(-1));
+        attempt1.MarkProcessing(clock.UtcNow.AddMinutes(-30));
+        await attemptRepo.SaveAsync(attempt1);
+
+        // 2. Attempt 2: Older attempt on ord-proc-002, also in Processing
+        var attempt2 = PaymentAttempt.CreatePending(
+            "ord-proc-002", "gcash", Rge.BuildingBlocks.SharedKernel.Money.Money.Php(2000_00), "idem-proc-002", clock.UtcNow.AddHours(-1));
+        attempt2.AttachCheckoutSession("cs_proc_002", "https://checkout.paymongo.com/cs_proc_002", clock.UtcNow.AddMinutes(-10), clock.UtcNow.AddHours(-1));
+        attempt2.MarkProcessing(clock.UtcNow.AddMinutes(-10));
+        await attemptRepo.SaveAsync(attempt2);
+
+        // 3. Attempt 3: Eligible RequiresAction attempt past deadline
+        var attempt3 = PaymentAttempt.CreatePending(
+            "ord-proc-003", "maya", Rge.BuildingBlocks.SharedKernel.Money.Money.Php(3000_00), "idem-proc-003", clock.UtcNow.AddHours(-1));
+        attempt3.AttachCheckoutSession("cs_eligible_003", "https://checkout.paymongo.com/cs_eligible_003", clock.UtcNow.AddMinutes(-5), clock.UtcNow.AddHours(-1));
+        await attemptRepo.SaveAsync(attempt3);
+        gateway.SetRemoteSessionStatus("cs_eligible_003", "active");
+
+        // Act: Run expiration worker sweep
+        int processed = await worker.ProcessOverdueBatchOnceAsync();
+
+        // Assert:
+        Assert.Equal(1, processed);
+        Assert.Contains("cs_eligible_003", gateway.ExpiredSessionCalls);
+        Assert.DoesNotContain("cs_proc_001", gateway.ExpiredSessionCalls);
+        Assert.DoesNotContain("cs_proc_002", gateway.ExpiredSessionCalls);
+
+        PaymentAttempt? reloaded1 = await attemptRepo.GetByIdAsync(attempt1.Id);
+        Assert.NotNull(reloaded1);
+        Assert.Equal(PaymentAttemptStatus.Processing, reloaded1.Status);
+
+        PaymentAttempt? reloaded2 = await attemptRepo.GetByIdAsync(attempt2.Id);
+        Assert.NotNull(reloaded2);
+        Assert.Equal(PaymentAttemptStatus.Processing, reloaded2.Status);
+
+        PaymentAttempt? reloaded3 = await attemptRepo.GetByIdAsync(attempt3.Id);
+        Assert.NotNull(reloaded3);
+        Assert.Equal(PaymentAttemptStatus.Expired, reloaded3.Status);
+    }
 }
 
