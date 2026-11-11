@@ -7,7 +7,7 @@
     "dev": "next dev -H localhost",
     "lint": "eslint .",
     "start": "next start",
-    "test": "vitest run",
+    "test": "node --require ./patch-fs.cjs ./node_modules/vitest/vitest.mjs run",
     "test:watch": "vitest"
   },
   "dependencies": {

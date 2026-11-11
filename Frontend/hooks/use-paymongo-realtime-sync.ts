@@ -122,8 +122,17 @@ export function usePayMongoRealtimeSync({
   const serverClockOffsetMsRef = useRef<number>(0);
   const hasTriggeredZeroReconcileRef = useRef<boolean>(false);
   const isPollInFlightRef = useRef<boolean>(false);
+  const currentAttemptIdRef = useRef<string | null | undefined>(undefined);
+  const previousAttemptIdRef = useRef<string | null | undefined>(attemptId);
   const statusRef = useRef<AuthoritativePaymentStatus>(status);
-  statusRef.current = status;
+
+  // Immediate synchronization during render when attemptId changes
+  if (previousAttemptIdRef.current !== attemptId) {
+    previousAttemptIdRef.current = attemptId;
+    statusRef.current = normalizePaymentStatus(initialStatus);
+  } else {
+    statusRef.current = status;
+  }
 
   const isTerminal = TERMINAL_STATUSES.has(status);
 
@@ -145,19 +154,40 @@ export function usePayMongoRealtimeSync({
 
   useEffect(() => {
     const nextStatus = normalizePaymentStatus(initialStatus);
-    setStatus(nextStatus);
-    setExpiresAtUtc(effectiveInitialExpiresAt);
-    setCheckoutUrl(effectiveInitialCheckoutUrl);
-    setProviderPaymentId(initialProviderPaymentId);
-    setFailureCode(null);
-    setFailureMessage(null);
-    hasTriggeredZeroReconcileRef.current = false;
-    logDebug("HOOK_INITIALIZED_FOR_ATTEMPT", {
-      attemptId,
-      initialStatus: nextStatus,
-      initialExpiresAtUtc: effectiveInitialExpiresAt,
-      initialProviderPaymentId,
+    const isNewAttempt = currentAttemptIdRef.current !== attemptId;
+    currentAttemptIdRef.current = attemptId;
+
+    if (isNewAttempt) {
+      statusRef.current = nextStatus;
+      isPollInFlightRef.current = false;
+    }
+
+    setStatus((prev) => {
+      // Guard: If existing attempt is already succeeded, never downgrade from props
+      if (!isNewAttempt && prev === "succeeded" && nextStatus !== "succeeded") {
+        logDebug("IGNORED_PROP_DOWNGRADE_ON_SUCCEEDED", {
+          prevStatus: prev,
+          attemptedPropStatus: nextStatus,
+        });
+        return prev;
+      }
+      return nextStatus;
     });
+
+    if (isNewAttempt) {
+      setExpiresAtUtc(effectiveInitialExpiresAt);
+      setCheckoutUrl(effectiveInitialCheckoutUrl);
+      setProviderPaymentId(initialProviderPaymentId);
+      setFailureCode(null);
+      setFailureMessage(null);
+      hasTriggeredZeroReconcileRef.current = false;
+      logDebug("HOOK_INITIALIZED_FOR_ATTEMPT", {
+        attemptId,
+        initialStatus: nextStatus,
+        initialExpiresAtUtc: effectiveInitialExpiresAt,
+        initialProviderPaymentId,
+      });
+    }
   }, [
     attemptId,
     initialStatus,
@@ -221,6 +251,7 @@ export function usePayMongoRealtimeSync({
           setCheckoutUrl(nextCheckoutUrl);
         }
 
+        statusRef.current = normalized;
         return normalized;
       });
     },
@@ -229,7 +260,13 @@ export function usePayMongoRealtimeSync({
 
   const reconcileWithGateway = useCallback(
     async (triggerReason: string = "scheduled_poll") => {
-      if (!attemptId || TERMINAL_STATUSES.has(statusRef.current)) {
+      const targetAttemptId = attemptId;
+      if (
+        !targetAttemptId ||
+        (currentAttemptIdRef.current !== undefined &&
+          currentAttemptIdRef.current !== targetAttemptId) ||
+        TERMINAL_STATUSES.has(statusRef.current)
+      ) {
         setIsReconciling(false);
         return;
       }
@@ -241,14 +278,17 @@ export function usePayMongoRealtimeSync({
 
       isPollInFlightRef.current = true;
       setIsReconciling(true);
-      const encodedId = encodeURIComponent(attemptId);
+      const encodedId = encodeURIComponent(targetAttemptId);
 
       try {
         logDebug("POLL_REQUEST_START", {
           triggerReason,
           currentStatus: statusRef.current,
-          endpoint: `/api/v1/payments/${attemptId}/poll`,
+          endpoint: `/api/v1/payments/${targetAttemptId}/poll`,
         });
+
+        // Pre-fetch correlation check
+        if (currentAttemptIdRef.current !== targetAttemptId) return;
 
         let response = await fetch(`/api/v1/payments/${encodedId}/poll`, {
           method: "POST",
@@ -256,17 +296,42 @@ export function usePayMongoRealtimeSync({
           cache: "no-store",
         });
 
+        // Post-primary fetch correlation check
+        if (currentAttemptIdRef.current !== targetAttemptId) {
+          logDebug("POLL_DROPPED_STALE_ATTEMPT", {
+            step: "after_primary_fetch",
+            polledAttemptId: targetAttemptId,
+            currentAttemptId: currentAttemptIdRef.current,
+          });
+          return;
+        }
+
         if (response.status === 404 || response.status === 405) {
+          // Pre-fallback fetch correlation check
+          if (currentAttemptIdRef.current !== targetAttemptId) return;
+
           response = await fetch(`/api/v1/payments/${encodedId}`, {
             method: "GET",
             headers: { Accept: "application/json" },
             cache: "no-store",
           });
+
+          // Post-fallback fetch correlation check
+          if (currentAttemptIdRef.current !== targetAttemptId) {
+            logDebug("POLL_DROPPED_STALE_ATTEMPT", {
+              step: "after_fallback_fetch",
+              polledAttemptId: targetAttemptId,
+              currentAttemptId: currentAttemptIdRef.current,
+            });
+            return;
+          }
         }
 
         const httpStatus = response.status;
 
         if (!response.ok) {
+          if (currentAttemptIdRef.current !== targetAttemptId) return;
+
           logDebug("POLL_HTTP_ERROR", { triggerReason, httpStatus });
           setTelemetry((prev: SyncDebugTelemetry) => ({
             ...prev,
@@ -277,7 +342,21 @@ export function usePayMongoRealtimeSync({
           return;
         }
 
+        // Pre-json parse correlation check
+        if (currentAttemptIdRef.current !== targetAttemptId) return;
+
         const data: ReconcileApiPayload = await response.json();
+
+        // Post-json parse correlation check
+        if (currentAttemptIdRef.current !== targetAttemptId) {
+          logDebug("POLL_DROPPED_STALE_ATTEMPT", {
+            step: "after_json_parse",
+            polledAttemptId: targetAttemptId,
+            currentAttemptId: currentAttemptIdRef.current,
+          });
+          return;
+        }
+
         const resolvedExpiresAt = data.expires_at_utc ?? data.expires_at;
         const resolvedPayable =
           data.is_payable !== undefined
@@ -294,6 +373,9 @@ export function usePayMongoRealtimeSync({
           failureCode: data.failure_code,
           failureMessage: data.failure_message,
         });
+
+        // Pre-commit correlation check
+        if (currentAttemptIdRef.current !== targetAttemptId) return;
 
         setTelemetry((prev: SyncDebugTelemetry) => ({
           ...prev,
@@ -316,13 +398,17 @@ export function usePayMongoRealtimeSync({
           data.provider_payment_id
         );
       } catch (err) {
-        logDebug("POLL_NETWORK_EXCEPTION", {
-          triggerReason,
-          error: err instanceof Error ? err.message : String(err),
-        });
+        if (currentAttemptIdRef.current === targetAttemptId) {
+          logDebug("POLL_NETWORK_EXCEPTION", {
+            triggerReason,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       } finally {
-        isPollInFlightRef.current = false;
-        setIsReconciling(false);
+        if (currentAttemptIdRef.current === targetAttemptId) {
+          isPollInFlightRef.current = false;
+          setIsReconciling(false);
+        }
       }
     },
     [attemptId, applyAuthoritativeState, logDebug]
@@ -373,6 +459,10 @@ export function usePayMongoRealtimeSync({
         failureCode?: string;
         failureMessage?: string;
       }) => {
+        if (currentAttemptIdRef.current !== attemptId) {
+          return;
+        }
+
         const targetId = (
           event.attemptId ??
           event.transactionId ??
@@ -400,6 +490,8 @@ export function usePayMongoRealtimeSync({
     connection
       .start()
       .then(() => {
+        if (currentAttemptIdRef.current !== attemptId) return;
+
         setIsSignalRConnected(true);
         setTelemetry((prev: SyncDebugTelemetry) => ({
           ...prev,
@@ -415,6 +507,8 @@ export function usePayMongoRealtimeSync({
         }
       })
       .catch(() => {
+        if (currentAttemptIdRef.current !== attemptId) return;
+
         setIsSignalRConnected(false);
         setTelemetry((prev: SyncDebugTelemetry) => ({
           ...prev,
@@ -423,7 +517,9 @@ export function usePayMongoRealtimeSync({
       });
 
     return () => {
-      connection.stop().catch(() => {});
+      try {
+        connection?.stop?.()?.catch?.(() => {});
+      } catch (_) {}
     };
   }, [
     attemptId,
@@ -462,6 +558,8 @@ export function usePayMongoRealtimeSync({
     }
 
     const tick = () => {
+      if (currentAttemptIdRef.current !== attemptId) return;
+
       const nowAuthoritative = Date.now() + serverClockOffsetMsRef.current;
       const secs = Math.max(
         0,

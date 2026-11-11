@@ -1,7 +1,7 @@
 "use client"
 
-import React, { useEffect, useState, use } from "react"
-import { useRouter } from "next/navigation"
+import React, { useEffect, useState, use, useCallback, useRef, Suspense } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -52,10 +52,13 @@ function getChannelIcon(code: string) {
   return Smartphone
 }
 
-export default function PaymentResultPage({ params }: PageProps) {
+function PaymentResultContent({ params }: PageProps) {
   const resolvedParams = use(params)
   const paymentId = resolvedParams.paymentId
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const clientRedirectStatus =
+    searchParams?.get("status") || searchParams?.get("redirect_status") || searchParams?.get("state") || null
 
   const [payment, setPayment] = useState<PaymentAttempt | null>(null)
   const [receipt, setReceipt] = useState<ReceiptData | null>(null)
@@ -65,6 +68,23 @@ export default function PaymentResultPage({ params }: PageProps) {
   const [error, setError] = useState<string | null>(null)
   const [receiptRetries, setReceiptRetries] = useState(0)
   const [receiptLoadingError, setReceiptLoadingError] = useState<string | null>(null)
+  const lastFocusSyncMsRef = useRef<number>(0)
+  const isFocusSyncInFlightRef = useRef<boolean>(false)
+
+  // Terminal Succeeded State Guard: Prevents late polls or webhooks from downgrading Succeeded status
+  const safeSetPayment = useCallback(
+    (update: PaymentAttempt | null | ((prev: PaymentAttempt | null) => PaymentAttempt | null)) => {
+      setPayment((prev) => {
+        const next = typeof update === "function" ? update(prev) : update
+        if (!next) return next
+        if (prev?.status === "succeeded" && next.status !== "succeeded") {
+          return prev
+        }
+        return next
+      })
+    },
+    []
+  )
 
   // Resend email state
   const [emailInput, setEmailInput] = useState("")
@@ -83,7 +103,7 @@ export default function PaymentResultPage({ params }: PageProps) {
     enabled: !isTerminal(payment?.status),
     onStatusChanged: (payload) => {
       if (payload.status) {
-        setPayment((prev) => (prev ? { ...prev, status: payload.status.toLowerCase() as any } : null))
+        safeSetPayment((prev) => (prev ? { ...prev, status: payload.status.toLowerCase() as any } : null))
         if (payload.status.toLowerCase() === "succeeded" || payload.status.toLowerCase() === "paid") {
           fetchPaymentReceipt(paymentId).then(setReceipt).catch(() => {})
         }
@@ -92,7 +112,7 @@ export default function PaymentResultPage({ params }: PageProps) {
     onPollFallback: () => {
       if (!isTerminal(payment?.status)) {
         pollPaymentStatus(paymentId, false).then((data) => {
-          setPayment(data)
+          safeSetPayment(data)
           if (data.receipt) setReceipt(data.receipt)
         }).catch(() => {})
       }
@@ -117,7 +137,7 @@ export default function PaymentResultPage({ params }: PageProps) {
         const localData = await pollPaymentStatus(paymentId, false)
         if (!active) return
 
-        setPayment(localData)
+        safeSetPayment(localData)
         if (localData.receipt) {
           setReceipt(localData.receipt)
         } else if (localData.status === "succeeded") {
@@ -131,9 +151,9 @@ export default function PaymentResultPage({ params }: PageProps) {
         if (!isTerminal(localData.status)) {
           setIsReconciling(true)
           try {
-            const reconciledData = await pollPaymentStatus(paymentId, true)
+            const reconciledData = await pollPaymentStatus(paymentId, true, clientRedirectStatus)
             if (!active) return
-            setPayment(reconciledData)
+            safeSetPayment(reconciledData)
             if (reconciledData.receipt) {
               setReceipt(reconciledData.receipt)
             } else if (reconciledData.status === "succeeded") {
@@ -159,7 +179,7 @@ export default function PaymentResultPage({ params }: PageProps) {
     return () => {
       active = false
     }
-  }, [paymentId])
+  }, [paymentId, clientRedirectStatus, safeSetPayment])
 
   // Periodic heartbeat / polling fallback loop
   useEffect(() => {
@@ -183,7 +203,7 @@ export default function PaymentResultPage({ params }: PageProps) {
         const data = await pollPaymentStatus(paymentId, false)
         if (!active) return
 
-        setPayment(data)
+        safeSetPayment(data)
         if (data.receipt) {
           setReceipt(data.receipt)
         } else if (data.status === "succeeded") {
@@ -200,7 +220,50 @@ export default function PaymentResultPage({ params }: PageProps) {
       active = false
       clearInterval(timer)
     }
-  }, [paymentId, payment?.status, isSignalRConnected, pollCount])
+  }, [paymentId, payment?.status, isSignalRConnected, pollCount, safeSetPayment])
+
+  // Window focus & Document visibility change sync:
+  // Instantly reconciles payment status when customer returns from PayMongo checkout tab
+  useEffect(() => {
+    if (isTerminal(payment?.status)) return
+
+    const handleVisibilityOrFocus = async () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return
+      }
+
+      const now = Date.now()
+      if (now - lastFocusSyncMsRef.current < 3000 || isFocusSyncInFlightRef.current) {
+        return
+      }
+      lastFocusSyncMsRef.current = now
+      isFocusSyncInFlightRef.current = true
+      setIsReconciling(true)
+
+      try {
+        const freshData = await pollPaymentStatus(paymentId, true, clientRedirectStatus)
+        safeSetPayment(freshData)
+        if (freshData.receipt) {
+          setReceipt(freshData.receipt)
+        } else if (freshData.status === "succeeded") {
+          fetchPaymentReceipt(paymentId).then(setReceipt).catch(() => {})
+        }
+      } catch {
+        // Background sync error does not disturb existing rendered state
+      } finally {
+        isFocusSyncInFlightRef.current = false
+        setIsReconciling(false)
+      }
+    }
+
+    window.addEventListener("focus", handleVisibilityOrFocus)
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus)
+
+    return () => {
+      window.removeEventListener("focus", handleVisibilityOrFocus)
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus)
+    }
+  }, [paymentId, payment?.status, clientRedirectStatus, safeSetPayment])
 
   // Dedicated receipt polling loop when payment has succeeded but receipt is not yet loaded
   useEffect(() => {
@@ -256,7 +319,7 @@ export default function PaymentResultPage({ params }: PageProps) {
     try {
       await reconcilePayment(paymentId)
       const updated = await pollPaymentStatus(paymentId, true)
-      setPayment(updated)
+      safeSetPayment(updated)
       if (updated.receipt) {
         setReceipt(updated.receipt)
       } else if (updated.status === "succeeded") {
@@ -1054,5 +1117,19 @@ export default function PaymentResultPage({ params }: PageProps) {
         </div>
       )}
     </div>
+  )
+}
+
+export default function PaymentResultPage({ params }: PageProps) {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center p-6 bg-background">
+          <Loader2 className="w-8 h-8 animate-spin text-accent" />
+        </div>
+      }
+    >
+      <PaymentResultContent params={params} />
+    </Suspense>
   )
 }

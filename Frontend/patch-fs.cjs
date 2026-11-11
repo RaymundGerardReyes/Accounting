@@ -100,3 +100,12 @@ try {
   const gracefulFs = require("graceful-fs");
   patch(gracefulFs);
 } catch (_) {}
+
+// Ensure vitest finds Frontend configuration and modules when invoked from root
+const path = require("path");
+const feDir = path.resolve(__dirname);
+if (!process.argv.includes("--root") && !process.argv.includes("-r")) {
+  if (path.resolve(process.cwd()) !== feDir) {
+    process.argv.push("--root", feDir);
+  }
+}

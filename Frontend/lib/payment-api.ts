@@ -266,8 +266,15 @@ export async function createPaymentAttempt(
   return res.json()
 }
 
-export async function pollPaymentStatus(paymentId: string, autoReconcile: boolean = true): Promise<PaymentAttempt> {
-  const url = `${API_BASE}/api/v1/payments/${encodeURIComponent(paymentId)}?auto_reconcile=${autoReconcile}`
+export async function pollPaymentStatus(
+  paymentId: string,
+  autoReconcile: boolean = true,
+  clientReportedRedirectStatus?: string | null
+): Promise<PaymentAttempt> {
+  let url = `${API_BASE}/api/v1/payments/${encodeURIComponent(paymentId)}?auto_reconcile=${autoReconcile}`
+  if (clientReportedRedirectStatus) {
+    url += `&client_reported_redirect_status=${encodeURIComponent(clientReportedRedirectStatus)}`
+  }
   const res = await fetch(url, { cache: "no-store" })
   if (!res.ok) throw new Error(`Failed to poll payment status: ${res.statusText}`)
   const attempt = await res.json()
