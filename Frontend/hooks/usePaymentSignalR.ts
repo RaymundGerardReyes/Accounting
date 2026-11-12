@@ -46,8 +46,27 @@ export function usePaymentSignalR({
 
     let isMounted = true
 
+    const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL
+    // Direct Kestrel connection is only possible in local dev when hitting port 5080/5000 directly
+    const isDirectKestrel = Boolean(
+      backendBase &&
+        (backendBase.includes(":5080") || backendBase.includes(":5000"))
+    )
+    const hubUrl = isDirectKestrel
+      ? `${backendBase!.replace(/\/$/, "")}/api/hubs/payments`
+      : "/api/hubs/payments"
+
+    // When going through Next.js API route proxy (/api/hubs/payments) on Heroku or production,
+    // WebSockets cannot upgrade HTTP 101 and causes Heroku router H18 503 drops.
+    // LongPolling is the 100% stable, fully supported transport across the reverse proxy.
+    const transport = isDirectKestrel
+      ? signalR.HttpTransportType.WebSockets | signalR.HttpTransportType.LongPolling
+      : signalR.HttpTransportType.LongPolling
+
     const connection = new signalR.HubConnectionBuilder()
-      .withUrl("/hubs/payment")
+      .withUrl(hubUrl, {
+        transport,
+      })
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
       .configureLogging(signalR.LogLevel.Warning)
       .build()
@@ -78,6 +97,8 @@ export function usePaymentSignalR({
         if (!isMounted) return
         setIsConnected(false)
         setConnectionError(err?.message || "Failed to connect to real-time payment hub")
+        // Silently activate polling fallback immediately so UI keeps updating seamlessly
+        pollCallbackRef.current?.()
       }
     }
 

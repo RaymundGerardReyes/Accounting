@@ -2,6 +2,7 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -11,6 +12,7 @@ import {
   RefreshCw,
   Terminal,
   XCircle,
+  FileText,
 } from "lucide-react";
 import { usePayMongoRealtimeSync } from "@/hooks/use-paymongo-realtime-sync";
 import { Button } from "@/components/ui/button";
@@ -23,9 +25,9 @@ export interface PayMongoCheckoutGuardProps {
   initialExpiresAtUtc?: string | null;
   initialCheckoutUrl?: string | null;
   initialProviderPaymentId?: string | null;
+  clientReportedRedirectStatus?: string | null;
   onCreateNewAttempt?: () => void;
-  onPaymentSucceeded?: () => void;
-  // Backwards compatibility props
+  // Backward compatibility props (optional)
   orderId?: string;
   orderNumber?: string;
   amountMinor?: number;
@@ -41,8 +43,8 @@ export function PayMongoCheckoutGuard({
   initialExpiresAtUtc,
   initialCheckoutUrl,
   initialProviderPaymentId,
+  clientReportedRedirectStatus = null,
   onCreateNewAttempt,
-  onPaymentSucceeded,
   expiresAt,
   checkoutUrl: fallbackCheckoutUrl,
   onRetry,
@@ -71,13 +73,8 @@ export function PayMongoCheckoutGuard({
     initialExpiresAtUtc: effectiveExpiresAt,
     initialCheckoutUrl: effectiveCheckoutUrl,
     initialProviderPaymentId,
+    clientReportedRedirectStatus,
   });
-
-  React.useEffect(() => {
-    if (status === "succeeded") {
-      onPaymentSucceeded?.();
-    }
-  }, [status, onPaymentSucceeded]);
 
   return (
     <Card className={`w-full border-2 shadow-sm ${className}`}>
@@ -93,14 +90,22 @@ export function PayMongoCheckoutGuard({
       <CardContent className="space-y-4">
         {/* 1. SUCCEEDED STATE */}
         {status === "succeeded" && (
-          <div className="flex items-start gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 text-emerald-700 dark:text-emerald-400">
-            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
-            <div className="space-y-1">
-              <p className="font-semibold">Payment Verified & Confirmed (00:00)</p>
-              <p className="text-sm">
-                PayMongo confirmed your payment. Your BIR Official Receipt is ready.
-              </p>
+          <div className="space-y-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 text-emerald-700 dark:text-emerald-400">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
+              <div className="space-y-1">
+                <p className="font-semibold">Payment Verified & Confirmed (00:00)</p>
+                <p className="text-sm">
+                  PayMongo confirmed your payment. Your BIR Official Receipt is ready.
+                </p>
+              </div>
             </div>
+            <Button asChild className="w-full bg-emerald-600 hover:bg-emerald-700 text-white">
+              <Link href={`/payment/result/${encodeURIComponent(attemptId)}`}>
+                <FileText className="mr-2 h-4 w-4" />
+                View Official Receipt
+              </Link>
+            </Button>
           </div>
         )}
 
@@ -170,6 +175,23 @@ export function PayMongoCheckoutGuard({
         {/* 4. ACTIVE COUNTDOWN STATE */}
         {!isTerminal && (
           <div className="space-y-4 rounded-lg border bg-muted/30 p-4 text-center">
+            {failureCode === "qrph_source_expired" && (
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-left text-xs text-amber-800 dark:text-amber-300">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div className="space-y-1">
+                    <p className="font-semibold">
+                      QR Code Timed Out — Checkout Session Still Active
+                    </p>
+                    <p>
+                      {failureMessage ||
+                        "The child QR/source payment resource expired, while the parent PayMongo Checkout Session remains active. Click Open PayMongo Gateway to generate a new QR code on the hosted page, or click Change Payment Method below to expire this session and start fresh."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               <Clock className="h-3.5 w-3.5" />
               <span>Authoritative Session Countdown</span>
@@ -216,6 +238,20 @@ export function PayMongoCheckoutGuard({
                 Verify Now
               </Button>
             </div>
+
+            {handleRetry && (
+              <div className="pt-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleRetry}
+                  className="w-full text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                  Change Payment Method or Start New Checkout Session
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
@@ -230,7 +266,7 @@ export function PayMongoCheckoutGuard({
           <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
             <div>
               <span className="text-zinc-500">Attempt ID: </span>
-              <span className="text-zinc-100">{attemptId}</span>
+              <span className="text-zinc-100">{attemptId.slice(0, 8)}...</span>
             </div>
             <div>
               <span className="text-zinc-500">PayMongo ID: </span>

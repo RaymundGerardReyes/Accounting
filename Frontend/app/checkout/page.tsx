@@ -33,6 +33,8 @@ interface OrderDetailDto {
   status: string;
   created_at: string;
   latest_payment_attempt_id?: string | null;
+  latest_attempt?: PaymentAttemptCreatedDto | null;
+  attempts?: PaymentAttemptCreatedDto[] | null;
 }
 
 interface PaymentAttemptCreatedDto {
@@ -47,6 +49,51 @@ interface PaymentAttemptCreatedDto {
 }
 
 const STORAGE_KEY_PREFIX = "rge_checkout_attempt_";
+const TERMINAL_ATTEMPT_STATUSES = new Set(["expired", "failed", "cancelled", "canceled"]);
+
+function isAttemptStillActive(attempt?: PaymentAttemptCreatedDto | null): boolean {
+  if (!attempt || !attempt.id) return false;
+  const normalizedStatus = (attempt.status || "").trim().toLowerCase();
+  if (TERMINAL_ATTEMPT_STATUSES.has(normalizedStatus)) {
+    return false;
+  }
+  const rawExpiry = attempt.expires_at_utc ?? attempt.expires_at;
+  if (rawExpiry) {
+    const expiryMs = Date.parse(rawExpiry);
+    if (!Number.isNaN(expiryMs) && expiryMs <= Date.now()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+const PAYMENT_METHOD_OPTIONS = [
+  {
+    id: "qrph",
+    label: "QR Ph — Scan to Pay",
+    description:
+      "Scan the QR code using GCash, Maya, or another supported bank/e-wallet app.",
+    icon: QrCode,
+  },
+  {
+    id: "gcash",
+    label: "GCash — E-wallet",
+    description: "Continue to GCash to authorize your payment.",
+    icon: Smartphone,
+  },
+  {
+    id: "paymaya",
+    label: "Maya — E-wallet",
+    description: "Continue to Maya to authorize your payment.",
+    icon: Smartphone,
+  },
+  {
+    id: "card",
+    label: "Credit / Debit Card",
+    description: "Pay using an eligible Visa or Mastercard.",
+    icon: CreditCard,
+  },
+] as const;
 
 function formatPhpFromMinor(amountMinor: number, currency = "PHP"): string {
   return new Intl.NumberFormat("en-PH", {
@@ -60,8 +107,12 @@ function CheckoutPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const orderId = searchParams.get("order_id") || searchParams.get("orderId") || "";
-  const urlAttemptId = searchParams.get("attempt_id") || searchParams.get("attemptId") || "";
+  const orderId = searchParams.get("order_id") || "";
+  const urlAttemptId = searchParams.get("attempt_id") || "";
+  const isCancelledRedirect =
+    searchParams.get("cancelled") === "true" ||
+    searchParams.get("status") === "cancelled" ||
+    searchParams.get("status") === "canceled";
 
   const [order, setOrder] = useState<OrderDetailDto | null>(null);
   const [activeAttempt, setActiveAttempt] =
@@ -71,7 +122,6 @@ function CheckoutPageContent() {
   const [isInitiating, setIsInitiating] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // 1. Restore persisted attempt from URL or sessionStorage on mount / reload
   useEffect(() => {
     if (!orderId || typeof window === "undefined") return;
 
@@ -82,33 +132,37 @@ function CheckoutPageContent() {
       try {
         const parsed = JSON.parse(rawSaved) as PaymentAttemptCreatedDto;
         if (parsed && parsed.id) {
-          console.info(
-            "[PAYMONGO-CHECKOUT] Restored active attempt from sessionStorage on reload:",
-            parsed
-          );
-          setActiveAttempt(parsed);
-          return;
+          if (urlAttemptId && parsed.id === urlAttemptId) {
+            setActiveAttempt(parsed);
+            return;
+          }
+          if (!urlAttemptId && isAttemptStillActive(parsed)) {
+            setActiveAttempt(parsed);
+            return;
+          }
+          if (!isAttemptStillActive(parsed)) {
+            window.sessionStorage.removeItem(storageKey);
+          }
         }
       } catch {
-        // Ignore corrupted sessionStorage entry
+        // Ignore corrupted sessionStorage
       }
     }
 
     if (urlAttemptId) {
-      console.info(
-        "[PAYMONGO-CHECKOUT] Restored active attemptId from URL query parameter:",
-        urlAttemptId
+      setActiveAttempt((prev) =>
+        prev && prev.id === urlAttemptId
+          ? prev
+          : {
+              id: urlAttemptId,
+              order_id: orderId,
+              status: "requiresaction",
+              payment_method: selectedMethod,
+            }
       );
-      setActiveAttempt({
-        id: urlAttemptId,
-        order_id: orderId,
-        status: "requiresaction",
-        payment_method: selectedMethod,
-      });
     }
   }, [orderId, urlAttemptId, selectedMethod]);
 
-  // 2. Load Order details from GET /api/v1/orders/{order_id}
   const fetchOrder = useCallback(async () => {
     if (!orderId) {
       setIsLoadingOrder(false);
@@ -135,7 +189,37 @@ function CheckoutPageContent() {
       const data: OrderDetailDto = await response.json();
       setOrder(data);
 
-      // If the order response includes a latest_payment_attempt_id and we don't have one yet, mount it
+      const storageKey = `${STORAGE_KEY_PREFIX}${orderId}`;
+      const matchedFromUrl = urlAttemptId
+        ? (data.attempts ?? []).find((a) => a.id === urlAttemptId) ??
+          (data.latest_attempt?.id === urlAttemptId ? data.latest_attempt : null)
+        : null;
+
+      if (matchedFromUrl) {
+        setActiveAttempt(matchedFromUrl);
+        if (typeof window !== "undefined" && isAttemptStillActive(matchedFromUrl)) {
+          window.sessionStorage.setItem(storageKey, JSON.stringify(matchedFromUrl));
+        }
+        return;
+      }
+
+      const latest = data.latest_attempt;
+      if (latest && (data.status === "paid" || isAttemptStillActive(latest))) {
+        setActiveAttempt(latest);
+        if (typeof window !== "undefined") {
+          window.sessionStorage.setItem(storageKey, JSON.stringify(latest));
+        }
+        return;
+      }
+
+      if (latest && !isAttemptStillActive(latest) && !urlAttemptId) {
+        if (typeof window !== "undefined") {
+          window.sessionStorage.removeItem(storageKey);
+        }
+        setActiveAttempt(null);
+        return;
+      }
+
       if (data.latest_payment_attempt_id) {
         setActiveAttempt((prev) =>
           prev
@@ -155,13 +239,12 @@ function CheckoutPageContent() {
     } finally {
       setIsLoadingOrder(false);
     }
-  }, [orderId]);
+  }, [orderId, urlAttemptId]);
 
   useEffect(() => {
     fetchOrder();
   }, [fetchOrder]);
 
-  // 3. Create PayMongo Checkout Session & automatically mount <PayMongoCheckoutGuard />
   const handleInitiateCheckout = async () => {
     if (!orderId) return;
 
@@ -170,11 +253,16 @@ function CheckoutPageContent() {
 
     try {
       const idempotencyKey = `idem-${orderId}-${Date.now()}`;
-      console.info("[PAYMONGO-CHECKOUT] Creating new payment attempt...", {
-        orderId,
-        selectedMethod,
-        idempotencyKey,
-      });
+      const origin =
+        typeof window !== "undefined" && window.location.origin
+          ? window.location.origin
+          : "";
+      const successUrl = origin
+        ? `${origin}/payment/return?order_id=${encodeURIComponent(orderId)}`
+        : undefined;
+      const cancelUrl = origin
+        ? `${origin}/checkout?order_id=${encodeURIComponent(orderId)}&cancelled=true`
+        : undefined;
 
       const response = await fetch(
         `/api/v1/orders/${encodeURIComponent(orderId)}/payment-attempts`,
@@ -187,24 +275,19 @@ function CheckoutPageContent() {
           body: JSON.stringify({
             payment_method: selectedMethod,
             idempotency_key: idempotencyKey,
+            success_url: successUrl,
+            cancel_url: cancelUrl,
           }),
         }
       );
 
       if (!response.ok) {
         const errText = await response.text();
-        throw new Error(
-          `Checkout creation failed (HTTP ${response.status}): ${errText}`
-        );
+        throw new Error(`Checkout creation failed: ${errText}`);
       }
 
       const created: PaymentAttemptCreatedDto = await response.json();
-      console.info(
-        "[PAYMONGO-CHECKOUT] PaymentAttempt created! Mounting <PayMongoCheckoutGuard />:",
-        created
-      );
 
-      // Persist in sessionStorage and URL so page reloads (F5) keep monitoring this exact attempt
       if (typeof window !== "undefined") {
         window.sessionStorage.setItem(
           `${STORAGE_KEY_PREFIX}${orderId}`,
@@ -216,10 +299,8 @@ function CheckoutPageContent() {
         window.history.replaceState(null, "", nextUrl);
       }
 
-      // Mount <PayMongoCheckoutGuard /> immediately
       setActiveAttempt(created);
 
-      // Open PayMongo Hosted Checkout in a new tab so this page stays alive monitoring SignalR & polling
       if (created.checkout_url) {
         window.open(created.checkout_url, "_blank", "noopener,noreferrer");
       }
@@ -233,6 +314,17 @@ function CheckoutPageContent() {
   };
 
   const handleResetAttempt = () => {
+    if (activeAttempt?.id && isAttemptStillActive(activeAttempt)) {
+      const abandonedId = encodeURIComponent(activeAttempt.id);
+      fetch(
+        `/api/v1/payments/${abandonedId}/poll?auto_reconcile=true&force_reconcile=true&client_reported_redirect_status=cancelled`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+        }
+      ).catch(() => {});
+    }
     if (typeof window !== "undefined" && orderId) {
       window.sessionStorage.removeItem(`${STORAGE_KEY_PREFIX}${orderId}`);
       window.history.replaceState(
@@ -289,7 +381,7 @@ function CheckoutPageContent() {
               </span>
             </div>
 
-            {/* AUTOMATICALLY MOUNTS <PayMongoCheckoutGuard /> WHEN AN ATTEMPT EXISTS */}
+            {/* MOUNTS ONCE: NO INFINITE LOOPS */}
             {activeAttempt ? (
               <PayMongoCheckoutGuard
                 attemptId={activeAttempt.id}
@@ -303,20 +395,16 @@ function CheckoutPageContent() {
                 initialProviderPaymentId={
                   activeAttempt.provider_payment_id ?? null
                 }
+                clientReportedRedirectStatus={
+                  isCancelledRedirect ? "cancelled" : null
+                }
                 onCreateNewAttempt={handleResetAttempt}
-                onPaymentSucceeded={() => {
-                  fetchOrder();
-                }}
               />
             ) : (
               <div className="space-y-4">
                 <p className="text-sm font-medium">Select Payment Method</p>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { id: "qrph", label: "QR Ph", icon: QrCode },
-                    { id: "gcash", label: "GCash / Maya", icon: Smartphone },
-                    { id: "card", label: "Credit / Debit", icon: CreditCard },
-                  ].map((m) => {
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {PAYMENT_METHOD_OPTIONS.map((m) => {
                     const Icon = m.icon;
                     const active = selectedMethod === m.id;
                     return (
@@ -324,14 +412,19 @@ function CheckoutPageContent() {
                         key={m.id}
                         type="button"
                         onClick={() => setSelectedMethod(m.id)}
-                        className={`flex flex-col items-center gap-2 rounded-lg border p-3 text-sm transition ${
+                        className={`flex flex-col items-start gap-1.5 rounded-lg border p-3.5 text-left text-sm transition ${
                           active
-                            ? "border-primary bg-primary/5 font-semibold"
+                            ? "border-primary bg-primary/5 ring-1 ring-primary/30"
                             : "hover:bg-muted/50"
                         }`}
                       >
-                        <Icon className="h-5 w-5" />
-                        <span>{m.label}</span>
+                        <div className="flex items-center gap-2 font-semibold">
+                          <Icon className="h-4 w-4 shrink-0 text-primary" />
+                          <span>{m.label}</span>
+                        </div>
+                        <span className="text-xs leading-relaxed text-muted-foreground">
+                          {m.description}
+                        </span>
                       </button>
                     );
                   })}

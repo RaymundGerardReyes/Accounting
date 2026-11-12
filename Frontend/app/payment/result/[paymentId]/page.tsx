@@ -1,7 +1,7 @@
 "use client"
 
-import React, { useEffect, useState, use } from "react"
-import { useRouter } from "next/navigation"
+import React, { useEffect, useState, use, useCallback, useRef, Suspense } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -52,10 +52,13 @@ function getChannelIcon(code: string) {
   return Smartphone
 }
 
-export default function PaymentResultPage({ params }: PageProps) {
+function PaymentResultContent({ params }: PageProps) {
   const resolvedParams = use(params)
   const paymentId = resolvedParams.paymentId
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const clientRedirectStatus =
+    searchParams?.get("status") || searchParams?.get("redirect_status") || searchParams?.get("state") || null
 
   const [payment, setPayment] = useState<PaymentAttempt | null>(null)
   const [receipt, setReceipt] = useState<ReceiptData | null>(null)
@@ -63,6 +66,25 @@ export default function PaymentResultPage({ params }: PageProps) {
   const [isReconciling, setIsReconciling] = useState(false)
   const [pollCount, setPollCount] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [receiptRetries, setReceiptRetries] = useState(0)
+  const [receiptLoadingError, setReceiptLoadingError] = useState<string | null>(null)
+  const lastFocusSyncMsRef = useRef<number>(0)
+  const isFocusSyncInFlightRef = useRef<boolean>(false)
+
+  // Terminal Succeeded State Guard: Prevents late polls or webhooks from downgrading Succeeded status
+  const safeSetPayment = useCallback(
+    (update: PaymentAttempt | null | ((prev: PaymentAttempt | null) => PaymentAttempt | null)) => {
+      setPayment((prev) => {
+        const next = typeof update === "function" ? update(prev) : update
+        if (!next) return next
+        if (prev?.status === "succeeded" && next.status !== "succeeded") {
+          return prev
+        }
+        return next
+      })
+    },
+    []
+  )
 
   // Resend email state
   const [emailInput, setEmailInput] = useState("")
@@ -81,7 +103,7 @@ export default function PaymentResultPage({ params }: PageProps) {
     enabled: !isTerminal(payment?.status),
     onStatusChanged: (payload) => {
       if (payload.status) {
-        setPayment((prev) => (prev ? { ...prev, status: payload.status.toLowerCase() as any } : null))
+        safeSetPayment((prev) => (prev ? { ...prev, status: payload.status.toLowerCase() as any } : null))
         if (payload.status.toLowerCase() === "succeeded" || payload.status.toLowerCase() === "paid") {
           fetchPaymentReceipt(paymentId).then(setReceipt).catch(() => {})
         }
@@ -90,7 +112,7 @@ export default function PaymentResultPage({ params }: PageProps) {
     onPollFallback: () => {
       if (!isTerminal(payment?.status)) {
         pollPaymentStatus(paymentId, false).then((data) => {
-          setPayment(data)
+          safeSetPayment(data)
           if (data.receipt) setReceipt(data.receipt)
         }).catch(() => {})
       }
@@ -115,7 +137,7 @@ export default function PaymentResultPage({ params }: PageProps) {
         const localData = await pollPaymentStatus(paymentId, false)
         if (!active) return
 
-        setPayment(localData)
+        safeSetPayment(localData)
         if (localData.receipt) {
           setReceipt(localData.receipt)
         } else if (localData.status === "succeeded") {
@@ -129,9 +151,9 @@ export default function PaymentResultPage({ params }: PageProps) {
         if (!isTerminal(localData.status)) {
           setIsReconciling(true)
           try {
-            const reconciledData = await pollPaymentStatus(paymentId, true)
+            const reconciledData = await pollPaymentStatus(paymentId, true, clientRedirectStatus)
             if (!active) return
-            setPayment(reconciledData)
+            safeSetPayment(reconciledData)
             if (reconciledData.receipt) {
               setReceipt(reconciledData.receipt)
             } else if (reconciledData.status === "succeeded") {
@@ -157,7 +179,7 @@ export default function PaymentResultPage({ params }: PageProps) {
     return () => {
       active = false
     }
-  }, [paymentId])
+  }, [paymentId, clientRedirectStatus, safeSetPayment])
 
   // Periodic heartbeat / polling fallback loop
   useEffect(() => {
@@ -181,7 +203,7 @@ export default function PaymentResultPage({ params }: PageProps) {
         const data = await pollPaymentStatus(paymentId, false)
         if (!active) return
 
-        setPayment(data)
+        safeSetPayment(data)
         if (data.receipt) {
           setReceipt(data.receipt)
         } else if (data.status === "succeeded") {
@@ -198,14 +220,106 @@ export default function PaymentResultPage({ params }: PageProps) {
       active = false
       clearInterval(timer)
     }
-  }, [paymentId, payment?.status, isSignalRConnected, pollCount])
+  }, [paymentId, payment?.status, isSignalRConnected, pollCount, safeSetPayment])
+
+  // Window focus & Document visibility change sync:
+  // Instantly reconciles payment status when customer returns from PayMongo checkout tab
+  useEffect(() => {
+    if (isTerminal(payment?.status)) return
+
+    const handleVisibilityOrFocus = async () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return
+      }
+
+      const now = Date.now()
+      if (now - lastFocusSyncMsRef.current < 3000 || isFocusSyncInFlightRef.current) {
+        return
+      }
+      lastFocusSyncMsRef.current = now
+      isFocusSyncInFlightRef.current = true
+      setIsReconciling(true)
+
+      try {
+        const freshData = await pollPaymentStatus(paymentId, true, clientRedirectStatus)
+        safeSetPayment(freshData)
+        if (freshData.receipt) {
+          setReceipt(freshData.receipt)
+        } else if (freshData.status === "succeeded") {
+          fetchPaymentReceipt(paymentId).then(setReceipt).catch(() => {})
+        }
+      } catch {
+        // Background sync error does not disturb existing rendered state
+      } finally {
+        isFocusSyncInFlightRef.current = false
+        setIsReconciling(false)
+      }
+    }
+
+    window.addEventListener("focus", handleVisibilityOrFocus)
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus)
+
+    return () => {
+      window.removeEventListener("focus", handleVisibilityOrFocus)
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus)
+    }
+  }, [paymentId, payment?.status, clientRedirectStatus, safeSetPayment])
+
+  // Dedicated receipt polling loop when payment has succeeded but receipt is not yet loaded
+  useEffect(() => {
+    if (payment?.status !== "succeeded" || receipt) {
+      return
+    }
+
+    let active = true
+    let attempt = 0
+    const maxAttempts = 12
+
+    const fetchReceiptLoop = async () => {
+      while (active && attempt < maxAttempts) {
+        attempt++
+        setReceiptRetries(attempt)
+        try {
+          const rData = await fetchPaymentReceipt(paymentId)
+          if (!active) return
+          setReceipt(rData)
+          setReceiptLoadingError(null)
+          return
+        } catch (err: any) {
+          if (!active) return
+          if (attempt >= maxAttempts) {
+            setReceiptLoadingError(err.message || "Official Receipt is still processing. Click Retry to refresh.")
+            return
+          }
+          await new Promise((resolve) => setTimeout(resolve, Math.min(2000 + attempt * 250, 4000)))
+        }
+      }
+    }
+
+    fetchReceiptLoop()
+
+    return () => {
+      active = false
+    }
+  }, [paymentId, payment?.status, receipt])
+
+  const handleRetryReceipt = async () => {
+    setReceiptLoadingError(null)
+    setReceiptRetries(0)
+    try {
+      const rData = await fetchPaymentReceipt(paymentId)
+      setReceipt(rData)
+    } catch (err: any) {
+      setReceiptLoadingError(err.message || "Unable to retrieve receipt. Please check back shortly.")
+    }
+  }
 
   const handleManualReconcile = async () => {
     setIsReconciling(true)
     try {
       await reconcilePayment(paymentId)
       const updated = await pollPaymentStatus(paymentId, true)
-      setPayment(updated)
+      safeSetPayment(updated)
       if (updated.receipt) {
         setReceipt(updated.receipt)
       } else if (updated.status === "succeeded") {
@@ -422,9 +536,33 @@ export default function PaymentResultPage({ params }: PageProps) {
       {status === "succeeded" && !receipt && (
         <Card className="border-border bg-card shadow-sm text-center p-8">
           <div className="flex flex-col items-center gap-3">
-            <Loader2 className="w-8 h-8 animate-spin text-accent" />
-            <p className="text-sm font-semibold text-foreground">Generating Official Receipt & Treasury Acknowledgement Report...</p>
-            <p className="text-xs text-muted-foreground font-mono">Synthesizing ISO-32000-1 vector PDF and recording cryptographic audit digest.</p>
+            {!receiptLoadingError ? (
+              <>
+                <Loader2 className="w-8 h-8 animate-spin text-accent" />
+                <p className="text-sm font-semibold text-foreground">Generating Official Receipt & Treasury Acknowledgement Report...</p>
+                <p className="text-xs text-muted-foreground font-mono">
+                  Synthesizing ISO-32000-1 vector PDF and recording cryptographic audit digest.
+                  {receiptRetries > 0 && ` (Attempt ${receiptRetries}/12)`}
+                </p>
+              </>
+            ) : (
+              <>
+                <AlertTriangle className="w-8 h-8 text-amber-500" />
+                <p className="text-sm font-semibold text-foreground">Official Receipt Processing</p>
+                <p className="text-xs text-muted-foreground font-mono max-w-md">
+                  {receiptLoadingError}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRetryReceipt}
+                  className="mt-2 text-xs font-mono gap-1.5 border-border"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Retry Receipt Generation</span>
+                </Button>
+              </>
+            )}
           </div>
         </Card>
       )}
@@ -439,7 +577,7 @@ export default function PaymentResultPage({ params }: PageProps) {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <span className="text-[11px] font-semibold tracking-wider uppercase text-muted-foreground block">
-                    {receipt.issuer.company_name} &middot; {receipt.issuer.department}
+                    {receipt.issuer?.company_name || receipt.issuer_name || "R.G.E Accounting Firm Inc."} &middot; {receipt.issuer?.department || "Corporate Accounting & Treasury"}
                   </span>
                 </div>
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#12A579]/10 text-[#0d7c5a] border border-[#12A579]/30 dark:bg-[#12A579]/20 dark:text-[#12A579] dark:border-[#12A579]/40 text-xs font-semibold self-start sm:self-center">
@@ -772,10 +910,10 @@ export default function PaymentResultPage({ params }: PageProps) {
 
             <CardFooter className="bg-muted/30 border-t border-border p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground">
               <div>
-                {receipt.issuer.company_name || "R.G.E Accounting Firm Inc."} &middot; Corporate Accounting &amp; Treasury
+                {receipt.issuer?.company_name || receipt.issuer_name || "R.G.E Accounting Firm Inc."} &middot; Corporate Accounting &amp; Treasury
               </div>
               <div className="text-[11px] font-mono">
-                TIN: {receipt.issuer.tin}
+                TIN: {receipt.issuer?.tin || receipt.issuer_tin || "000-123-456-000"}
               </div>
             </CardFooter>
           </Card>
@@ -823,7 +961,7 @@ export default function PaymentResultPage({ params }: PageProps) {
                 <div>
                   <span className="text-muted-foreground block text-[10px] uppercase">Outbox Delivery State</span>
                   <span className="text-foreground font-semibold mt-0.5 block">
-                    {receipt.outbox_status.toUpperCase()} (SHA-256 Audit Trail)
+                    {(receipt.outbox_status || "published").toUpperCase()} (SHA-256 Audit Trail)
                   </span>
                 </div>
                 <div>
@@ -869,7 +1007,7 @@ export default function PaymentResultPage({ params }: PageProps) {
                   Supported PayMongo Rails &amp; Confirmed Rail:
                 </span>
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
-                  {receipt.supported_channels.map((ch) => {
+                  {(receipt.supported_channels || []).map((ch) => {
                     const Icon = getChannelIcon(ch.code)
                     return (
                       <div
@@ -902,23 +1040,23 @@ export default function PaymentResultPage({ params }: PageProps) {
                   </div>
                   <span
                     className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold uppercase ${
-                      receipt.smtp_delivery.status === "sent"
+                      receipt.smtp_delivery?.status === "sent"
                         ? "bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800"
-                        : receipt.smtp_delivery.status === "failed"
+                        : receipt.smtp_delivery?.status === "failed"
                         ? "bg-destructive/10 text-destructive border border-destructive/30"
                         : "bg-muted text-muted-foreground border border-border"
                     }`}
                   >
-                    {receipt.smtp_delivery.status}
+                    {receipt.smtp_delivery?.status || "sent"}
                   </span>
                 </div>
 
                 <div className="text-[11px] text-muted-foreground">
                   Target Recipient:{" "}
                   <strong className="text-foreground font-mono">
-                    {receipt.smtp_delivery.recipient || receipt.customer_email || "Configured Treasury User"}
+                    {receipt.smtp_delivery?.recipient || receipt.customer_email || "Configured Treasury User"}
                   </strong>
-                  {receipt.smtp_delivery.sent_at && (
+                  {receipt.smtp_delivery?.sent_at && (
                     <span className="ml-2 text-[10px]">
                       (Sent at {new Date(receipt.smtp_delivery.sent_at).toLocaleTimeString()})
                     </span>
@@ -979,5 +1117,19 @@ export default function PaymentResultPage({ params }: PageProps) {
         </div>
       )}
     </div>
+  )
+}
+
+export default function PaymentResultPage({ params }: PageProps) {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center p-6 bg-background">
+          <Loader2 className="w-8 h-8 animate-spin text-accent" />
+        </div>
+      }
+    >
+      <PaymentResultContent params={params} />
+    </Suspense>
   )
 }

@@ -11,16 +11,24 @@ function ReturnContent() {
   const router = useRouter()
   const orderId = searchParams?.get("order_id") || searchParams?.get("orderId") || null
   const paymentId = searchParams?.get("payment_id") || searchParams?.get("paymentId") || null
+  const redirectStatus =
+    searchParams?.get("status") || searchParams?.get("redirect_status") || searchParams?.get("state") || null
 
   const [message, setMessage] = useState("Connecting to PayMongo Orchestrator...")
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    const buildResultUrl = (resolvedPaymentId: string) => {
+      return redirectStatus
+        ? `/payment/result/${encodeURIComponent(resolvedPaymentId)}?status=${encodeURIComponent(redirectStatus)}`
+        : `/payment/result/${encodeURIComponent(resolvedPaymentId)}`
+    }
+
     const resolvePayment = async () => {
       try {
         if (paymentId) {
           setMessage("Verifying payment settlement status...")
-          router.replace(`/payment/result/${paymentId}`)
+          router.replace(buildResultUrl(paymentId))
           return
         }
 
@@ -29,7 +37,7 @@ function ReturnContent() {
           const order = await fetchOrder(orderId)
           if (order.attempts && order.attempts.length > 0) {
             const latestAttempt = order.attempts[0]
-            router.replace(`/payment/result/${latestAttempt.id}`)
+            router.replace(buildResultUrl(latestAttempt.id))
             return
           }
         }
@@ -37,7 +45,7 @@ function ReturnContent() {
         // If neither, fallback to the latest order's attempt
         const orders = await fetchOrders()
         if (orders.length > 0 && orders[0].latest_attempt) {
-          router.replace(`/payment/result/${orders[0].latest_attempt.id}`)
+          router.replace(buildResultUrl(orders[0].latest_attempt.id))
           return
         }
 
@@ -48,7 +56,7 @@ function ReturnContent() {
     }
 
     resolvePayment()
-  }, [orderId, paymentId, router])
+  }, [orderId, paymentId, redirectStatus, router])
 
   if (error) {
     return (

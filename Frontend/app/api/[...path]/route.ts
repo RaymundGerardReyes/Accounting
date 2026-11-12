@@ -95,6 +95,7 @@ async function proxyRequest(
       body: bodyBuffer && bodyBuffer.byteLength > 0 ? bodyBuffer : undefined,
       redirect: "manual",
       cache: "no-store",
+      signal: request.signal,
     })
 
     // Handle OAuth 2.0 and other HTTP redirects (301, 302, 303, 307, 308)
@@ -123,13 +124,26 @@ async function proxyRequest(
       }
     }
 
+    const contentType = backendRes.headers.get("content-type") || ""
+
+    // Handle streaming responses (e.g. Server-Sent Events text/event-stream)
+    if (contentType.includes("text/event-stream") && backendRes.body) {
+      const streamResponse = new NextResponse(backendRes.body, {
+        status: backendRes.status,
+        statusText: backendRes.statusText,
+      })
+      streamResponse.headers.set("content-type", contentType)
+      streamResponse.headers.set("cache-control", "no-cache, no-transform")
+      streamResponse.headers.set("connection", "keep-alive")
+      return streamResponse
+    }
+
     const responseBody = await backendRes.arrayBuffer()
     const response = new NextResponse(responseBody, {
       status: backendRes.status,
       statusText: backendRes.statusText,
     })
 
-    const contentType = backendRes.headers.get("content-type")
     if (contentType) {
       response.headers.set("content-type", contentType)
     }
@@ -146,6 +160,16 @@ async function proxyRequest(
 
     return response
   } catch (err: any) {
+    const isHub = joinedPath.startsWith("hubs/")
+    const isAbort =
+      request.signal.aborted ||
+      err?.name === "AbortError" ||
+      err?.code === "UND_ERR_ABORTED"
+
+    if (isAbort || (isHub && err?.message?.includes("fetch failed"))) {
+      return new NextResponse(null, { status: 204 })
+    }
+
     return NextResponse.json(
       {
         error: "Backend proxy unreachable",
