@@ -219,4 +219,49 @@ describe("usePayMongoRealtimeSync - State Locking & Focus Sync", () => {
 
     expect(pollCount).toBeGreaterThan(initialCalls)
   })
+
+  it("passes auto_reconcile=true on poll requests and preserves active session on qrph_source_expired", async () => {
+    const capturedUrls: string[] = []
+    const futureIso = new Date(Date.now() + 1680 * 1000).toISOString()
+
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      capturedUrls.push(String(url))
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            id: "ac188954-5429-42f6-9418-e7564ef36925",
+            provider_payment_id: "cs_fafe58a436adb3bc3aee6274",
+            status: "requiresaction",
+            checkout_url: "https://checkout.paymongo.com/cs_fafe58a436adb3bc3aee6274",
+            expires_at: futureIso,
+            failure_code: "qrph_source_expired",
+            failure_message: "Underlying QR code expired while Checkout Session remains active.",
+          }),
+      })
+    })
+
+    const { result } = renderHook(() =>
+      usePayMongoRealtimeSync({
+        attemptId: "ac188954-5429-42f6-9418-e7564ef36925",
+        initialStatus: "requiresaction",
+        initialExpiresAtUtc: null,
+        initialCheckoutUrl: null,
+        enableDebugLogs: false,
+      })
+    )
+
+    await act(async () => {
+      await result.current.reconcileWithGateway("manual_debug_button")
+    })
+
+    expect(capturedUrls.some((u) => u.includes("auto_reconcile=true"))).toBe(true)
+    expect(capturedUrls.some((u) => u.includes("force_reconcile=true"))).toBe(true)
+    expect(result.current.status).toBe("requiresaction")
+    expect(result.current.isTerminal).toBe(false)
+    expect(result.current.failureCode).toBe("qrph_source_expired")
+    expect(result.current.remainingSeconds).toBeGreaterThan(1600)
+    expect(result.current.isPayable).toBe(true)
+  })
 })

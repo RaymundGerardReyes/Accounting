@@ -219,14 +219,23 @@ export function usePayMongoRealtimeSync({
 
       if (nextExpiresAt) {
         setExpiresAtUtc(nextExpiresAt);
+        const deadlineMs = Date.parse(nextExpiresAt);
+        if (!Number.isNaN(deadlineMs) && !TERMINAL_STATUSES.has(normalized)) {
+          const nowAuthoritative = Date.now() + serverClockOffsetMsRef.current;
+          const secs = Math.max(
+            0,
+            Math.ceil((deadlineMs - nowAuthoritative) / 1000)
+          );
+          setRemainingSeconds(secs);
+        }
       }
 
       if (nextProviderId) {
         setProviderPaymentId(nextProviderId);
       }
 
-      if (nextFailureCode) setFailureCode(nextFailureCode);
-      if (nextFailureMessage) setFailureMessage(nextFailureMessage);
+      if (nextFailureCode !== undefined) setFailureCode(nextFailureCode);
+      if (nextFailureMessage !== undefined) setFailureMessage(nextFailureMessage);
 
       setStatus((prev: AuthoritativePaymentStatus) => {
         if (TERMINAL_STATUSES.has(prev)) {
@@ -290,7 +299,17 @@ export function usePayMongoRealtimeSync({
         // Pre-fetch correlation check
         if (currentAttemptIdRef.current !== targetAttemptId) return;
 
-        let response = await fetch(`/api/v1/payments/${encodedId}/poll`, {
+        const isForceTrigger =
+          triggerReason === "mount_or_reload" ||
+          triggerReason === "window_focus" ||
+          triggerReason === "tab_visibility_visible" ||
+          triggerReason === "manual_debug_button" ||
+          triggerReason === "countdown_reached_zero";
+        const pollQuery = isForceTrigger
+          ? "?auto_reconcile=true&force_reconcile=true"
+          : "?auto_reconcile=true";
+
+        let response = await fetch(`/api/v1/payments/${encodedId}/poll${pollQuery}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           cache: "no-store",

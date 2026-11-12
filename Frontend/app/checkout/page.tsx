@@ -33,6 +33,8 @@ interface OrderDetailDto {
   status: string;
   created_at: string;
   latest_payment_attempt_id?: string | null;
+  latest_attempt?: PaymentAttemptCreatedDto | null;
+  attempts?: PaymentAttemptCreatedDto[] | null;
 }
 
 interface PaymentAttemptCreatedDto {
@@ -47,6 +49,51 @@ interface PaymentAttemptCreatedDto {
 }
 
 const STORAGE_KEY_PREFIX = "rge_checkout_attempt_";
+const TERMINAL_ATTEMPT_STATUSES = new Set(["expired", "failed", "cancelled", "canceled"]);
+
+function isAttemptStillActive(attempt?: PaymentAttemptCreatedDto | null): boolean {
+  if (!attempt || !attempt.id) return false;
+  const normalizedStatus = (attempt.status || "").trim().toLowerCase();
+  if (TERMINAL_ATTEMPT_STATUSES.has(normalizedStatus)) {
+    return false;
+  }
+  const rawExpiry = attempt.expires_at_utc ?? attempt.expires_at;
+  if (rawExpiry) {
+    const expiryMs = Date.parse(rawExpiry);
+    if (!Number.isNaN(expiryMs) && expiryMs <= Date.now()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+const PAYMENT_METHOD_OPTIONS = [
+  {
+    id: "qrph",
+    label: "QR Ph — Scan to Pay",
+    description:
+      "Scan the QR code using GCash, Maya, or another supported bank/e-wallet app.",
+    icon: QrCode,
+  },
+  {
+    id: "gcash",
+    label: "GCash — E-wallet",
+    description: "Continue to GCash to authorize your payment.",
+    icon: Smartphone,
+  },
+  {
+    id: "paymaya",
+    label: "Maya — E-wallet",
+    description: "Continue to Maya to authorize your payment.",
+    icon: Smartphone,
+  },
+  {
+    id: "card",
+    label: "Credit / Debit Card",
+    description: "Pay using an eligible Visa or Mastercard.",
+    icon: CreditCard,
+  },
+] as const;
 
 function formatPhpFromMinor(amountMinor: number, currency = "PHP"): string {
   return new Intl.NumberFormat("en-PH", {
@@ -81,8 +128,17 @@ function CheckoutPageContent() {
       try {
         const parsed = JSON.parse(rawSaved) as PaymentAttemptCreatedDto;
         if (parsed && parsed.id) {
-          setActiveAttempt(parsed);
-          return;
+          if (urlAttemptId && parsed.id === urlAttemptId) {
+            setActiveAttempt(parsed);
+            return;
+          }
+          if (!urlAttemptId && isAttemptStillActive(parsed)) {
+            setActiveAttempt(parsed);
+            return;
+          }
+          if (!isAttemptStillActive(parsed)) {
+            window.sessionStorage.removeItem(storageKey);
+          }
         }
       } catch {
         // Ignore corrupted sessionStorage
@@ -90,12 +146,16 @@ function CheckoutPageContent() {
     }
 
     if (urlAttemptId) {
-      setActiveAttempt({
-        id: urlAttemptId,
-        order_id: orderId,
-        status: "requiresaction",
-        payment_method: selectedMethod,
-      });
+      setActiveAttempt((prev) =>
+        prev && prev.id === urlAttemptId
+          ? prev
+          : {
+              id: urlAttemptId,
+              order_id: orderId,
+              status: "requiresaction",
+              payment_method: selectedMethod,
+            }
+      );
     }
   }, [orderId, urlAttemptId, selectedMethod]);
 
@@ -125,6 +185,37 @@ function CheckoutPageContent() {
       const data: OrderDetailDto = await response.json();
       setOrder(data);
 
+      const storageKey = `${STORAGE_KEY_PREFIX}${orderId}`;
+      const matchedFromUrl = urlAttemptId
+        ? (data.attempts ?? []).find((a) => a.id === urlAttemptId) ??
+          (data.latest_attempt?.id === urlAttemptId ? data.latest_attempt : null)
+        : null;
+
+      if (matchedFromUrl) {
+        setActiveAttempt(matchedFromUrl);
+        if (typeof window !== "undefined" && isAttemptStillActive(matchedFromUrl)) {
+          window.sessionStorage.setItem(storageKey, JSON.stringify(matchedFromUrl));
+        }
+        return;
+      }
+
+      const latest = data.latest_attempt;
+      if (latest && (data.status === "paid" || isAttemptStillActive(latest))) {
+        setActiveAttempt(latest);
+        if (typeof window !== "undefined") {
+          window.sessionStorage.setItem(storageKey, JSON.stringify(latest));
+        }
+        return;
+      }
+
+      if (latest && !isAttemptStillActive(latest) && !urlAttemptId) {
+        if (typeof window !== "undefined") {
+          window.sessionStorage.removeItem(storageKey);
+        }
+        setActiveAttempt(null);
+        return;
+      }
+
       if (data.latest_payment_attempt_id) {
         setActiveAttempt((prev) =>
           prev
@@ -144,7 +235,7 @@ function CheckoutPageContent() {
     } finally {
       setIsLoadingOrder(false);
     }
-  }, [orderId]);
+  }, [orderId, urlAttemptId]);
 
   useEffect(() => {
     fetchOrder();
@@ -294,12 +385,8 @@ function CheckoutPageContent() {
             ) : (
               <div className="space-y-4">
                 <p className="text-sm font-medium">Select Payment Method</p>
-                <div className="grid grid-cols-3 gap-3">
-                  {([
-                    { id: "qrph", label: "QR Ph", icon: QrCode },
-                    { id: "gcash", label: "GCash / Maya", icon: Smartphone },
-                    { id: "card", label: "Credit / Debit", icon: CreditCard },
-                  ] as const).map((m) => {
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {PAYMENT_METHOD_OPTIONS.map((m) => {
                     const Icon = m.icon;
                     const active = selectedMethod === m.id;
                     return (
@@ -307,14 +394,19 @@ function CheckoutPageContent() {
                         key={m.id}
                         type="button"
                         onClick={() => setSelectedMethod(m.id)}
-                        className={`flex flex-col items-center gap-2 rounded-lg border p-3 text-sm transition ${
+                        className={`flex flex-col items-start gap-1.5 rounded-lg border p-3.5 text-left text-sm transition ${
                           active
-                            ? "border-primary bg-primary/5 font-semibold"
+                            ? "border-primary bg-primary/5 ring-1 ring-primary/30"
                             : "hover:bg-muted/50"
                         }`}
                       >
-                        <Icon className="h-5 w-5" />
-                        <span>{m.label}</span>
+                        <div className="flex items-center gap-2 font-semibold">
+                          <Icon className="h-4 w-4 shrink-0 text-primary" />
+                          <span>{m.label}</span>
+                        </div>
+                        <span className="text-xs leading-relaxed text-muted-foreground">
+                          {m.description}
+                        </span>
                       </button>
                     );
                   })}

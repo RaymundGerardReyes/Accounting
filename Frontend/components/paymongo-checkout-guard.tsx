@@ -172,6 +172,23 @@ export function PayMongoCheckoutGuard({
         {/* 4. ACTIVE COUNTDOWN STATE */}
         {!isTerminal && (
           <div className="space-y-4 rounded-lg border bg-muted/30 p-4 text-center">
+            {failureCode === "qrph_source_expired" && (
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-left text-xs text-amber-800 dark:text-amber-300">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div className="space-y-1">
+                    <p className="font-semibold">
+                      QR Code Timed Out — Checkout Session Still Active
+                    </p>
+                    <p>
+                      {failureMessage ||
+                        "Your dynamic QR Ph code timed out, but this PayMongo Checkout Session is still active. Re-open the gateway below to generate a fresh QR code or switch payment methods."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               <Clock className="h-3.5 w-3.5" />
               <span>Authoritative Session Countdown</span>
@@ -218,6 +235,20 @@ export function PayMongoCheckoutGuard({
                 Verify Now
               </Button>
             </div>
+
+            {handleRetry && (
+              <div className="pt-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleRetry}
+                  className="w-full text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                  Change Payment Method or Start New Checkout Session
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
