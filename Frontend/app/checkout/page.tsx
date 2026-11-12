@@ -109,6 +109,10 @@ function CheckoutPageContent() {
 
   const orderId = searchParams.get("order_id") || "";
   const urlAttemptId = searchParams.get("attempt_id") || "";
+  const isCancelledRedirect =
+    searchParams.get("cancelled") === "true" ||
+    searchParams.get("status") === "cancelled" ||
+    searchParams.get("status") === "canceled";
 
   const [order, setOrder] = useState<OrderDetailDto | null>(null);
   const [activeAttempt, setActiveAttempt] =
@@ -310,6 +314,17 @@ function CheckoutPageContent() {
   };
 
   const handleResetAttempt = () => {
+    if (activeAttempt?.id && isAttemptStillActive(activeAttempt)) {
+      const abandonedId = encodeURIComponent(activeAttempt.id);
+      fetch(
+        `/api/v1/payments/${abandonedId}/poll?auto_reconcile=true&force_reconcile=true&client_reported_redirect_status=cancelled`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+        }
+      ).catch(() => {});
+    }
     if (typeof window !== "undefined" && orderId) {
       window.sessionStorage.removeItem(`${STORAGE_KEY_PREFIX}${orderId}`);
       window.history.replaceState(
@@ -379,6 +394,9 @@ function CheckoutPageContent() {
                 initialCheckoutUrl={activeAttempt.checkout_url ?? null}
                 initialProviderPaymentId={
                   activeAttempt.provider_payment_id ?? null
+                }
+                clientReportedRedirectStatus={
+                  isCancelledRedirect ? "cancelled" : null
                 }
                 onCreateNewAttempt={handleResetAttempt}
               />

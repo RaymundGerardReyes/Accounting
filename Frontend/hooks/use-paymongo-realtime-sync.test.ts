@@ -264,4 +264,50 @@ describe("usePayMongoRealtimeSync - State Locking & Focus Sync", () => {
     expect(result.current.remainingSeconds).toBeGreaterThan(1600)
     expect(result.current.isPayable).toBe(true)
   })
+
+  it("forwards client_reported_redirect_status=cancelled on cancel redirect and transitions to failed", async () => {
+    const capturedUrls: string[] = []
+
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      capturedUrls.push(String(url))
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            id: "b8c42e75-1c25-47e2-bd16-3f0b3c5622c7",
+            provider_payment_id: "cs_d82fafa0fd3d9d5aaa9e8ad2",
+            status: "failed",
+            checkout_url: null,
+            is_payable: false,
+            failure_code: "source_cancelled",
+            failure_message: "Payment cancelled by customer during checkout redirect.",
+          }),
+      })
+    })
+
+    const { result } = renderHook(() =>
+      usePayMongoRealtimeSync({
+        attemptId: "b8c42e75-1c25-47e2-bd16-3f0b3c5622c7",
+        initialStatus: "requiresaction",
+        initialProviderPaymentId: "cs_d82fafa0fd3d9d5aaa9e8ad2",
+        clientReportedRedirectStatus: "cancelled",
+        enableDebugLogs: false,
+      })
+    )
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(
+      capturedUrls.some((u) =>
+        u.includes("client_reported_redirect_status=cancelled")
+      )
+    ).toBe(true)
+    expect(result.current.status).toBe("failed")
+    expect(result.current.isTerminal).toBe(true)
+    expect(result.current.failureCode).toBe("source_cancelled")
+    expect(result.current.isPayable).toBe(false)
+  })
 })

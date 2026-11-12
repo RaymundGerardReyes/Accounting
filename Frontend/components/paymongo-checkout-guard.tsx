@@ -25,6 +25,7 @@ export interface PayMongoCheckoutGuardProps {
   initialExpiresAtUtc?: string | null;
   initialCheckoutUrl?: string | null;
   initialProviderPaymentId?: string | null;
+  clientReportedRedirectStatus?: string | null;
   onCreateNewAttempt?: () => void;
   // Backward compatibility props (optional)
   orderId?: string;
@@ -42,6 +43,7 @@ export function PayMongoCheckoutGuard({
   initialExpiresAtUtc,
   initialCheckoutUrl,
   initialProviderPaymentId,
+  clientReportedRedirectStatus = null,
   onCreateNewAttempt,
   expiresAt,
   checkoutUrl: fallbackCheckoutUrl,
@@ -71,6 +73,7 @@ export function PayMongoCheckoutGuard({
     initialExpiresAtUtc: effectiveExpiresAt,
     initialCheckoutUrl: effectiveCheckoutUrl,
     initialProviderPaymentId,
+    clientReportedRedirectStatus,
   });
 
   return (
@@ -182,7 +185,7 @@ export function PayMongoCheckoutGuard({
                     </p>
                     <p>
                       {failureMessage ||
-                        "Your dynamic QR Ph code timed out, but this PayMongo Checkout Session is still active. Re-open the gateway below to generate a fresh QR code or switch payment methods."}
+                        "The child QR/source payment resource expired, while the parent PayMongo Checkout Session remains active. Click Open PayMongo Gateway to generate a new QR code on the hosted page, or click Change Payment Method below to expire this session and start fresh."}
                     </p>
                   </div>
                 </div>

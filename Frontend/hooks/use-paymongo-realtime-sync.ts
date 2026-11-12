@@ -46,6 +46,7 @@ export interface UsePayMongoRealtimeSyncOptions {
   initialCheckoutUrl?: string | null;
   checkoutUrl?: string | null;
   initialProviderPaymentId?: string | null;
+  clientReportedRedirectStatus?: string | null;
   signalRHubUrl?: string;
   pollIntervalMs?: number;
   enableDebugLogs?: boolean;
@@ -83,6 +84,7 @@ export function usePayMongoRealtimeSync({
   initialCheckoutUrl = null,
   checkoutUrl: fallbackCheckoutUrl = null,
   initialProviderPaymentId = null,
+  clientReportedRedirectStatus = null,
   signalRHubUrl = process.env.NEXT_PUBLIC_SIGNALR_HUB_URL || "/api/hubs/payments",
   pollIntervalMs = 3000,
   enableDebugLogs = true,
@@ -121,6 +123,7 @@ export function usePayMongoRealtimeSync({
 
   const serverClockOffsetMsRef = useRef<number>(0);
   const hasTriggeredZeroReconcileRef = useRef<boolean>(false);
+  const hasSentClientRedirectStatusRef = useRef<boolean>(false);
   const isPollInFlightRef = useRef<boolean>(false);
   const currentAttemptIdRef = useRef<string | null | undefined>(undefined);
   const previousAttemptIdRef = useRef<string | null | undefined>(attemptId);
@@ -181,6 +184,7 @@ export function usePayMongoRealtimeSync({
       setFailureCode(null);
       setFailureMessage(null);
       hasTriggeredZeroReconcileRef.current = false;
+      hasSentClientRedirectStatusRef.current = false;
       logDebug("HOOK_INITIALIZED_FOR_ATTEMPT", {
         attemptId,
         initialStatus: nextStatus,
@@ -305,9 +309,24 @@ export function usePayMongoRealtimeSync({
           triggerReason === "tab_visibility_visible" ||
           triggerReason === "manual_debug_button" ||
           triggerReason === "countdown_reached_zero";
-        const pollQuery = isForceTrigger
+        let pollQuery = isForceTrigger
           ? "?auto_reconcile=true&force_reconcile=true"
           : "?auto_reconcile=true";
+
+        const normalizedRedirectStatus = (
+          clientReportedRedirectStatus ?? ""
+        )
+          .trim()
+          .toLowerCase();
+        if (
+          normalizedRedirectStatus &&
+          !hasSentClientRedirectStatusRef.current
+        ) {
+          hasSentClientRedirectStatusRef.current = true;
+          pollQuery += `&client_reported_redirect_status=${encodeURIComponent(
+            normalizedRedirectStatus
+          )}`;
+        }
 
         let response = await fetch(`/api/v1/payments/${encodedId}/poll${pollQuery}`, {
           method: "POST",
@@ -430,7 +449,7 @@ export function usePayMongoRealtimeSync({
         }
       }
     },
-    [attemptId, applyAuthoritativeState, logDebug]
+    [attemptId, clientReportedRedirectStatus, applyAuthoritativeState, logDebug]
   );
 
   // 1. Reconcile on mount/reload and tab focus
