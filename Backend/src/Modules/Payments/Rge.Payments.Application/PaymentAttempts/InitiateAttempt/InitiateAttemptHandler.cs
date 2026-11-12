@@ -183,6 +183,41 @@ public sealed class InitiateAttemptHandler : ICommandHandler<InitiateAttemptComm
             return Result.Failure<PaymentAttemptDto>(gatewayResult.Error);
         }
 
+        // Supersede and expire any prior non-terminal checkout attempts on the same order
+        // so abandoned sessions do not remain open on PayMongo or polled indefinitely.
+        IReadOnlyList<PaymentAttempt> priorAttempts = await _attemptRepository
+            .GetByOrderIdAsync(order.Id, cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach (PaymentAttempt prior in priorAttempts)
+        {
+            if (prior.Id == attempt.Id || PaymentAttemptStateMachine.IsTerminal(prior.Status))
+            {
+                continue;
+            }
+
+            string? priorSessionId = prior.ProviderPaymentId;
+            prior.MarkExpired(nowUtc, "superseded_by_new_attempt", "Superseded by a new checkout session attempt.");
+            await _attemptRepository.SaveAsync(prior, cancellationToken).ConfigureAwait(false);
+
+            if (!string.IsNullOrWhiteSpace(priorSessionId) &&
+                priorSessionId.StartsWith("cs_", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                        await _paymentGateway.ExpireCheckoutSessionAsync(priorSessionId, cts.Token).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Best-effort gateway expiration for superseded session
+                    }
+                }, CancellationToken.None);
+            }
+        }
+
         attempt.AttachCheckoutSession(
             providerPaymentId: gatewayResult.Value.ProviderPaymentId,
             checkoutUrl: gatewayResult.Value.CheckoutUrl,

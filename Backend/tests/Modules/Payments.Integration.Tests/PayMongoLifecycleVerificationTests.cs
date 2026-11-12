@@ -1026,5 +1026,54 @@ public sealed class PayMongoLifecycleVerificationTests
         Assert.NotNull(reloaded3);
         Assert.Equal(PaymentAttemptStatus.Expired, reloaded3.Status);
     }
+
+    // =========================================================================
+    // Scenario 18: Initiating New Attempt Supersedes & Expires Prior Non-Terminal Attempts
+    // =========================================================================
+    [Fact]
+    public async Task Scenario18_InitiateNewAttemptOnSameOrder_SupersedesAndExpiresPriorNonTerminalAttempts()
+    {
+        var (sp, clock, gateway, _) = BuildTestHarness();
+        await using var _ = sp;
+        await using AsyncServiceScope scope = sp.CreateAsyncScope();
+
+        var createOrder = scope.ServiceProvider.GetRequiredService<CreateOrderHandler>();
+        var initiateAttempt = scope.ServiceProvider.GetRequiredService<InitiateAttemptHandler>();
+        var attemptRepo = scope.ServiceProvider.GetRequiredService<IPaymentAttemptRepository>();
+
+        var ordRes = await createOrder.HandleAsync(new CreateOrderCommand("COST-ACC-TEXT-2026", Quantity: 1));
+        Assert.True(ordRes.IsSuccess);
+
+        // 1. Initiate first attempt (qrph)
+        var firstRes = await initiateAttempt.HandleAsync(new InitiateAttemptCommand(ordRes.Value.Id, "qrph", "idem-sup-001"));
+        Assert.True(firstRes.IsSuccess);
+        string firstAttemptId = firstRes.Value.Id;
+        string firstCsId = firstRes.Value.ProviderPaymentId!;
+
+        // 2. Customer changes payment method or retries on the same order -> initiates second attempt (gcash)
+        clock.Advance(TimeSpan.FromMinutes(1));
+        var secondRes = await initiateAttempt.HandleAsync(new InitiateAttemptCommand(ordRes.Value.Id, "gcash", "idem-sup-002"));
+        Assert.True(secondRes.IsSuccess);
+        string secondAttemptId = secondRes.Value.Id;
+        string secondCsId = secondRes.Value.ProviderPaymentId!;
+
+        // 3. First attempt must be Expired with superseded_by_new_attempt and its PayMongo session expired
+        PaymentAttempt? firstReloaded = await attemptRepo.GetByIdAsync(firstAttemptId);
+        Assert.NotNull(firstReloaded);
+        Assert.Equal(PaymentAttemptStatus.Expired, firstReloaded.Status);
+        Assert.Equal("superseded_by_new_attempt", firstReloaded.FailureCode);
+
+        for (int i = 0; i < 50 && !gateway.ExpiredSessionCalls.Contains(firstCsId); i++)
+        {
+            await Task.Delay(20);
+        }
+        Assert.Contains(firstCsId, gateway.ExpiredSessionCalls);
+        Assert.DoesNotContain(secondCsId, gateway.ExpiredSessionCalls);
+
+        // 4. Second attempt remains active in RequiresAction
+        PaymentAttempt? secondReloaded = await attemptRepo.GetByIdAsync(secondAttemptId);
+        Assert.NotNull(secondReloaded);
+        Assert.Equal(PaymentAttemptStatus.RequiresAction, secondReloaded.Status);
+    }
 }
 

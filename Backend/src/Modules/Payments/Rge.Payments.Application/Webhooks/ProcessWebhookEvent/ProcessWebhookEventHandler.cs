@@ -382,7 +382,7 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
             order = await _orderRepository.GetByOrderNumberAsync(extractedReferenceNumber.Trim(), cancellationToken).ConfigureAwait(false);
         }
 
-        if (command.EventType is "checkout_session.payment.paid" or "payment.paid")
+        if (command.EventType is "checkout_session.payment.paid" or "payment.paid" or "qr.paid")
         {
             DateTimeOffset paidAtUtc = extractedPaidAt ?? nowUtc;
             string paymentMethod = actualPaymentMethod ?? attempt.PaymentMethod;
@@ -418,7 +418,7 @@ public sealed class ProcessWebhookEventHandler : ICommandHandler<ProcessWebhookE
                 attempt.MarkProcessing(nowUtc);
             }
         }
-        else if (command.EventType is "checkout_session.expired" or "qrph.expired" or "qr_code.expired")
+        else if (command.EventType is "checkout_session.expired" or "qrph.expired" or "qr_code.expired" or "qr.expired")
         {
             if (attempt.Status != PaymentAttemptStatus.Succeeded)
             {
