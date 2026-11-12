@@ -151,6 +151,8 @@ public sealed class PaymentAttempt : Entity<string>
         Status = transition.Value;
         PaidAt = paidAtUtc;
         UpdatedAt = paidAtUtc;
+        FailureCode = null;
+        FailureMessage = null;
 
         if (!string.IsNullOrWhiteSpace(actualPaymentMethod))
         {
@@ -158,6 +160,18 @@ public sealed class PaymentAttempt : Entity<string>
         }
 
         return Result.Success();
+    }
+
+    public void RecordRecoverableNotice(string? failureCode, string? failureMessage, DateTimeOffset nowUtc)
+    {
+        if (PaymentAttemptStateMachine.IsTerminal(Status))
+        {
+            return;
+        }
+
+        FailureCode = failureCode;
+        FailureMessage = failureMessage;
+        UpdatedAt = nowUtc;
     }
 
     public Result MarkFailed(string failureCode, string failureMessage, DateTimeOffset nowUtc)

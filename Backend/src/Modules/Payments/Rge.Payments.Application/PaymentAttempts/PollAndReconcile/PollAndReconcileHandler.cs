@@ -16,7 +16,7 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
 {
     private static readonly ConcurrentDictionary<string, DateTimeOffset> GatewayCheckCooldown = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, byte> SettledOrders = new(StringComparer.OrdinalIgnoreCase);
-    public static readonly TimeSpan CooldownWindow = TimeSpan.FromSeconds(10);
+    public static readonly TimeSpan CooldownWindow = TimeSpan.FromSeconds(3);
 
     private readonly IPaymentAttemptRepository _attemptRepository;
     private readonly IOrderRepository _orderRepository;
@@ -125,8 +125,8 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
             isWithinCooldown = true;
         }
 
-        bool shouldCheckGateway = (query.AutoReconcile || hasClientRedirect) &&
-            (!isWithinCooldown || hasClientRedirect) &&
+        bool shouldCheckGateway = (query.AutoReconcile || hasClientRedirect || query.ForceReconcile) &&
+            (!isWithinCooldown || hasClientRedirect || query.ForceReconcile) &&
             !string.IsNullOrWhiteSpace(attempt.ProviderPaymentId) &&
             !PaymentAttemptStateMachine.IsTerminal(attempt.Status);
 
@@ -211,6 +211,13 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
                     {
                         attempt.MarkFailed("customer_failed", "Payment failed during checkout redirect.", nowUtc);
                         TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
+                    }
+                }
+                else if (gwStatus is "awaiting_next_action" or "active" or "pending")
+                {
+                    if (!string.IsNullOrWhiteSpace(gw.FailureCode) || attempt.FailureCode is not null)
+                    {
+                        attempt.RecordRecoverableNotice(gw.FailureCode, gw.FailureMessage, nowUtc);
                     }
                 }
 

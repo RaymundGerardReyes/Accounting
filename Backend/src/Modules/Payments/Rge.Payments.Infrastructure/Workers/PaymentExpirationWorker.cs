@@ -265,6 +265,19 @@ public sealed class PaymentExpirationWorker : BackgroundService
                             attempt.Id);
                         continue;
                     }
+
+                    // Case E: Active session with recoverable source/QR notice (e.g. qrph_source_expired)
+                    if (!isDeadlineReached && remoteStatus is "awaiting_next_action" or "active" or "pending")
+                    {
+                        if (!string.IsNullOrWhiteSpace(statusResult.Value.FailureCode) || attempt.FailureCode is not null)
+                        {
+                            attempt.RecordRecoverableNotice(
+                                statusResult.Value.FailureCode,
+                                statusResult.Value.FailureMessage,
+                                nowUtc);
+                            await attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
+                        }
+                    }
                 }
             }
 

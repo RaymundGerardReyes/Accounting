@@ -482,6 +482,18 @@ public sealed class PayMongoClient : IPaymentGateway
             {
                 ObservedAwaitingNextActionSessions.TryRemove(sessionData.Id, out _);
 
+                string sessionStatus = (attrs.Status ?? string.Empty).Trim().ToLowerInvariant();
+                if (sessionStatus is "active")
+                {
+                    return new GatewayPaymentStatusResult(
+                        ProviderPaymentId: sessionData.Id,
+                        Status: "awaiting_next_action",
+                        PaymentMethodUsed: attrs.PaymentMethodUsed ?? srcEnvelope?.Data?.Attributes?.SourceType,
+                        PaidAtUtc: null,
+                        FailureCode: "qrph_source_expired",
+                        FailureMessage: $"Underlying source {srcId} expired while Checkout Session {sessionData.Id} remains active.");
+                }
+
                 return new GatewayPaymentStatusResult(
                     ProviderPaymentId: sessionData.Id,
                     Status: "expired",
@@ -793,7 +805,7 @@ public sealed class PayMongoClient : IPaymentGateway
             ObservedAwaitingNextActionSessions.ContainsKey(data.Id) &&
             intentStatus is "awaiting_payment_method";
 
-        if (paymentStatus is "failed" || lastError is not null || sourceExpiredOrFailedAfterAction)
+        if (paymentStatus is "failed" || lastError is not null)
         {
             ObservedAwaitingNextActionSessions.TryRemove(data.Id, out _);
 
@@ -801,15 +813,13 @@ public sealed class PayMongoClient : IPaymentGateway
                 ?? lastError?.FailedCode
                 ?? lastError?.Code
                 ?? attrs.FailedCode
-                ?? (sourceExpiredOrFailedAfterAction ? "source_expired_or_failed" : "payment_failed");
+                ?? "payment_failed";
 
             string failureMessage = latestPayment?.FailedMessage
                 ?? lastError?.FailedMessage
                 ?? lastError?.Detail
                 ?? attrs.FailedMessage
-                ?? (sourceExpiredOrFailedAfterAction
-                    ? "The underlying payment source (src_) expired or failed authorization on PayMongo."
-                    : "Payment failed at gateway.");
+                ?? "Payment failed at gateway.";
 
             return new GatewayPaymentStatusResult(
                 ProviderPaymentId: data.Id,
@@ -818,6 +828,19 @@ public sealed class PayMongoClient : IPaymentGateway
                 PaidAtUtc: null,
                 FailureCode: failureCode,
                 FailureMessage: failureMessage);
+        }
+
+        if (sourceExpiredOrFailedAfterAction && sessionStatus is "active")
+        {
+            ObservedAwaitingNextActionSessions.TryRemove(data.Id, out _);
+
+            return new GatewayPaymentStatusResult(
+                ProviderPaymentId: data.Id,
+                Status: "awaiting_next_action",
+                PaymentMethodUsed: attrs.PaymentMethodUsed,
+                PaidAtUtc: null,
+                FailureCode: "qrph_source_expired",
+                FailureMessage: "The underlying payment source or QR code expired while the Checkout Session remains active.");
         }
 
         // Priority 3: Expired Checkout Session or Cancelled Payment Intent
@@ -923,12 +946,13 @@ public sealed class PayMongoClient : IPaymentGateway
         }
     }
 
-    private static IReadOnlyList<string> MapPaymentMethodTypes(string requestedMethod) =>
-        requestedMethod.Trim().ToUpperInvariant() switch
+    public static IReadOnlyList<string> MapPaymentMethodTypes(string? requestedMethod) =>
+        (requestedMethod ?? string.Empty).Trim().ToUpperInvariant() switch
         {
             "QRPH" => ["qrph"],
             "GCASH" => ["gcash"],
             "PAYMAYA" or "MAYA" => ["paymaya"],
+            "GCASH_MAYA" => ["gcash", "paymaya"],
             "CARD" or "CARD_VISA" or "CARD_MASTERCARD" or "CARD_JCB" or "CARD_AMEX" => ["card"],
             "DOB" => ["dob", "dob_ubp"],
             "DOB_BPI" => ["dob"],

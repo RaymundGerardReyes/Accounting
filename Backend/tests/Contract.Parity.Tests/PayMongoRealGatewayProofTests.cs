@@ -92,7 +92,7 @@ public sealed class PayMongoRealGatewayProofTests
     }
 
     [Fact]
-    public void RealPayMongoJson_WhenSourceExpiresOrFails_TransitionsToAwaitingPaymentMethod_EvaluatesAsFailed()
+    public void RealPayMongoJson_WhenSourceExpiresOnActiveSession_TransitionsToAwaitingPaymentMethod_RemainsActiveWithRecoverableCode()
     {
         const string sourceActionJson = """
         {
@@ -118,7 +118,7 @@ public sealed class PayMongoRealGatewayProofTests
         var initialEvaluation = PayMongoClient.EvaluateCheckoutSessionStatus(actionEnvelope.Data);
         Assert.Equal("awaiting_next_action", initialEvaluation.Status);
 
-        // When customer lets src_ expire or clicks fail, PayMongo resets payment_intent to awaiting_payment_method
+        // When customer lets a QR/source expire on an active Checkout Session, PayMongo resets payment_intent to awaiting_payment_method
         const string sourceExpiredResetJson = """
         {
           "data": {
@@ -142,9 +142,22 @@ public sealed class PayMongoRealGatewayProofTests
         Assert.NotNull(resetEnvelope?.Data);
         var finalEvaluation = PayMongoClient.EvaluateCheckoutSessionStatus(resetEnvelope.Data);
 
-        // Must catch the source expiry drop and evaluate as failed
-        Assert.Equal("failed", finalEvaluation.Status);
-        Assert.Equal("source_expired_or_failed", finalEvaluation.FailureCode);
+        // Must preserve the active Checkout Session with recoverable qrph_source_expired code
+        Assert.Equal("awaiting_next_action", finalEvaluation.Status);
+        Assert.Equal("qrph_source_expired", finalEvaluation.FailureCode);
+    }
+
+    [Theory]
+    [InlineData("qrph", new[] { "qrph" })]
+    [InlineData("gcash", new[] { "gcash" })]
+    [InlineData("paymaya", new[] { "paymaya" })]
+    [InlineData("maya", new[] { "paymaya" })]
+    [InlineData("card", new[] { "card" })]
+    [InlineData("gcash_maya", new[] { "gcash", "paymaya" })]
+    public void MapPaymentMethodTypes_MapsFourCustomerChoicesAndLegacyAliasCleanly(string method, string[] expectedTypes)
+    {
+        var actual = PayMongoClient.MapPaymentMethodTypes(method);
+        Assert.Equal(expectedTypes, actual);
     }
 }
 

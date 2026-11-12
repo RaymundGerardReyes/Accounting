@@ -236,7 +236,7 @@ public sealed class PayMongoSourceInspectionProofTests
     }
 
     [Fact]
-    public async Task GetCheckoutSessionStatus_WhenUnderlyingSourceExpired_OverridesStatusToExpired()
+    public async Task GetCheckoutSessionStatus_WhenUnderlyingSourceExpired_MaintainsActiveSessionWithRecoverableCode()
     {
         // Arrange
         const string csId = "cs_test_active_awaiting_action";
@@ -253,10 +253,10 @@ public sealed class PayMongoSourceInspectionProofTests
             // Act
             var result = await client.GetCheckoutSessionStatusAsync(csId);
 
-            // Assert
+            // Assert: Active Checkout Session must NOT be prematurely killed when a child QR/source expires
             Assert.True(result.IsSuccess);
-            Assert.Equal("expired", result.Value.Status);
-            Assert.Equal("source_expired", result.Value.FailureCode);
+            Assert.Equal("awaiting_next_action", result.Value.Status);
+            Assert.Equal("qrph_source_expired", result.Value.FailureCode);
             Assert.Contains(srcId, result.Value.FailureMessage, StringComparison.OrdinalIgnoreCase);
 
             // Verify both HTTP endpoints were invoked in order
