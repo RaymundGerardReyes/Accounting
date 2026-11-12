@@ -156,3 +156,30 @@ To audit any transaction (`cs_...`, `pi_...`, `src_...`) end-to-end:
 8. Confirm `events` includes `qrph.expired` (for QR expiry notifications) and `checkout_session.payment.paid` / `payment.paid` / `payment.failed` / `source.chargeable`.
 9. Trigger a controlled test event in the same mode and verify `POST /api/v1/webhooks/paymongo` logs `[PAYMONGO-WEBHOOK-INBOUND]`.
 10. Verify `GET /api/v1/admin/webhook-events` returns the persisted event row rather than `[]`.
+
+---
+
+## 9. Architectural Invariants: Separation of QR Source vs. Checkout Session
+
+Based on the official PayMongo documentation ([PayMongo — Checkout Session and QR Ph lifecycle](https://docs.paymongo.com/docs/payment-channels-key-concepts)):
+
+### 9.1 Summary of Invariants
+1. **Never Call `ExpireCheckoutSessionAsync` Solely Because a QR Source Expired**:
+   - When a QR code or e-wallet source (`src_...`) expires (`src_status=expired`), the Payment Intent resets to `awaiting_payment_method` while the parent Checkout Session (`cs_...`) remains `active`.
+   - The merchant application must **never** call `POST /v1/checkout_sessions/{id}/expire` simply because the source expired. Doing so converts a recoverable payment-method expiration into a terminal session termination.
+   - The customer can simply reopen or stay on the Hosted Checkout page and generate a new QR code or select another payment method.
+2. **Recoverable Local Classification (`awaiting_next_action` / `qrph_source_expired`)**:
+   - The gateway returns `Status = "awaiting_next_action"` and `FailureCode = "qrph_source_expired"`.
+   - The UI displays a recoverable notification: *"QR Code Timed Out — Checkout Session Still Active"*.
+   - The session countdown reflects the actual remaining session time; it does not snap to `00:00` unless the session's overall deadline is reached.
+3. **Poll Throttling & Cooldown Distinction**:
+   - Differentiate fast cached database reads from remote PayMongo gateway reconciliations.
+   - Respect a 3-second cooldown window for ordinary automatic polling ticks, but bypass cooldown for user-initiated triggers (`force_reconcile=true`, window focus, tab visibility change, or cancel redirects).
+4. **SignalR Connection & Polling Lifecycle**:
+   - Stop payment-status polling and teardown SignalR only upon reaching a terminal state (`paid`, `succeeded`, `failed`, `expired`, `cancelled`).
+   - For recoverable states (`RequiresAction`), maintain controlled polling and keep the active session open.
+   - Maintain stable SignalR connection dependencies to prevent reconnection loops.
+5. **Webhook Correlation & Subscriptions**:
+   - Ensure canonical webhook events (`checkout_session.payment.paid`, `payment.paid`, `payment.failed`, `source.chargeable`, `qrph.expired`) are registered.
+   - PayMongo does not send a webhook for Checkout Session expiration; that must be recorded when explicitly expired via the API or evaluated during reconciliation.
+
