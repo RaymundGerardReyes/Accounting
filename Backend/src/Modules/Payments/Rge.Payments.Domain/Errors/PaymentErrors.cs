@@ -22,10 +22,5 @@ public static class PaymentErrors
         Error.Conflict(
             "Payments.OrderAlreadyPaid",
             $"Order '{orderNumber}' is already marked as paid.");
-
-    public static Error InvalidWebhookPayload =>
-        Error.Validation(
-            "Webhooks.MalformedEnvelope",
-            "Webhook payload root must be a JSON object.");
 }
 

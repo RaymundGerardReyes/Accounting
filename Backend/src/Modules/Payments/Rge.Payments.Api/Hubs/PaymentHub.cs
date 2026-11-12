@@ -29,16 +29,6 @@ public sealed class PaymentHub : Hub
         return Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupName(transactionId));
     }
 
-    /// <summary>
-    /// Client-friendly alias for JoinPaymentGroupAsync.
-    /// </summary>
-    public Task SubscribeToPayment(string transactionId) => JoinPaymentGroupAsync(transactionId);
-
-    /// <summary>
-    /// Client-friendly alias for LeavePaymentGroupAsync.
-    /// </summary>
-    public Task UnsubscribeFromPayment(string transactionId) => LeavePaymentGroupAsync(transactionId);
-
     /// <summary>Returns the canonical group name for a payment transaction.</summary>
     public static string GroupName(string transactionId) => $"payment:{transactionId}";
 }

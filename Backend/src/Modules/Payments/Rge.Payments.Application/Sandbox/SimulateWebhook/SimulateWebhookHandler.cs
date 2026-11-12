@@ -168,10 +168,9 @@ public sealed class SimulateWebhookHandler : ICommandHandler<SimulateWebhookComm
                     amountMinor: order.Amount.AmountMinor,
                     currency: order.Amount.CurrencyCode,
                     paymentMethod: attempt.PaymentMethod,
-                    customerName: string.Empty,
+                    customerName: "Valued Customer",
                     customerEmail: string.Empty,
-                    paidAtUtc: nowUtc,
-                    metadataJson: order.MetadataJson);
+                    paidAtUtc: nowUtc);
 
                 await _outboxWriter.EnqueueAsync(paidEvent, cancellationToken).ConfigureAwait(false);
             }

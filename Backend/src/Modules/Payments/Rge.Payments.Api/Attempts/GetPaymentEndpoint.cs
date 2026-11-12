@@ -26,28 +26,13 @@ public sealed class GetPaymentEndpoint : IEndpointModule
         HttpContext httpContext,
         string payment_id,
         bool? auto_reconcile,
-        bool? force_reconcile,
-        bool? forceReconcile,
-        string? client_reported_redirect_status,
-        string? clientReportedRedirectStatus,
         PollAndReconcileHandler handler,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(httpContext);
         ArgumentNullException.ThrowIfNull(handler);
 
-        string? redirectStatus = !string.IsNullOrWhiteSpace(client_reported_redirect_status)
-            ? client_reported_redirect_status
-            : clientReportedRedirectStatus;
-
-        bool effectiveAutoReconcile = auto_reconcile ?? HttpMethods.IsPost(httpContext.Request.Method);
-        bool effectiveForceReconcile = force_reconcile ?? forceReconcile ?? false;
-
-        var query = new PollAndReconcileQuery(
-            payment_id,
-            effectiveAutoReconcile,
-            redirectStatus,
-            effectiveForceReconcile);
+        var query = new PollAndReconcileQuery(payment_id, auto_reconcile ?? true);
         var result = await handler.HandleAsync(query, cancellationToken).ConfigureAwait(false);
         return result.ToHttpResult(httpContext, attempt => Results.Ok(attempt));
     }

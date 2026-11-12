@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Data.Common;
 using Rge.BuildingBlocks.Infrastructure.Persistence;
-using Rge.BuildingBlocks.SharedKernel.Money;
 using Rge.Payments.Application.Ports;
 using Rge.Payments.Domain.Orders;
 using Rge.Payments.Infrastructure.Persistence.Mappings;
@@ -11,14 +10,9 @@ namespace Rge.Payments.Infrastructure.Persistence.Repositories;
 
 public sealed class OrderRepository : IOrderRepository
 {
-    private static long _fallbackSequence = 10;
+    private static long _fallbackSequence;
     private static readonly ConcurrentDictionary<string, Order> MemoryById = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, Order> MemoryByNumber = new(StringComparer.OrdinalIgnoreCase);
-
-    static OrderRepository()
-    {
-        EnsureSeeded();
-    }
 
     private readonly ConnectionScope _connectionScope;
 
@@ -28,95 +22,12 @@ public sealed class OrderRepository : IOrderRepository
         _connectionScope = connectionScope;
     }
 
-    /// <summary>
-    /// Resets the in-memory fallback dictionary to the initial baseline seed orders.
-    /// Useful for test isolation.
-    /// </summary>
-    public static void ResetToBaseline()
-    {
-        MemoryById.Clear();
-        MemoryByNumber.Clear();
-        Interlocked.Exchange(ref _fallbackSequence, 10);
-        EnsureSeeded();
-    }
-
-    private static void EnsureSeeded()
-    {
-        if (!MemoryById.IsEmpty)
-        {
-            return;
-        }
-
-        Order[] baselineSeeds =
-        [
-            Order.Rehydrate(
-                id: "ord_seed_001_cpa2026",
-                userId: "acme_admin",
-                orderNumber: "ORD-202611-0001",
-                title: "CPA Review Materials - Batch 2026",
-                category: OrderCategory.ProductOrder,
-                referenceCode: "CPA-REV-AUDIT-2026",
-                amount: Money.Php(1450_00),
-                status: OrderStatus.Pending,
-                metadataJson: """{"customer_name":"Maria Santos","customer_email":"maria.santos@example.ph","customer_phone":"+639171234567","department":"Tax","cost_center":"CC-101"}""",
-                createdAt: new DateTimeOffset(2026, 11, 1, 8, 0, 0, TimeSpan.Zero),
-                updatedAt: new DateTimeOffset(2026, 11, 1, 8, 0, 0, TimeSpan.Zero)),
-
-            Order.Rehydrate(
-                id: "ord_seed_002_costacc",
-                userId: "acme_admin",
-                orderNumber: "ORD-202611-0002",
-                title: "Cost Accounting Textbook 2026",
-                category: OrderCategory.ProductOrder,
-                referenceCode: "COST-ACC-TEXT-2026",
-                amount: Money.Php(1850_00),
-                status: OrderStatus.Paid,
-                metadataJson: """{"customer_name":"Juan Dela Cruz","customer_email":"juan.delacruz@example.ph","customer_phone":"+639189876543","source":"google_forms","google_form_response_id":"GFR-2026-8812"}""",
-                createdAt: new DateTimeOffset(2026, 11, 2, 9, 30, 0, TimeSpan.Zero),
-                updatedAt: new DateTimeOffset(2026, 11, 2, 10, 0, 0, TimeSpan.Zero)),
-
-            Order.Rehydrate(
-                id: "ord_seed_003_mfgdept",
-                userId: "acme_admin",
-                orderNumber: "INV-202611-0001",
-                title: "Manufacturing Monthly Overhead Allocation",
-                category: OrderCategory.DepartmentInvoice,
-                referenceCode: "manufacturing",
-                amount: Money.Php(45000_00),
-                status: OrderStatus.Pending,
-                metadataJson: """{"department":"manufacturing","cost_center":"CC-001","approved_by":"Operations Director"}""",
-                createdAt: new DateTimeOffset(2026, 11, 2, 14, 0, 0, TimeSpan.Zero),
-                updatedAt: new DateTimeOffset(2026, 11, 2, 14, 0, 0, TimeSpan.Zero)),
-
-            Order.Rehydrate(
-                id: "ord_seed_004_canceldoc",
-                userId: "acme_admin",
-                orderNumber: "INV-202611-0002",
-                title: "Assembly Monthly Overhead Allocation",
-                category: OrderCategory.DepartmentInvoice,
-                referenceCode: "assembly",
-                amount: Money.Php(28000_00),
-                status: OrderStatus.Cancelled,
-                metadataJson: """{"department":"assembly","cost_center":"CC-002","cancellation_reason":"Budget realigned for Q4"}""",
-                createdAt: new DateTimeOffset(2026, 11, 1, 11, 0, 0, TimeSpan.Zero),
-                updatedAt: new DateTimeOffset(2026, 11, 1, 11, 30, 0, TimeSpan.Zero))
-        ];
-
-        foreach (Order order in baselineSeeds)
-        {
-            MemoryById.TryAdd(order.Id, order);
-            MemoryByNumber.TryAdd(order.OrderNumber, order);
-        }
-    }
-
     public async Task<Order?> GetByIdAsync(string orderId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(orderId))
         {
             return null;
         }
-
-        EnsureSeeded();
 
         if (MemoryById.TryGetValue(orderId.Trim(), out Order? cached))
         {
@@ -154,8 +65,6 @@ public sealed class OrderRepository : IOrderRepository
         {
             return null;
         }
-
-        EnsureSeeded();
 
         if (MemoryByNumber.TryGetValue(orderNumber.Trim(), out Order? cached))
         {
@@ -214,22 +123,10 @@ public sealed class OrderRepository : IOrderRepository
                 list.Add(order);
             }
 
-            if (list.Count == 0)
-            {
-                EnsureSeeded();
-                var fallback = MemoryById.Values.AsEnumerable();
-                if (!string.IsNullOrWhiteSpace(status))
-                {
-                    fallback = fallback.Where(o => string.Equals(o.Status, status.Trim(), StringComparison.OrdinalIgnoreCase));
-                }
-                return fallback.OrderByDescending(o => o.CreatedAt).Take(effectiveLimit).ToList();
-            }
-
             return list;
         }
         catch (Exception ex) when (ex is DbException or InvalidOperationException)
         {
-            EnsureSeeded();
             var memList = MemoryById.Values.AsEnumerable();
             if (!string.IsNullOrWhiteSpace(status))
             {
@@ -267,15 +164,7 @@ public sealed class OrderRepository : IOrderRepository
         {
         }
 
-        EnsureSeeded();
-        int existingCount = MemoryByNumber.Keys.Count(k => k.StartsWith($"{prefix}-{yearMonth}-", StringComparison.OrdinalIgnoreCase));
-        long next = Interlocked.Increment(ref _fallbackSequence);
-        if (next <= existingCount)
-        {
-            next = existingCount + 10;
-            Interlocked.Exchange(ref _fallbackSequence, next);
-        }
-        return next;
+        return Interlocked.Increment(ref _fallbackSequence);
     }
 
     public async Task SaveAsync(Order order, CancellationToken cancellationToken = default)

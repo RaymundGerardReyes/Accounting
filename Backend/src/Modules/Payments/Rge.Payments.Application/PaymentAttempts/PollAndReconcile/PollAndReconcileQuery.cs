@@ -5,7 +5,5 @@ namespace Rge.Payments.Application.PaymentAttempts.PollAndReconcile;
 
 public sealed record PollAndReconcileQuery(
     string PaymentId,
-    bool AutoReconcile = true,
-    string? ClientReportedRedirectStatus = null,
-    bool ForceReconcile = false) : IQuery<PaymentAttemptDto>;
+    bool AutoReconcile = true) : IQuery<PaymentAttemptDto>;
 

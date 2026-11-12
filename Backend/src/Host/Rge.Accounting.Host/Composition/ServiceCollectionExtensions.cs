@@ -45,7 +45,6 @@ using Rge.Integrations.Infrastructure;
 using Rge.Payments.Api;
 using Rge.Payments.Infrastructure;
 using Rge.Receipts.Api;
-using Rge.Receipts.Application.Ports;
 using Rge.Receipts.Infrastructure;
 
 namespace Rge.Accounting.Host.Composition;
@@ -396,14 +395,16 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IOutboxStore>(sp => sp.GetRequiredService<OutboxStore>());
         services.AddScoped<IOutboxWriter>(sp => sp.GetRequiredService<OutboxStore>());
 
-        services.AddScoped<IReceiptSourceResolver, ReceiptSourceResolver>();
-
         services.AddSingleton<OutboxDispatcher>(sp =>
         {
             var dispatcher = new OutboxDispatcher();
-            var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
-            var receiptOutboxHandler = new OrderPaidReceiptOutboxHandler(scopeFactory);
-            dispatcher.RegisterHandler(receiptOutboxHandler);
+            using IServiceScope scope = sp.CreateScope();
+            OrderPaidReceiptOutboxHandler? receiptOutboxHandler =
+                scope.ServiceProvider.GetService<OrderPaidReceiptOutboxHandler>();
+            if (receiptOutboxHandler is not null)
+            {
+                dispatcher.RegisterHandler(receiptOutboxHandler);
+            }
             return dispatcher;
         });
 
@@ -418,8 +419,6 @@ public static class ServiceCollectionExtensions
                 leaseManager,
                 clock);
         });
-
-        services.AddHostedService<OutboxHostedService>();
 
         // 3. Register Identity Module Services
         services.AddAuthentication(options =>

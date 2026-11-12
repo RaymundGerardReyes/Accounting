@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.Routing;
 using Rge.BuildingBlocks.Api.Endpoints;
 using Rge.Payments.Api.Admin;
@@ -43,16 +42,8 @@ public sealed class PaymentsEndpoints : IEndpointModule
         }
 
         // Map SignalR real-time payment hub for checkout countdown and status synchronization
-        Action<HttpConnectionDispatcherOptions> configureHub = options =>
-        {
-            options.Transports = HttpTransportType.WebSockets | HttpTransportType.LongPolling;
-            options.LongPolling.PollTimeout = TimeSpan.FromSeconds(20);
-            options.ApplicationMaxBufferSize = 128 * 1024;
-            options.TransportMaxBufferSize = 128 * 1024;
-        };
-
-        app.MapHub<PaymentHub>("/hubs/payment", configureHub);
-        app.MapHub<PaymentHub>("/hubs/payments", configureHub);
-        app.MapHub<PaymentHub>("/api/hubs/payments", configureHub);
+        app.MapHub<PaymentHub>("/hubs/payment");
+        app.MapHub<PaymentHub>("/hubs/payments");
+        app.MapHub<PaymentHub>("/api/hubs/payments");
     }
 }

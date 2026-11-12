@@ -131,6 +131,8 @@ public sealed class InitiateAttemptHandler : ICommandHandler<InitiateAttemptComm
             nowUtc: nowUtc,
             provider: "paymongo");
 
+        await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
+
         string? custName = command.CustomerName;
         string? custEmail = command.CustomerEmail;
         string? custPhone = command.CustomerPhone;
@@ -167,10 +169,7 @@ public sealed class InitiateAttemptHandler : ICommandHandler<InitiateAttemptComm
             CustomerName: custName,
             CustomerEmail: custEmail,
             CustomerPhone: custPhone,
-            LineItems: [new CheckoutLineItemDto(order.Title, 1, order.Amount.AmountMinor, order.Amount.CurrencyCode)],
-            SuccessUrl: command.SuccessUrl,
-            CancelUrl: command.CancelUrl,
-            PaymentAttemptId: attempt.Id);
+            LineItems: [new CheckoutLineItemDto(order.Title, 1, order.Amount.AmountMinor, order.Amount.CurrencyCode)]);
 
         Result<CheckoutSessionResult> gatewayResult = await _paymentGateway
             .CreateCheckoutSessionAsync(checkoutReq, cancellationToken)
@@ -181,41 +180,6 @@ public sealed class InitiateAttemptHandler : ICommandHandler<InitiateAttemptComm
             attempt.MarkFailed("GATEWAY_ERROR", gatewayResult.Error.Message, nowUtc);
             await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
             return Result.Failure<PaymentAttemptDto>(gatewayResult.Error);
-        }
-
-        // Supersede and expire any prior non-terminal checkout attempts on the same order
-        // so abandoned sessions do not remain open on PayMongo or polled indefinitely.
-        IReadOnlyList<PaymentAttempt> priorAttempts = await _attemptRepository
-            .GetByOrderIdAsync(order.Id, cancellationToken)
-            .ConfigureAwait(false);
-
-        foreach (PaymentAttempt prior in priorAttempts)
-        {
-            if (prior.Id == attempt.Id || PaymentAttemptStateMachine.IsTerminal(prior.Status))
-            {
-                continue;
-            }
-
-            string? priorSessionId = prior.ProviderPaymentId;
-            prior.MarkExpired(nowUtc, "superseded_by_new_attempt", "Superseded by a new checkout session attempt.");
-            await _attemptRepository.SaveAsync(prior, cancellationToken).ConfigureAwait(false);
-
-            if (!string.IsNullOrWhiteSpace(priorSessionId) &&
-                priorSessionId.StartsWith("cs_", StringComparison.OrdinalIgnoreCase))
-            {
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                        await _paymentGateway.ExpireCheckoutSessionAsync(priorSessionId, cts.Token).ConfigureAwait(false);
-                    }
-                    catch
-                    {
-                        // Best-effort gateway expiration for superseded session
-                    }
-                }, CancellationToken.None);
-            }
         }
 
         attempt.AttachCheckoutSession(
