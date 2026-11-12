@@ -21,6 +21,15 @@ public sealed class PayMongoWebhookEndpoint : IEndpointModule
     public const string SignatureHeaderName = "Paymongo-Signature";
     private const int MaxWebhookBodyBytes = 256 * 1024; // 256 KB strict cap on webhook payloads
 
+    public static readonly string[] CanonicalWebhookEvents =
+    [
+        "checkout_session.payment.paid",
+        "payment.paid",
+        "payment.failed",
+        "source.chargeable",
+        "qrph.expired"
+    ];
+
     public void MapEndpoints(IEndpointRouteBuilder app)
     {
         ArgumentNullException.ThrowIfNull(app);
@@ -44,12 +53,112 @@ public sealed class PayMongoWebhookEndpoint : IEndpointModule
            .WithName("ReceivePayMongoWebhookRootAlias")
            .WithTags("Payments.Webhooks");
 
-        // 2. Auto-Setup Webhooks (Admin Utility)
+        // 2. Auto-Setup & Inspect Webhooks (Admin Utilities)
         app.MapPost("/api/v1/admin/webhooks/paymongo/setup", SetupPayMongoWebhooksAsync)
            .AllowAnonymous()
            .DisableAntiforgery()
            .WithName("SetupPayMongoWebhooks")
            .WithTags("Payments.Admin");
+
+        app.MapGet("/api/v1/admin/webhooks/paymongo/status", InspectPayMongoWebhooksAsync)
+           .AllowAnonymous()
+           .WithName("InspectPayMongoWebhooks")
+           .WithTags("Payments.Admin");
+    }
+
+    private static async Task<IResult> InspectPayMongoWebhooksAsync(
+        HttpContext httpContext,
+        Microsoft.Extensions.Configuration.IConfiguration config,
+        IHttpClientFactory clientFactory,
+        ILogger<PayMongoWebhookEndpoint> logger,
+        CancellationToken cancellationToken)
+    {
+        string? secretKey = config["Secrets:PayMongoSecretKey"] ?? config["PAYMONGO_SECRET_KEY"];
+        if (string.IsNullOrWhiteSpace(secretKey))
+        {
+            return Results.BadRequest(new { error = "Missing PayMongoSecretKey in configuration." });
+        }
+
+        string keyMode = secretKey.Trim().StartsWith("sk_live_", StringComparison.OrdinalIgnoreCase) ? "live" : "test";
+        bool expectedLivemode = string.Equals(keyMode, "live", StringComparison.OrdinalIgnoreCase);
+
+        string scheme = httpContext.Request.Headers["X-Forwarded-Proto"].FirstOrDefault() ?? httpContext.Request.Scheme;
+        string host = httpContext.Request.Headers["X-Forwarded-Host"].FirstOrDefault() ?? httpContext.Request.Host.Value ?? "localhost";
+        string targetWebhookUrl = $"{scheme}://{host}/api/v1/webhooks/paymongo";
+
+        using var client = clientFactory.CreateClient();
+        client.BaseAddress = new Uri("https://api.paymongo.com/v1/");
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
+            "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{secretKey}:")));
+        client.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+
+        try
+        {
+            using var listResponse = await client.GetAsync("webhooks", cancellationToken).ConfigureAwait(false);
+            listResponse.EnsureSuccessStatusCode();
+            string listJson = await listResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+            using var doc = System.Text.Json.JsonDocument.Parse(listJson);
+            var webhooks = new List<object>();
+
+            if (doc.RootElement.TryGetProperty("data", out var dataEl) && dataEl.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var hook in dataEl.EnumerateArray())
+                {
+                    string id = hook.TryGetProperty("id", out var idProp) ? (idProp.GetString() ?? string.Empty) : string.Empty;
+                    if (!hook.TryGetProperty("attributes", out var attrs))
+                    {
+                        continue;
+                    }
+
+                    string url = attrs.TryGetProperty("url", out var urlProp) ? (urlProp.GetString() ?? string.Empty) : string.Empty;
+                    string status = attrs.TryGetProperty("status", out var statusProp) ? (statusProp.GetString() ?? string.Empty) : string.Empty;
+                    bool livemode = attrs.TryGetProperty("livemode", out var liveProp) && liveProp.ValueKind == System.Text.Json.JsonValueKind.True;
+
+                    var events = new List<string>();
+                    if (attrs.TryGetProperty("events", out var eventsProp) && eventsProp.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    {
+                        foreach (var ev in eventsProp.EnumerateArray())
+                        {
+                            if (ev.ValueKind == System.Text.Json.JsonValueKind.String && !string.IsNullOrWhiteSpace(ev.GetString()))
+                            {
+                                events.Add(ev.GetString()!);
+                            }
+                        }
+                    }
+
+                    string[] missingCanonical = CanonicalWebhookEvents
+                        .Where(ce => !events.Contains(ce, StringComparer.OrdinalIgnoreCase))
+                        .ToArray();
+
+                    webhooks.Add(new
+                    {
+                        id,
+                        url,
+                        status,
+                        livemode,
+                        events,
+                        matches_host = !string.IsNullOrWhiteSpace(url) && url.Contains(host, StringComparison.OrdinalIgnoreCase),
+                        mode_matches_key = livemode == expectedLivemode,
+                        missing_canonical_events = missingCanonical
+                    });
+                }
+            }
+
+            return Results.Ok(new
+            {
+                key_mode = keyMode,
+                expected_livemode = expectedLivemode,
+                target_url = targetWebhookUrl,
+                canonical_events = CanonicalWebhookEvents,
+                webhooks
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[PAYMONGO-WEBHOOK-INSPECT] Failed to inspect PayMongo webhooks.");
+            return Results.Problem("An error occurred while contacting PayMongo to inspect webhooks.");
+        }
     }
 
     private static async Task<IResult> SetupPayMongoWebhooksAsync(
@@ -105,6 +214,57 @@ public sealed class PayMongoWebhookEndpoint : IEndpointModule
                     {
                         webhookExists = true;
 
+                        var existingEvents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        if (attrs.TryGetProperty("events", out var eventsProp) && eventsProp.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        {
+                            foreach (var ev in eventsProp.EnumerateArray())
+                            {
+                                if (ev.ValueKind == System.Text.Json.JsonValueKind.String && !string.IsNullOrWhiteSpace(ev.GetString()))
+                                {
+                                    existingEvents.Add(ev.GetString()!);
+                                }
+                            }
+                        }
+
+                        string[] missingEvents = CanonicalWebhookEvents
+                            .Where(ce => !existingEvents.Contains(ce))
+                            .ToArray();
+
+                        if (missingEvents.Length > 0 || !string.Equals(url, targetWebhookUrl, StringComparison.OrdinalIgnoreCase))
+                        {
+                            string[] mergedEvents = existingEvents
+                                .Concat(CanonicalWebhookEvents)
+                                .Distinct(StringComparer.OrdinalIgnoreCase)
+                                .ToArray();
+
+                            var updatePayload = new
+                            {
+                                data = new
+                                {
+                                    attributes = new
+                                    {
+                                        events = mergedEvents,
+                                        url = targetWebhookUrl
+                                    }
+                                }
+                            };
+
+                            using var updateContent = new StringContent(
+                                System.Text.Json.JsonSerializer.Serialize(updatePayload),
+                                Encoding.UTF8,
+                                "application/json");
+
+                            using var updateResp = await client.PutAsync($"webhooks/{id}", updateContent, cancellationToken).ConfigureAwait(false);
+                            if (updateResp.IsSuccessStatusCode)
+                            {
+                                report.Add($"Updated webhook {id} events ({string.Join(", ", mergedEvents)}) and URL ({targetWebhookUrl}).");
+                            }
+                            else
+                            {
+                                report.Add($"Failed to update webhook {id} events. Please check PayMongo dashboard.");
+                            }
+                        }
+
                         // Step 2: Re-enable the webhook if it was disabled by PayMongo due to previous retries exhausted
                         if (string.Equals(status, "disabled", StringComparison.OrdinalIgnoreCase))
                         {
@@ -120,7 +280,7 @@ public sealed class PayMongoWebhookEndpoint : IEndpointModule
                         }
                         else
                         {
-                            report.Add($"Webhook {id} is already active and pointing to {url}.");
+                            report.Add($"Webhook {id} is active and pointing to {targetWebhookUrl}.");
                         }
                     }
                 }
@@ -135,13 +295,7 @@ public sealed class PayMongoWebhookEndpoint : IEndpointModule
                     {
                         attributes = new
                         {
-                            events = new[]
-                            {
-                                "checkout_session.payment.paid",
-                                "payment.paid",
-                                "payment.failed",
-                                "qr_code.expired"
-                            },
+                            events = CanonicalWebhookEvents,
                             url = targetWebhookUrl
                         }
                     }
@@ -190,6 +344,24 @@ public sealed class PayMongoWebhookEndpoint : IEndpointModule
         }
     }
 
+    private static string? ExtractSignatureHeader(IHeaderDictionary headers)
+    {
+        if (headers.TryGetValue(SignatureHeaderName, out var values) && !string.IsNullOrWhiteSpace(values))
+        {
+            return values.ToString();
+        }
+
+        foreach (var (key, value) in headers)
+        {
+            if (string.Equals(key, SignatureHeaderName, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value.ToString();
+            }
+        }
+
+        return null;
+    }
+
     private static async Task<IResult> HandleWebhookAsync(
         HttpContext httpContext,
         PayMongoSignatureVerifier signatureVerifier,
@@ -198,10 +370,15 @@ public sealed class PayMongoWebhookEndpoint : IEndpointModule
         CancellationToken cancellationToken)
     {
         string path = httpContext.Request.Path.Value ?? "/";
-        string? signatureHeader = httpContext.Request.Headers[SignatureHeaderName];
+        string? signatureHeader = ExtractSignatureHeader(httpContext.Request.Headers);
         bool hasSig = !string.IsNullOrWhiteSpace(signatureHeader);
 
         httpContext.Request.EnableBuffering();
+
+        if (httpContext.Request.Body.CanSeek)
+        {
+            httpContext.Request.Body.Position = 0;
+        }
 
         if (httpContext.Request.ContentLength > MaxWebhookBodyBytes)
         {
@@ -228,13 +405,40 @@ public sealed class PayMongoWebhookEndpoint : IEndpointModule
             rawBody = await reader.ReadToEndAsync(cancellationToken);
         }
 
+        if (httpContext.Request.Body.CanSeek)
+        {
+            httpContext.Request.Body.Position = 0;
+        }
+
         logger.LogInformation(
             "[PAYMONGO-WEBHOOK-INBOUND] Path={Path} | HasSignature={HasSig} | PayloadBytes={Bytes}",
             path,
             hasSig,
             Encoding.UTF8.GetByteCount(rawBody));
 
-        if (!signatureVerifier.IsValidSignature(signatureHeader, rawBody))
+        bool isValidSignature;
+        try
+        {
+            isValidSignature = signatureVerifier.IsValidSignature(signatureHeader, rawBody);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "[PAYMONGO-WEBHOOK-REJECTED] Path={Path} | Reason=SignatureVerificationException | HasSig={HasSig}",
+                path,
+                hasSig);
+            return Results.Json(
+                data: new
+                {
+                    received = false,
+                    error = "InvalidSignature",
+                    message = "Paymongo-Signature HMAC-SHA256 verification failed or timestamp expired."
+                },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (!isValidSignature)
         {
             logger.LogWarning(
                 "[PAYMONGO-WEBHOOK-REJECTED] Path={Path} | Reason=InvalidSignature | HasSig={HasSig}",

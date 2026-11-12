@@ -87,6 +87,7 @@ public sealed class PaymentExpirationWorker : BackgroundService
 
         // Identify the newest attempt per OrderId so any older superseded attempt is automatically expired
         Dictionary<string, string> latestAttemptIdByOrder = nonTerminal
+            .Where(a => a.Status is not PaymentAttemptStatus.Processing && !PaymentAttemptStateMachine.IsTerminal(a.Status))
             .GroupBy(a => a.OrderId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 g => g.Key,
@@ -104,6 +105,17 @@ public sealed class PaymentExpirationWorker : BackgroundService
             }
 
             inspected++;
+
+            // Strict exclusion of Processing and Terminal states (F8 / R3)
+            if (attempt.Status is PaymentAttemptStatus.Processing ||
+                PaymentAttemptStateMachine.IsTerminal(attempt.Status))
+            {
+                _logger.LogInformation(
+                    "[PAYMONGO-WORKER-SKIP] Skipping attempt {AttemptId} in non-sweepable status {Status}",
+                    attempt.Id,
+                    attempt.Status);
+                continue;
+            }
 
             double remainingSeconds = attempt.ExpiresAt.HasValue
                 ? (attempt.ExpiresAt.Value - nowUtc).TotalSeconds
@@ -179,9 +191,10 @@ public sealed class PaymentExpirationWorker : BackgroundService
                                     amountMinor: attempt.Amount.AmountMinor,
                                     currency: attempt.Amount.CurrencyCode,
                                     paymentMethod: methodUsed,
-                                    customerName: "Valued Customer",
+                                    customerName: string.Empty,
                                     customerEmail: string.Empty,
-                                    paidAtUtc: paidAt);
+                                    paidAtUtc: paidAt,
+                                    metadataJson: order.MetadataJson);
 
                                 await outboxPublisher.PublishOrderPaidAsync(
                                     paidEvent,
@@ -251,6 +264,19 @@ public sealed class PaymentExpirationWorker : BackgroundService
                             "[PAYMONGO-WORKER-DEFER] Attempt {AttemptId} reached deadline but remote is 'processing'. Deferring.",
                             attempt.Id);
                         continue;
+                    }
+
+                    // Case E: Active session with recoverable source/QR notice (e.g. qrph_source_expired)
+                    if (!isDeadlineReached && remoteStatus is "awaiting_next_action" or "active" or "pending")
+                    {
+                        if (!string.IsNullOrWhiteSpace(statusResult.Value.FailureCode) || attempt.FailureCode is not null)
+                        {
+                            attempt.RecordRecoverableNotice(
+                                statusResult.Value.FailureCode,
+                                statusResult.Value.FailureMessage,
+                                nowUtc);
+                            await attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
+                        }
                     }
                 }
             }

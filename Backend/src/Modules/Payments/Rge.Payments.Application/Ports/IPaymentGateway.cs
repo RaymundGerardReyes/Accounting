@@ -13,7 +13,10 @@ public sealed record CreateCheckoutSessionRequest(
     string? CustomerName,
     string? CustomerEmail,
     string? CustomerPhone,
-    IReadOnlyList<CheckoutLineItemDto> LineItems);
+    IReadOnlyList<CheckoutLineItemDto> LineItems,
+    string? SuccessUrl = null,
+    string? CancelUrl = null,
+    string? PaymentAttemptId = null);
 
 public sealed record CheckoutLineItemDto(
     string Name,

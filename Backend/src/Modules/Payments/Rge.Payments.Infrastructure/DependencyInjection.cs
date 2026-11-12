@@ -52,6 +52,34 @@ public static class DependencyInjection
                 {
                     options.WebhookSecret = webhookSecret;
                 }
+
+                string? envSuccess = configuration["PAYMONGO_SUCCESS_URL"] ?? configuration["PayMongo:SuccessUrl"];
+                if (!string.IsNullOrWhiteSpace(envSuccess))
+                {
+                    options.SuccessUrl = envSuccess;
+                }
+                else
+                {
+                    string? appUrl = configuration["NEXT_PUBLIC_APP_URL"] ?? configuration["APP_URL"];
+                    if (!string.IsNullOrWhiteSpace(appUrl))
+                    {
+                        options.SuccessUrl = $"{appUrl.TrimEnd('/')}/payment/return";
+                    }
+                }
+
+                string? envCancel = configuration["PAYMONGO_CANCEL_URL"] ?? configuration["PayMongo:CancelUrl"];
+                if (!string.IsNullOrWhiteSpace(envCancel))
+                {
+                    options.CancelUrl = envCancel;
+                }
+                else
+                {
+                    string? appUrl = configuration["NEXT_PUBLIC_APP_URL"] ?? configuration["APP_URL"];
+                    if (!string.IsNullOrWhiteSpace(appUrl))
+                    {
+                        options.CancelUrl = $"{appUrl.TrimEnd('/')}/checkout";
+                    }
+                }
             }
         });
 

@@ -202,7 +202,7 @@ public sealed class PaymentAttemptRepository : IPaymentAttemptRepository
         catch (Exception ex) when (ex is DbException or InvalidOperationException)
         {
             return MemoryById.Values
-                .Where(a => !PaymentAttemptStateMachine.IsTerminal(a.Status))
+                .Where(a => a.Status is PaymentAttemptStatus.Pending or PaymentAttemptStatus.RequiresAction)
                 .OrderBy(a => a.CreatedAt)
                 .ToList();
         }
@@ -248,11 +248,34 @@ public sealed class PaymentAttemptRepository : IPaymentAttemptRepository
 
     private static void IndexInMemory(PaymentAttempt attempt)
     {
-        MemoryById[attempt.Id] = attempt;
-        MemoryByIdempotency[attempt.IdempotencyKey] = attempt;
+        MemoryById.AddOrUpdate(
+            attempt.Id,
+            attempt,
+            (_, existing) =>
+                existing.Status == PaymentAttemptStatus.Succeeded &&
+                attempt.Status != PaymentAttemptStatus.Succeeded
+                    ? existing
+                    : attempt);
+
+        MemoryByIdempotency.AddOrUpdate(
+            attempt.IdempotencyKey,
+            attempt,
+            (_, existing) =>
+                existing.Status == PaymentAttemptStatus.Succeeded &&
+                attempt.Status != PaymentAttemptStatus.Succeeded
+                    ? existing
+                    : attempt);
+
         if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId))
         {
-            MemoryByProviderId[attempt.ProviderPaymentId] = attempt;
+            MemoryByProviderId.AddOrUpdate(
+                attempt.ProviderPaymentId,
+                attempt,
+                (_, existing) =>
+                    existing.Status == PaymentAttemptStatus.Succeeded &&
+                    attempt.Status != PaymentAttemptStatus.Succeeded
+                        ? existing
+                        : attempt);
         }
     }
 

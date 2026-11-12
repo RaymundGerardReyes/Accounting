@@ -112,9 +112,10 @@ public sealed class ReconcileOneHandler : ICommandHandler<ReconcileOneCommand, R
                     amountMinor: order.Amount.AmountMinor,
                     currency: order.Amount.CurrencyCode,
                     paymentMethod: attempt.PaymentMethod,
-                    customerName: "Valued Customer",
+                    customerName: string.Empty,
                     customerEmail: string.Empty,
-                    paidAtUtc: paidAt);
+                    paidAtUtc: paidAt,
+                    metadataJson: order.MetadataJson);
 
                 await _outboxWriter.EnqueueAsync(paidEvent, cancellationToken).ConfigureAwait(false);
             }

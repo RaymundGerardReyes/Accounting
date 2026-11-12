@@ -126,6 +126,20 @@ public sealed class PaymentAttempt : Entity<string>
         return Result.Success();
     }
 
+    public Result MarkProcessing(DateTimeOffset nowUtc)
+    {
+        var transition = PaymentAttemptStateMachine.Transition(Id, Status, PaymentAttemptStatus.Processing);
+        if (transition.IsFailure)
+        {
+            return transition;
+        }
+
+        Status = transition.Value;
+        UpdatedAt = nowUtc;
+
+        return Result.Success();
+    }
+
     public Result MarkSucceeded(DateTimeOffset paidAtUtc, string? actualPaymentMethod = null)
     {
         var transition = PaymentAttemptStateMachine.Transition(Id, Status, PaymentAttemptStatus.Succeeded);
@@ -137,6 +151,8 @@ public sealed class PaymentAttempt : Entity<string>
         Status = transition.Value;
         PaidAt = paidAtUtc;
         UpdatedAt = paidAtUtc;
+        FailureCode = null;
+        FailureMessage = null;
 
         if (!string.IsNullOrWhiteSpace(actualPaymentMethod))
         {
@@ -144,6 +160,18 @@ public sealed class PaymentAttempt : Entity<string>
         }
 
         return Result.Success();
+    }
+
+    public void RecordRecoverableNotice(string? failureCode, string? failureMessage, DateTimeOffset nowUtc)
+    {
+        if (PaymentAttemptStateMachine.IsTerminal(Status))
+        {
+            return;
+        }
+
+        FailureCode = failureCode;
+        FailureMessage = failureMessage;
+        UpdatedAt = nowUtc;
     }
 
     public Result MarkFailed(string failureCode, string failureMessage, DateTimeOffset nowUtc)
@@ -162,7 +190,7 @@ public sealed class PaymentAttempt : Entity<string>
         return Result.Success();
     }
 
-    public Result MarkExpired(DateTimeOffset nowUtc)
+    public Result MarkExpired(DateTimeOffset nowUtc, string? failureCode = null, string? failureMessage = null)
     {
         var transition = PaymentAttemptStateMachine.Transition(Id, Status, PaymentAttemptStatus.Expired);
         if (transition.IsFailure)
@@ -171,8 +199,8 @@ public sealed class PaymentAttempt : Entity<string>
         }
 
         Status = transition.Value;
-        FailureCode = "SESSION_EXPIRED";
-        FailureMessage = "Checkout session expired before payment completion.";
+        FailureCode = failureCode ?? "SESSION_EXPIRED";
+        FailureMessage = failureMessage ?? "Checkout session expired before payment completion.";
         UpdatedAt = nowUtc;
 
         return Result.Success();

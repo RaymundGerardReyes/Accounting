@@ -13,13 +13,25 @@ public static class AttemptQueries
             @failure_code, @failure_message, @expires_at, @paid_at, @created_at, @updated_at
         )
         ON CONFLICT (id) DO UPDATE SET
-            status = EXCLUDED.status,
+            status = CASE
+                WHEN LOWER(payment_attempts.status) = 'succeeded' THEN payment_attempts.status
+                ELSE EXCLUDED.status
+            END,
             provider_payment_id = COALESCE(EXCLUDED.provider_payment_id, payment_attempts.provider_payment_id),
-            checkout_url = EXCLUDED.checkout_url,
-            failure_code = EXCLUDED.failure_code,
-            failure_message = EXCLUDED.failure_message,
+            checkout_url = COALESCE(EXCLUDED.checkout_url, payment_attempts.checkout_url),
+            failure_code = CASE
+                WHEN LOWER(payment_attempts.status) = 'succeeded' THEN payment_attempts.failure_code
+                ELSE EXCLUDED.failure_code
+            END,
+            failure_message = CASE
+                WHEN LOWER(payment_attempts.status) = 'succeeded' THEN payment_attempts.failure_message
+                ELSE EXCLUDED.failure_message
+            END,
             expires_at = EXCLUDED.expires_at,
-            paid_at = EXCLUDED.paid_at,
+            paid_at = CASE
+                WHEN LOWER(payment_attempts.status) = 'succeeded' THEN COALESCE(payment_attempts.paid_at, EXCLUDED.paid_at)
+                ELSE EXCLUDED.paid_at
+            END,
             updated_at = EXCLUDED.updated_at;
         """;
 
@@ -62,7 +74,7 @@ public static class AttemptQueries
                amount_minor, currency, status, idempotency_key, checkout_url,
                failure_code, failure_message, expires_at, paid_at, created_at, updated_at
         FROM payment_attempts
-        WHERE status NOT IN ('succeeded', 'failed', 'cancelled', 'expired')
+        WHERE LOWER(status) IN ('pending', 'requiresaction', 'requires_action')
         ORDER BY created_at ASC;
         """;
 }

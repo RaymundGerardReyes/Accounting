@@ -2,6 +2,7 @@ using System.Text.Json;
 using Rge.BuildingBlocks.Application.Abstractions;
 using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Payments.Application.Webhooks.ProcessWebhookEvent;
+using Rge.Payments.Domain.Errors;
 
 namespace Rge.Payments.Application.Webhooks.ReceivePayMongoWebhook;
 
@@ -17,7 +18,13 @@ public sealed class ReceivePayMongoWebhookHandler : ICommandHandler<ReceivePayMo
         "payment.paid",
         "payment.failed",
         "checkout_session.expired",
-        "qr_code.expired"
+        "qr_code.expired",
+        "qrph.expired",
+        "qr.paid",
+        "qr.expired",
+        "source.chargeable",
+        "payment.refunded",
+        "payment.refund.updated"
     };
 
     private readonly ProcessWebhookEventHandler? _processHandler;
@@ -48,18 +55,28 @@ public sealed class ReceivePayMongoWebhookHandler : ICommandHandler<ReceivePayMo
             using JsonDocument doc = JsonDocument.Parse(command.RawJsonBody);
             JsonElement root = doc.RootElement;
 
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return Result.Failure<WebhookAckResponse>(PaymentErrors.InvalidWebhookPayload);
+            }
+
             if (!root.TryGetProperty("data", out JsonElement dataElement) ||
+                dataElement.ValueKind != JsonValueKind.Object ||
                 !dataElement.TryGetProperty("id", out JsonElement idElement))
             {
                 return Result.Failure<WebhookAckResponse>(
                     Error.Validation("Webhooks.MalformedEnvelope", "Missing 'data.id' in PayMongo webhook payload."));
             }
 
-            string providerEventId = idElement.GetString() ?? string.Empty;
+            string providerEventId = idElement.ValueKind == JsonValueKind.String
+                ? (idElement.GetString() ?? string.Empty)
+                : string.Empty;
             string eventType = "unknown";
 
             if (dataElement.TryGetProperty("attributes", out JsonElement attrsElement) &&
-                attrsElement.TryGetProperty("type", out JsonElement typeElement))
+                attrsElement.ValueKind == JsonValueKind.Object &&
+                attrsElement.TryGetProperty("type", out JsonElement typeElement) &&
+                typeElement.ValueKind == JsonValueKind.String)
             {
                 eventType = typeElement.GetString() ?? "unknown";
             }
@@ -101,6 +118,10 @@ public sealed class ReceivePayMongoWebhookHandler : ICommandHandler<ReceivePayMo
         {
             return Result.Failure<WebhookAckResponse>(
                 Error.Validation("Webhooks.InvalidJson", "Webhook payload is not valid JSON."));
+        }
+        catch (InvalidOperationException)
+        {
+            return Result.Failure<WebhookAckResponse>(PaymentErrors.InvalidWebhookPayload);
         }
     }
 }
