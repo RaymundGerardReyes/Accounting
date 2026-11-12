@@ -78,8 +78,81 @@ flowchart TD
 - `PollAndReconcileHandler.cs` uses a `3-second` gateway cooldown window (`CooldownWindow = TimeSpan.FromSeconds(3)`) and bypasses the cooldown whenever `ForceReconcile` or `ClientReportedRedirectStatus` is present.
 - `use-paymongo-realtime-sync.ts` sends `POST /api/v1/payments/{id}/poll?auto_reconcile=true` on scheduled 3-second intervals and appends `&force_reconcile=true` on `mount_or_reload`, `window_focus`, `tab_visibility_visible`, `manual_debug_button`, and `countdown_reached_zero`.
 
-### 4.2 Authoritative `/checkout` URL Hydration
+### 4.2 Authoritative `/checkout` URL Hydration & Cancel Redirect Handling
 - When navigating to `/checkout?order_id={orderId}` or `/checkout?order_id={orderId}&attempt_id={attemptId}`:
   - `Frontend/app/checkout/page.tsx` fetches `GET /api/v1/orders/{orderId}` and inspects `data.latest_attempt` and `data.attempts`.
   - If a cached `sessionStorage` attempt (`rge_checkout_attempt_${orderId}`) is already terminal (`expired`, `failed`, `cancelled`) or past its `expires_at` timestamp, it is automatically evicted so the customer is never trapped on a locked session.
   - While an attempt is in `RequiresAction` (including when `failureCode === "qrph_source_expired"`), `PayMongoCheckoutGuard` displays a recoverable notice, keeps the **Open PayMongo Gateway** button active while time remains, and offers a **Change Payment Method or Start New Checkout Session** action.
+- **Cancel Redirect (`?cancelled=true`) & Abandoned Session Cleanup**:
+  - When a customer clicks Back/Cancel on PayMongo and returns to `/checkout?order_id={orderId}&cancelled=true`, `checkout/page.tsx` passes `clientReportedRedirectStatus="cancelled"` to `PayMongoCheckoutGuard` and `usePayMongoRealtimeSync`.
+  - `usePayMongoRealtimeSync` appends `&client_reported_redirect_status=cancelled` to `POST /api/v1/payments/{id}/poll`.
+  - `PollAndReconcileHandler` queries PayMongo first (preventing a spoofed redirect from overwriting a paid session) and, if unpaid, transitions the attempt to `Failed` (`source_cancelled`) and calls `ExpireCheckoutSessionAsync(cs_...)` (`POST /v1/checkout_sessions/{cs_id}/expire`).
+  - Similarly, when the customer clicks **Change Payment Method or Start New Checkout Session** (`handleResetAttempt`) or initiates a new payment attempt on the same order (`InitiateAttemptHandler`), any prior non-terminal attempt is superseded/expired locally and on PayMongo (`superseded_by_new_attempt`) so `PaymentExpirationWorker` stops polling abandoned sessions.
+
+---
+
+## 5. Interpret Resources Separately (`cs_...`, `pi_...`, `src_...`)
+
+Production logs (`2026-11-12T11:40:24Z` to `11:42:14Z`) demonstrated two separate contexts when a child QR/source expires inside an active Checkout Session:
+
+| Resource | Production Example | State | Meaning |
+| :--- | :--- | :--- | :--- |
+| **QR / Source Payment Resource** | `src_trsEs5mZdwDDb2UwWyQ91goT` / `src_2d7NdAhpYZEwsNaqDb1qjw4T` | `expired` | That specific payment source / QR code is no longer usable |
+| **Payment Intent** | `pi_rZHtZVfLp1kSXf9FEK3gcbKW` / `pi_sBTzFzg7tcZZhN44MSQoTEvD` | `awaiting_next_action` | Waiting for customer authorization or retry |
+| **Checkout Session** | `cs_1c368511968843ba195aedd8` / `cs_d82fafa0fd3d9d5aaa9e8ad2` | `active` | Hosted checkout remains open and can accept a retry |
+| **Hosted URL** | `https://checkout.paymongo.com/1c368511968843ba195aedd8` | Still opens | Expected while the Checkout Session remains `active` |
+
+### 5.1 Why the PayMongo-Hosted Checkout Page Can Still Show a Timer
+- **Merchant Application Context**: The backend polls `GET /v1/checkout_sessions/{cs_id}` and `GET /v1/sources/{src_id}`, observes `src_status=expired` while `cs_status=active`, records `qrph_source_expired`, and renders a recoverable notice in the merchant UI.
+- **PayMongo-Hosted Context (`checkout.paymongo.com`)**: PayMongo controls the hosted checkout page DOM and its displayed timer. A backend `GET /v1/sources/{src_id}` retrieval is a read operation—it does not remotely close or mutate the customer's open `checkout.paymongo.com` tab. Only calling `POST /v1/checkout_sessions/{cs_id}/expire` expires the hosted session on PayMongo.
+
+---
+
+## 6. Why Backend Polling Does Not Create PayMongo Webhook Deliveries
+
+1. **Outbound Pull vs. Inbound Push**:
+   - Backend logs showing `GET https://api.paymongo.com/v1/checkout_sessions/cs_...` and `GET https://api.paymongo.com/v1/sources/src_...` are outbound REST queries initiated by the merchant server.
+   - Outbound `GET` requests never create entries in PayMongo's **Webhook Deliveries** dashboard and never populate `GET /api/v1/admin/webhook-events`.
+2. **Webhook Events Reference Matrix**:
+
+| Event | Meaning |
+| :--- | :--- |
+| `checkout_session.payment.paid` | Hosted Checkout Session payment succeeded |
+| `payment.paid` | Payment succeeded |
+| `payment.failed` | Payment failed |
+| `source.chargeable` | E-wallet / source authorized and ready to be charged |
+| `qrph.expired` | QR Ph code expired before payment was completed |
+| `qr.paid` / `qr.expired` | Dynamic QR payment paid / expired |
+| *(Checkout Session expiry)* | **No webhook sent by PayMongo** — record from the Expire endpoint response |
+
+---
+
+## 7. Webhook Subscription Verification & Diagnostics
+
+When PayMongo's dashboard shows **No event deliveries found** and `GET /api/v1/admin/webhook-events` returns `[]` (`bytes=2`), verify:
+1. **Test vs. Live Mode Separation**: A `test` mode transaction (`sk_test_...`, `livemode: false`) only triggers `test` webhooks; a `live` mode transaction (`sk_live_...`, `livemode: true`) only triggers `live` webhooks.
+2. **Subscribed Events List**: Ensure the registered webhook includes all canonical events:
+   - `checkout_session.payment.paid`
+   - `payment.paid`
+   - `payment.failed`
+   - `source.chargeable`
+   - `qrph.expired`
+3. **Diagnostic & Auto-Setup Endpoints**:
+   - `GET /api/v1/admin/webhooks/paymongo/status`: Queries `GET https://api.paymongo.com/v1/webhooks` and reports `key_mode` (`test` vs `live`), `target_url`, registered webhooks, `mode_matches_key`, and `missing_canonical_events`.
+   - `POST /api/v1/admin/webhooks/paymongo/setup`: Creates or updates (`PUT /v1/webhooks/{id}`) the domain's webhook so all 5 canonical events (`checkout_session.payment.paid`, `payment.paid`, `payment.failed`, `source.chargeable`, `qrph.expired`) are subscribed and enabled.
+
+---
+
+## 8. 10-Step Transaction Diagnostic Procedure
+
+To audit any transaction (`cs_...`, `pi_...`, `src_...`) end-to-end:
+1. Retrieve `GET https://api.paymongo.com/v1/checkout_sessions/{cs_id}` and record `data.attributes.status` (`active`, `expired`, `paid`) and `data.attributes.livemode`.
+2. Retrieve `GET https://api.paymongo.com/v1/payment_intents/{pi_id}` and record `data.attributes.status` and `last_payment_error`.
+3. Retrieve `GET https://api.paymongo.com/v1/sources/{src_id}` and record `data.attributes.status` and `created_at` / `updated_at`.
+4. Confirm all three IDs belong to the same transaction chain (`cs_...` -> `pi_...` -> `src_...`).
+5. Retrieve `GET https://api.paymongo.com/v1/webhooks` (or call `GET /api/v1/admin/webhooks/paymongo/status`).
+6. Confirm a webhook exists in the same `livemode` (`test` vs `live`) as the transaction.
+7. Confirm the webhook `status` is `enabled` and its `url` points to `https://<host>/api/v1/webhooks/paymongo`.
+8. Confirm `events` includes `qrph.expired` (for QR expiry notifications) and `checkout_session.payment.paid` / `payment.paid` / `payment.failed` / `source.chargeable`.
+9. Trigger a controlled test event in the same mode and verify `POST /api/v1/webhooks/paymongo` logs `[PAYMONGO-WEBHOOK-INBOUND]`.
+10. Verify `GET /api/v1/admin/webhook-events` returns the persisted event row rather than `[]`.
