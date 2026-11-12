@@ -66,14 +66,21 @@ PayMongo sends `Paymongo-Signature: t=<timestamp>,te=<test_signature>,li=<live_s
   - Heroku Postgres add-ons export `DATABASE_URL=postgres://...`. In `Backend/database.py`, always normalize `postgres://` to `postgresql://` for SQLAlchemy 2.0.
 
 ## 8. Multi-Channel Payment Method Selection & `payment_method_types` Array Mapping
-- **Channel Specificity**:
-  - When initiating a checkout session, never hardcode a static array of payment methods. Map the user's selected channel dynamically via `resolve_paymongo_payment_method_types(payment_method)`.
-  - Canonical PayMongo Checkout Sessions API types:
-    - `card`: `["card"]` (opens Credit / Debit Card form directly)
-    - `gcash_maya`: `["gcash", "paymaya"]` (opens GCash & Maya e-wallet authorization)
-    - `dob`: `["dob"]` (opens Direct Online Banking for BPI & UnionBank)
-    - `qrph`: `["qrph"]` (opens National QR Ph standard)
-    - `hosted_checkout`: `["card", "gcash", "paymaya", "dob", "qrph"]` (renders full multi-channel suite with Card & E-Wallets leading so customers are never defaulted exclusively to QR Ph)
+- **Customer-Facing 4-Option Taxonomy (`Frontend/app/checkout/page.tsx` & `PayMongoClient.MapPaymentMethodTypes`)**:
+  - Always present four explicit, non-overlapping customer-facing payment method options and map them cleanly to PayMongo `payment_method_types`:
+    - `qrph` (**QR Ph — Scan to Pay**): `["qrph"]` — *"Scan the QR code using GCash, Maya, or another supported bank/e-wallet app."*
+    - `gcash` (**GCash — E-wallet**): `["gcash"]` — *"Continue to GCash to authorize your payment."*
+    - `paymaya` (**Maya — E-wallet**): `["paymaya"]` — *"Continue to Maya to authorize your payment."*
+    - `card` (**Credit / Debit Card**): `["card"]` — *"Pay using an eligible Visa or Mastercard."*
+  - Legacy aliases:
+    - `gcash_maya`: `["gcash", "paymaya"]` (backward compatibility only; never combine GCash and Maya into a single `"gcash"` button in customer-facing UI)
+    - `dob`: `["dob", "dob_ubp"]`
+    - `hosted_checkout`: `["qrph", "card", "gcash", "paymaya", "dob", "dob_ubp"]`
+- **QR Source Expiry vs. Checkout Session Expiry Separation (`PayMongoClient.cs` & `PaymentExpirationWorker.cs`)**:
+  - Inside an active Checkout Session (`cs_...` with `cs_status == "active"` and before `attempt.ExpiresAt`), a child QR Ph / source (`src_...`) expiring (`src_status == "expired"` or `pi_status` returning from `awaiting_next_action` to `awaiting_payment_method` without `last_payment_error`) is a **recoverable payment-method timeout** (`Status = "awaiting_next_action"`, `FailureCode = "qrph_source_expired"`), NOT a terminal Checkout Session expiration.
+  - Never mark an active `cs_...` `PaymentAttempt` as `Expired` or call `ExpireCheckoutSessionAsync(cs_...)` solely because its child `src_...` expired while the parent Checkout Session remains active.
+- **Active `/poll` Reconciliation Default (`GetPaymentEndpoint.cs` & `use-paymongo-realtime-sync.ts`)**:
+  - `POST /api/v1/payments/{payment_id}/poll` MUST default `auto_reconcile` to `true`, and `use-paymongo-realtime-sync.ts` must pass `?auto_reconcile=true` (plus `&force_reconcile=true` on mount, window focus, tab visibility, and manual verify triggers) so `/poll` actively queries PayMongo instead of returning a cached DB row.
 - **Simulator Parity**:
   - In `Frontend/app/payment/sandbox/[attemptId]/page.tsx`, ensure `initialMethod` handles compound keys like `gcash_maya` (mapping to `"gcash"`) and renders a prominent badge displaying the channel selected at checkout.
 
