@@ -236,16 +236,27 @@ public sealed class PaymentExpirationWorker : BackgroundService
                         continue;
                     }
 
-                    // Case C: EXPIRED / CANCELLED on PayMongo
+                    // Case C: EXPIRED / CANCELLED on PayMongo — or an abandoned QR/source whose
+                    // Checkout Session is still remotely active (code=qrph_source_expired).
                     if (remoteStatus is "expired" or "cancelled")
                     {
+                        string? expireCode = statusResult.Value.FailureCode;
+                        bool remoteSessionStillActive = string.Equals(expireCode, "qrph_source_expired", StringComparison.OrdinalIgnoreCase);
+
                         _logger.LogInformation(
-                            "[PAYMONGO-WORKER-EXPIRED-DETECTED] Remote session cs_id={CsId} is already '{RemoteStatus}'. Marking local attempt {AttemptId} Expired.",
+                            "[PAYMONGO-WORKER-EXPIRED-DETECTED] cs_id={CsId} is '{RemoteStatus}' (code={Code}, close_remote={CloseRemote}). Marking local attempt {AttemptId} Expired.",
                             attempt.ProviderPaymentId,
                             remoteStatus,
+                            expireCode ?? "none",
+                            remoteSessionStillActive,
                             attempt.Id);
 
-                        if (attempt.MarkExpired(nowUtc).IsSuccess)
+                        if (remoteSessionStillActive)
+                        {
+                            _ = await gateway.ExpireCheckoutSessionAsync(attempt.ProviderPaymentId, cancellationToken).ConfigureAwait(false);
+                        }
+
+                        if (attempt.MarkExpired(nowUtc, expireCode, statusResult.Value.FailureMessage).IsSuccess)
                         {
                             await attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
                             transitionedCount++;

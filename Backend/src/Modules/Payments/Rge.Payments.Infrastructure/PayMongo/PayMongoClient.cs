@@ -20,6 +20,16 @@ public sealed class PayMongoClient : IPaymentGateway
     private static readonly ConcurrentDictionary<string, bool> ObservedAwaitingNextActionSessions =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// First time (UTC) a given "cs_id|src_id" pair was observed with src_status=expired while the
+    /// Checkout Session was still active. Drives the SourceExpiryGraceSeconds abandonment rule.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, DateTimeOffset> SourceExpiryFirstSeen =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Clears source-expiry grace tracking (used by deterministic tests).</summary>
+    public static void ResetSourceExpiryTracking() => SourceExpiryFirstSeen.Clear();
+
     private readonly HttpClient _httpClient;
     private readonly PayMongoOptions _options;
     private readonly ILogger<PayMongoClient> _logger;
@@ -465,6 +475,11 @@ public sealed class PayMongoClient : IPaymentGateway
                 srcId,
                 srcStatus);
 
+            if (srcStatus is not "expired")
+            {
+                SourceExpiryFirstSeen.TryRemove($"{sessionData.Id}|{srcId}", out _);
+            }
+
             if (srcStatus is "cancelled")
             {
                 ObservedAwaitingNextActionSessions.TryRemove(sessionData.Id, out _);
@@ -485,6 +500,49 @@ public sealed class PayMongoClient : IPaymentGateway
                 string sessionStatus = (attrs.Status ?? string.Empty).Trim().ToLowerInvariant();
                 if (sessionStatus is "active")
                 {
+                    // The Payment Intent is still bound to the dead source when it has NOT been reset to
+                    // awaiting_payment_method. In that state nothing on PayMongo's side will ever change by
+                    // itself (production logs showed 7+ minutes of identical polls), so after a short grace
+                    // window we treat the attempt as abandoned instead of polling until the 30-minute deadline.
+                    string piStatusNow = (attrs.PaymentIntent?.Attributes?.Status ?? string.Empty).Trim().ToLowerInvariant();
+                    bool intentStillBoundToDeadSource = piStatusNow is "" or "awaiting_next_action";
+
+                    string trackingKey = $"{sessionData.Id}|{srcId}";
+                    DateTimeOffset nowUtc = DateTimeOffset.UtcNow;
+                    DateTimeOffset firstSeenUtc = SourceExpiryFirstSeen.GetOrAdd(trackingKey, nowUtc);
+                    TimeSpan grace = TimeSpan.FromSeconds(Math.Max(0, _options.SourceExpiryGraceSeconds));
+                    TimeSpan elapsed = nowUtc - firstSeenUtc;
+
+                    if (intentStillBoundToDeadSource && elapsed >= grace)
+                    {
+                        SourceExpiryFirstSeen.TryRemove(trackingKey, out _);
+
+                        _logger.LogWarning(
+                            "[PAYMONGO-SOURCE-ABANDONED] cs_id={CsId} | pi_id={PiId} | src_id={SrcId} | pi_status={PiStatus} | expired_for_sec={Elapsed:F0} | grace_sec={Grace:F0} => closing session",
+                            sessionData.Id,
+                            piId ?? "none",
+                            srcId,
+                            piStatusNow,
+                            elapsed.TotalSeconds,
+                            grace.TotalSeconds);
+
+                        return new GatewayPaymentStatusResult(
+                            ProviderPaymentId: sessionData.Id,
+                            Status: "expired",
+                            PaymentMethodUsed: attrs.PaymentMethodUsed ?? srcEnvelope?.Data?.Attributes?.SourceType,
+                            PaidAtUtc: null,
+                            FailureCode: "qrph_source_expired",
+                            FailureMessage: $"QR code {srcId} expired and was not replaced within {grace.TotalSeconds:F0}s. Checkout Session {sessionData.Id} has been closed — start a new checkout to pay.");
+                    }
+
+                    _logger.LogInformation(
+                        "[PAYMONGO-SOURCE-GRACE] cs_id={CsId} | src_id={SrcId} | pi_status={PiStatus} | expired_for_sec={Elapsed:F0} | grace_sec={Grace:F0}",
+                        sessionData.Id,
+                        srcId,
+                        piStatusNow,
+                        elapsed.TotalSeconds,
+                        grace.TotalSeconds);
+
                     return new GatewayPaymentStatusResult(
                         ProviderPaymentId: sessionData.Id,
                         Status: "awaiting_next_action",

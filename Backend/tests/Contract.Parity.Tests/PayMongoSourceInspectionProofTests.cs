@@ -217,7 +217,9 @@ public sealed class PayMongoSourceInspectionProofTests
     }
     """;
 
-    private static (PayMongoClient Client, HttpClient HttpClient) CreateClient(MockHttpMessageHandler handler)
+    private static (PayMongoClient Client, HttpClient HttpClient) CreateClient(
+        MockHttpMessageHandler handler,
+        int sourceExpiryGraceSeconds = 30)
     {
         var httpClient = new HttpClient(handler, disposeHandler: false)
         {
@@ -229,16 +231,69 @@ public sealed class PayMongoSourceInspectionProofTests
             BaseUrl = "https://api.paymongo.com/v1/",
             SecretKey = "sk_test_authentic_proof_key_12345",
             SuccessUrl = "http://localhost:3000/payment/return",
-            CancelUrl = "http://localhost:3000/checkout"
+            CancelUrl = "http://localhost:3000/checkout",
+            SourceExpiryGraceSeconds = sourceExpiryGraceSeconds
         });
 
         return (new PayMongoClient(httpClient, options, NullLogger<PayMongoClient>.Instance), httpClient);
     }
 
     [Fact]
+    public async Task GetCheckoutSessionStatus_WhenSourceExpiredAndGraceZero_ClosesAbandonedSessionAsExpired()
+    {
+        PayMongoClient.ResetSourceExpiryTracking();
+        const string csId = "cs_test_active_awaiting_action";
+        const string srcId = "src_ba7hPZAKRbxYVCFXT7LFao9q";
+
+        using var handler = new MockHttpMessageHandler();
+        handler
+            .MapRoute($"checkout_sessions/{csId}", HttpStatusCode.OK, ActiveAwaitingNextActionSessionJson)
+            .MapRoute($"sources/{srcId}", HttpStatusCode.OK, SourceExpiredJson);
+
+        var (client, httpClient) = CreateClient(handler, sourceExpiryGraceSeconds: 0);
+        using (httpClient)
+        {
+            var result = await client.GetCheckoutSessionStatusAsync(csId);
+
+            Assert.True(result.IsSuccess);
+            Assert.Equal("expired", result.Value.Status);
+            Assert.Equal("qrph_source_expired", result.Value.FailureCode);
+            Assert.Contains(srcId, result.Value.FailureMessage, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public async Task GetCheckoutSessionStatus_WhenSourceStaysExpiredPastGrace_TransitionsFromRecoverableToExpired()
+    {
+        PayMongoClient.ResetSourceExpiryTracking();
+        const string csId = "cs_test_active_awaiting_action";
+        const string srcId = "src_ba7hPZAKRbxYVCFXT7LFao9q";
+
+        using var handler = new MockHttpMessageHandler();
+        handler
+            .MapRoute($"checkout_sessions/{csId}", HttpStatusCode.OK, ActiveAwaitingNextActionSessionJson)
+            .MapRoute($"sources/{srcId}", HttpStatusCode.OK, SourceExpiredJson);
+
+        var (client, httpClient) = CreateClient(handler, sourceExpiryGraceSeconds: 1);
+        using (httpClient)
+        {
+            var first = await client.GetCheckoutSessionStatusAsync(csId);
+            Assert.Equal("awaiting_next_action", first.Value.Status);
+            Assert.Equal("qrph_source_expired", first.Value.FailureCode);
+
+            await Task.Delay(TimeSpan.FromMilliseconds(1200));
+
+            var second = await client.GetCheckoutSessionStatusAsync(csId);
+            Assert.Equal("expired", second.Value.Status);
+            Assert.Equal("qrph_source_expired", second.Value.FailureCode);
+        }
+    }
+
+    [Fact]
     public async Task GetCheckoutSessionStatus_WhenUnderlyingSourceExpired_MaintainsActiveSessionWithRecoverableCode()
     {
         // Arrange
+        PayMongoClient.ResetSourceExpiryTracking();
         const string csId = "cs_test_active_awaiting_action";
         const string srcId = "src_ba7hPZAKRbxYVCFXT7LFao9q";
 

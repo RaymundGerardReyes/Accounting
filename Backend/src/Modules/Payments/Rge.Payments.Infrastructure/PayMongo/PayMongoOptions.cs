@@ -63,6 +63,16 @@ public sealed class PayMongoOptions
     }
 
     public int RequestTimeoutSeconds { get; set; } = 10;
+
+    /// <summary>
+    /// How long (seconds) a Checkout Session may sit with its Payment Intent still bound to an
+    /// EXPIRED QR/source (pi_status=awaiting_next_action + src_status=expired) before the backend
+    /// treats the attempt as abandoned, calls the Expire endpoint, and marks the attempt Expired.
+    /// If PayMongo replaces the source (new src_ id) or resets the intent to awaiting_payment_method
+    /// within this window, the session stays active. Set to 0 for immediate termination.
+    /// Env override: PayMongo__SourceExpiryGraceSeconds.
+    /// </summary>
+    public int SourceExpiryGraceSeconds { get; set; } = 30;
     public bool AllowTestWebhookSignatures { get; set; } = true;
 
     public static string SanitizeSecret(string? value)
