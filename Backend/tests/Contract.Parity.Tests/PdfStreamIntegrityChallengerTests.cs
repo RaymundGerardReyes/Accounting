@@ -287,7 +287,9 @@ public sealed class PdfStreamIntegrityChallengerTests
         byte[] secondCall = renderer.RenderOfficialReceiptPdf(receipt);
 
         Assert.NotNull(firstCall);
-        Assert.Same(firstCall, secondCall);
+        Assert.NotNull(secondCall);
+        Assert.NotSame(firstCall, secondCall);
+        Assert.Equal(firstCall, secondCall);
     }
 
     [Fact]
@@ -306,7 +308,9 @@ public sealed class PdfStreamIntegrityChallengerTests
             byte[] bytes2 = renderer.RenderOfficialReceiptPdf(receipt);
 
             Assert.NotNull(bytes1);
-            Assert.Same(bytes1, bytes2);
+            Assert.NotNull(bytes2);
+            Assert.NotSame(bytes1, bytes2);
+            Assert.Equal(bytes1, bytes2);
             Assert.Equal("%PDF-1.4", Encoding.ASCII.GetString(bytes1, 0, 8));
             renderedResults[receipt.Id] = bytes1;
         });

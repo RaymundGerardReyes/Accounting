@@ -252,7 +252,7 @@ public sealed class QuestPdfReceiptRendererHostileChallengerTests
     }
 
     [Fact]
-    public void RenderOfficialReceiptPdf_CacheHit_ReturnsExactSameReference()
+    public void RenderOfficialReceiptPdf_CacheHit_ReturnsDeterministicDefensiveCopy()
     {
         var renderer = new QuestPdfReceiptRenderer();
         var receipt = CreateReceipt();
@@ -260,7 +260,49 @@ public sealed class QuestPdfReceiptRendererHostileChallengerTests
         byte[] firstCall = renderer.RenderOfficialReceiptPdf(receipt);
         byte[] secondCall = renderer.RenderOfficialReceiptPdf(receipt);
 
-        Assert.Same(firstCall, secondCall);
+        Assert.NotNull(firstCall);
+        Assert.NotNull(secondCall);
+        Assert.NotSame(firstCall, secondCall);
+        Assert.Equal(firstCall, secondCall);
+    }
+
+    [Fact]
+    public void RenderOfficialReceiptPdf_ShouldReturnDefensiveCopy_PreventingCallerCacheCorruption()
+    {
+        // Arrange
+        var renderer = new QuestPdfReceiptRenderer();
+        OfficialReceipt receipt = CreateReceipt();
+
+        // Act
+        byte[] firstRender = renderer.RenderOfficialReceiptPdf(receipt);
+        byte originalFirstByte = firstRender[0];
+        firstRender[0] = 0x00; // Mutate returned array in-place
+
+        byte[] secondRender = renderer.RenderOfficialReceiptPdf(receipt);
+
+        // Assert
+        Assert.Equal(originalFirstByte, secondRender[0]);
+        Assert.Equal((byte)'%', secondRender[0]);
+    }
+
+    [Fact]
+    public void RenderOfficialReceiptPdf_WithHostileUnbrokenDescriptionAndDigest_ShouldNotThrowOrOverflow()
+    {
+        // Arrange
+        var renderer = new QuestPdfReceiptRenderer();
+        string unbrokenDescription = new string('A', 1200);
+        string longCustomerEmail = $"treasury.settlement.{new string('x', 90)}@rge-accounting-enterprise.com.ph";
+        OfficialReceipt receipt = CreateReceipt(
+            description: unbrokenDescription,
+            customerEmail: longCustomerEmail);
+
+        // Act
+        byte[] pdfBytes = renderer.RenderOfficialReceiptPdf(receipt);
+
+        // Assert
+        Assert.NotNull(pdfBytes);
+        Assert.True(pdfBytes.Length > 1024);
+        Assert.Equal("%PDF-1.4", Encoding.ASCII.GetString(pdfBytes, 0, 8));
     }
 
     // =========================================================================

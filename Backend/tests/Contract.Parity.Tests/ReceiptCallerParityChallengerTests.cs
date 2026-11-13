@@ -87,9 +87,11 @@ public sealed class ReceiptCallerParityChallengerTests
         string tail = Encoding.ASCII.GetString(pdfBytes, pdfBytes.Length - 15, 15);
         Assert.Contains("%%EOF", tail, StringComparison.Ordinal);
 
-        // Caching verification: second call returns identical reference
+        // Caching verification: second call returns defensive copy with identical bytes
         byte[] cachedBytes = renderer.RenderOfficialReceiptPdf(receipt);
-        Assert.Same(pdfBytes, cachedBytes);
+        Assert.NotNull(cachedBytes);
+        Assert.NotSame(pdfBytes, cachedBytes);
+        Assert.Equal(pdfBytes, cachedBytes);
     }
 
     [Fact]
@@ -104,7 +106,9 @@ public sealed class ReceiptCallerParityChallengerTests
             byte[] bytes2 = renderer.RenderOfficialReceiptPdf(receipt);
 
             Assert.NotNull(bytes1);
-            Assert.Same(bytes1, bytes2);
+            Assert.NotNull(bytes2);
+            Assert.NotSame(bytes1, bytes2);
+            Assert.Equal(bytes1, bytes2);
             Assert.Equal("%PDF-1.4", Encoding.ASCII.GetString(bytes1, 0, 8));
         });
     }
