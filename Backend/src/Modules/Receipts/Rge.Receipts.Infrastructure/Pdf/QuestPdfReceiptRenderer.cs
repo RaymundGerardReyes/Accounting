@@ -172,7 +172,7 @@ public sealed class QuestPdfReceiptRenderer : IPdfRenderer
 
     /// <summary>
     /// ZONE 02 — PAYMENT HERO
-    /// Clean left-aligned editorial layout without duplicate reference numbers.
+    /// Displays the hero amount and human-friendly Philippine Time confirmation.
     /// </summary>
     private static void ComposePaymentHero(IContainer container, ReceiptDocumentViewModel vm)
     {
@@ -194,15 +194,16 @@ public sealed class QuestPdfReceiptRenderer : IPdfRenderer
                     .FontSize(ReceiptDesignTokens.HeroTimestampSize)
                     .FontColor(ReceiptDesignTokens.SecondaryText));
 
-                text.Span("Payment confirmed  ·  Issued ");
-                text.Span(vm.FormattedIssuedAtPst);
+                text.Span("Payment confirmed  ·  ");
+                text.Span(vm.FormattedCustomerDateTime);
             });
         });
     }
 
     /// <summary>
     /// ZONE 03A — TRANSACTION REFERENCE PANEL
-    /// Dedicated primary reference panel with 8pt rounded corners and a 2x2 grid.
+    /// Displays customer-relevant references (Official Receipt No., Treasury Ack No., Order Number, Payment Method)
+    /// without exposing internal OrderId or PaymentAttemptId UUIDs.
     /// </summary>
     private static void ComposeTransactionReferencePanel(IContainer container, ReceiptDocumentViewModel vm)
     {
@@ -232,66 +233,69 @@ public sealed class QuestPdfReceiptRenderer : IPdfRenderer
                     row.RelativeItem().PaddingRight(8f)
                         .Element(c => AddMetadataField(c, "ORDER NUMBER", vm.OrderNumber));
                     row.RelativeItem().PaddingLeft(8f)
-                        .Element(c => AddMetadataField(c, "ORDER ID", vm.OrderId));
+                        .Element(c => AddMetadataField(c, "PAYMENT METHOD", vm.PaymentMethod));
                 });
             });
     }
 
     /// <summary>
-    /// ZONE 03B — PAYMENT & CUSTOMER INFORMATION
-    /// Distinct sections separated by whitespace and subtle horizontal dividers rather than nested cards.
+    /// ZONE 03B — PAYMENT DATE & CUSTOMER INFORMATION
+    /// Presents a single, unambiguous Philippine Time block alongside customer information.
     /// </summary>
     private static void ComposePartyAndPaymentDetails(IContainer container, ReceiptDocumentViewModel vm)
     {
-        container.Column(section =>
+        container.Row(row =>
         {
-            section.Spacing(12f);
-
-            section.Item().Row(row =>
+            // Payment Date & Time Column (Philippine Time only — no duplicate UTC timestamp)
+            row.RelativeItem().PaddingRight(12f).Column(payment =>
             {
-                // Payment Information Column
-                row.RelativeItem().PaddingRight(12f).Column(payment =>
+                payment.Item().PaddingBottom(6f).Text("PAYMENT DATE & TIME")
+                    .FontSize(ReceiptDesignTokens.SectionHeadingSize)
+                    .Bold()
+                    .FontColor(ReceiptDesignTokens.PrimaryText);
+
+                payment.Item().LineHorizontal(ReceiptDesignTokens.DividerThickness)
+                    .LineColor(ReceiptDesignTokens.Border);
+
+                payment.Item().PaddingTop(8f).Column(fields =>
                 {
-                    payment.Item().PaddingBottom(6f).Text("PAYMENT INFORMATION")
-                        .FontSize(ReceiptDesignTokens.SectionHeadingSize)
+                    fields.Item().Text(vm.FormattedPaymentDate)
+                        .FontSize(11f)
                         .Bold()
                         .FontColor(ReceiptDesignTokens.PrimaryText);
 
-                    payment.Item().LineHorizontal(ReceiptDesignTokens.DividerThickness)
-                        .LineColor(ReceiptDesignTokens.Border);
+                    fields.Item().PaddingTop(2f).Text(vm.FormattedPaymentTime)
+                        .FontSize(9.5f)
+                        .SemiBold()
+                        .FontColor(ReceiptDesignTokens.PrimaryText);
 
-                    payment.Item().PaddingTop(8f).Column(fields =>
-                    {
-                        fields.Spacing(6f);
-                        fields.Item().Element(c => AddMetadataField(c, "PAYMENT METHOD", vm.PaymentMethod));
-                        fields.Item().Element(c => AddMetadataField(c, "PAYMENT ATTEMPT ID", vm.PaymentAttemptId));
-                        fields.Item().Element(c => AddMetadataField(c, "ISSUED AT (LOCAL)", vm.FormattedIssuedAtPst));
-                        fields.Item().Element(c => AddMetadataField(c, "ISSUED AT (UTC)", vm.FormattedIssuedAtUtc));
-                    });
+                    fields.Item().PaddingTop(2f).Text(vm.FormattedTimeZoneLabel)
+                        .FontSize(ReceiptDesignTokens.MetadataLabelSize)
+                        .FontColor(ReceiptDesignTokens.SecondaryText);
+                });
+            });
+
+            // Customer Information Column
+            row.RelativeItem().PaddingLeft(12f).Column(customer =>
+            {
+                customer.Item().PaddingBottom(6f).Row(headerRow =>
+                {
+                    headerRow.AutoItem().Width(3f).Height(10f)
+                        .Background(ReceiptDesignTokens.Accent);
+                    headerRow.RelativeItem().PaddingLeft(6f).Text("CUSTOMER INFORMATION")
+                        .FontSize(ReceiptDesignTokens.SectionHeadingSize)
+                        .Bold()
+                        .FontColor(ReceiptDesignTokens.PrimaryText);
                 });
 
-                // Customer Information Column
-                row.RelativeItem().PaddingLeft(12f).Column(customer =>
+                customer.Item().LineHorizontal(ReceiptDesignTokens.DividerThickness)
+                    .LineColor(ReceiptDesignTokens.Border);
+
+                customer.Item().PaddingTop(8f).Column(fields =>
                 {
-                    customer.Item().PaddingBottom(6f).Row(headerRow =>
-                    {
-                        headerRow.AutoItem().Width(3f).Height(10f)
-                            .Background(ReceiptDesignTokens.Accent);
-                        headerRow.RelativeItem().PaddingLeft(6f).Text("CUSTOMER INFORMATION")
-                            .FontSize(ReceiptDesignTokens.SectionHeadingSize)
-                            .Bold()
-                            .FontColor(ReceiptDesignTokens.PrimaryText);
-                    });
-
-                    customer.Item().LineHorizontal(ReceiptDesignTokens.DividerThickness)
-                        .LineColor(ReceiptDesignTokens.Border);
-
-                    customer.Item().PaddingTop(8f).Column(fields =>
-                    {
-                        fields.Spacing(6f);
-                        fields.Item().Element(c => AddMetadataField(c, "RECEIVED FROM", vm.CustomerName));
-                        fields.Item().Element(c => AddMetadataField(c, "EMAIL ADDRESS", vm.CustomerEmail));
-                    });
+                    fields.Spacing(6f);
+                    fields.Item().Element(c => AddMetadataField(c, "RECEIVED FROM", vm.CustomerName));
+                    fields.Item().Element(c => AddMetadataField(c, "EMAIL ADDRESS", vm.CustomerEmail));
                 });
             });
         });
@@ -447,9 +451,8 @@ public sealed class QuestPdfReceiptRenderer : IPdfRenderer
     }
 
     /// <summary>
-    /// ZONE 05 — AUTHENTICATION AND VERIFICATION
-    /// Technical audit digest panel with safe wrapping for 64+ character SHA-256 hex strings
-    /// and exact preservation of the domain's legal compliance wording.
+    /// ZONE 05 — CUSTOMER CONFIRMATION & RECEIPT REFERENCE
+    /// Replaces the raw cryptographic SHA-256 dump with an understandable confirmation and short receipt reference.
     /// </summary>
     private static void ComposeAuthenticationSection(IContainer container, ReceiptDocumentViewModel vm)
     {
@@ -459,27 +462,40 @@ public sealed class QuestPdfReceiptRenderer : IPdfRenderer
             .BorderColor(ReceiptDesignTokens.Border)
             .CornerRadius(ReceiptDesignTokens.SecondaryPanelRadius)
             .Padding(ReceiptDesignTokens.PanelPadding)
-            .Column(auth =>
+            .Column(confirm =>
             {
-                auth.Item().Text("AUTHENTICATION & VERIFICATION")
+                confirm.Item().Text("PAYMENT CONFIRMED")
                     .FontSize(ReceiptDesignTokens.SectionHeadingSize)
                     .Bold()
+                    .FontColor(ReceiptDesignTokens.SuccessText);
+
+                confirm.Item().PaddingTop(2f).Text("Your payment has been successfully recorded.")
+                    .FontSize(ReceiptDesignTokens.MetadataValueSize)
                     .FontColor(ReceiptDesignTokens.PrimaryText);
 
-                auth.Item().PaddingTop(6f).Text("SHA-256 AUDIT DIGEST")
+                confirm.Item().PaddingTop(8f).Text("RECEIPT REFERENCE")
                     .FontSize(ReceiptDesignTokens.MetadataLabelSize)
                     .SemiBold()
                     .FontColor(ReceiptDesignTokens.SecondaryText);
 
-                auth.Item().PaddingTop(2f)
-                    .Text(InsertZeroWidthSpacesForLongTokens(vm.AuditDigest, 32))
+                confirm.Item().PaddingTop(2f)
+                    .Text(InsertZeroWidthSpacesForLongTokens(vm.CustomerReceiptReference, 32))
                     .FontFamily(ReceiptDesignTokens.MonospaceFontFamily)
-                    .FontSize(ReceiptDesignTokens.AuditDigestSize)
+                    .FontSize(9f)
+                    .Bold()
                     .FontColor(ReceiptDesignTokens.PrimaryText);
+
+                confirm.Item().PaddingTop(2f).Text("Keep this receipt reference for future inquiries.")
+                    .FontSize(ReceiptDesignTokens.ComplianceNoteSize)
+                    .FontColor(ReceiptDesignTokens.SecondaryText);
 
                 if (!string.IsNullOrWhiteSpace(vm.LegalComplianceNote))
                 {
-                    auth.Item().PaddingTop(8f).Text(vm.LegalComplianceNote)
+                    confirm.Item().PaddingTop(8f)
+                        .BorderTop(ReceiptDesignTokens.DividerThickness)
+                        .BorderColor(ReceiptDesignTokens.Border)
+                        .PaddingTop(6f)
+                        .Text(vm.LegalComplianceNote)
                         .FontSize(ReceiptDesignTokens.ComplianceNoteSize)
                         .FontColor(ReceiptDesignTokens.SecondaryText);
                 }

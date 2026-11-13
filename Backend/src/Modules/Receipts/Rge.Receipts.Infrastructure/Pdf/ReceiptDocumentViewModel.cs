@@ -42,12 +42,19 @@ public sealed record ReceiptDocumentViewModel
     public string FormattedIssuedAtPht { get; init; } = string.Empty;
     public string FormattedDualTimestamp { get; init; } = string.Empty;
 
+    // Customer-Facing Philippine Time Presentation ("Quiet Financial Precision")
+    public string FormattedPaymentDate { get; init; } = string.Empty;
+    public string FormattedPaymentTime { get; init; } = string.Empty;
+    public string FormattedTimeZoneLabel { get; init; } = "Philippine Time (UTC+8)";
+    public string FormattedCustomerDateTime { get; init; } = string.Empty;
+
     // Domain Money
     public Money GrossAmount { get; init; }
     public Money VatableSales { get; init; }
     public Money VatAmount { get; init; }
     public Money VatExemptSales { get; init; }
     public Money ZeroRatedSales { get; init; }
+    public string CurrencyCode { get; init; } = "PHP";
 
     // Formatted Peso Strings (₱#,##0.00)
     public string FormattedGrossAmount { get; init; } = string.Empty;
@@ -60,6 +67,7 @@ public sealed record ReceiptDocumentViewModel
     public IReadOnlyList<ReceiptLineItemViewModel> LineItems { get; init; } = [];
 
     // Security & Legal
+    public string CustomerReceiptReference { get; init; } = string.Empty;
     public string AuditDigest { get; init; } = string.Empty;
     public string LegalComplianceNote { get; init; } = "Compliant with BIR RMC No. 77-2024 & RA 11976 (Ease of Paying Taxes Act)";
 
@@ -69,6 +77,15 @@ public sealed record ReceiptDocumentViewModel
 
         var pstOffset = TimeSpan.FromHours(8);
         var issuedAtPst = receipt.IssuedAtUtc.ToOffset(pstOffset);
+
+        string formattedDate = issuedAtPst.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture);
+        string formattedTime = issuedAtPst.ToString("h:mm tt", CultureInfo.InvariantCulture);
+        const string timeZoneLabel = "Philippine Time (UTC+8)";
+
+        string rawDigest = receipt.Digest.Value;
+        string customerReference = BuildCustomerReceiptReference(
+            receipt.ReceiptNumber.Value,
+            rawDigest);
 
         string grossStr = receipt.VatBreakdown.GrossAmount.ToPhilippinePesoString();
         string vatableStr = receipt.VatBreakdown.VatableSales.ToPhilippinePesoString();
@@ -95,12 +112,18 @@ public sealed record ReceiptDocumentViewModel
             PaymentAttemptId = receipt.PaymentAttemptId,
             Description = receipt.Description,
             PaymentMethod = receipt.PaymentMethod.ToUpperInvariant(),
+            CurrencyCode = receipt.VatBreakdown.GrossAmount.CurrencyCode,
             IssuedAtUtc = receipt.IssuedAtUtc,
             IssuedAtPst = issuedAtPst,
             FormattedIssuedAtUtc = receipt.IssuedAtUtc.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture),
             FormattedIssuedAtPst = issuedAtPst.ToString("yyyy-MM-dd HH:mm:ss 'PST (UTC+8)'", CultureInfo.InvariantCulture),
             FormattedIssuedAtPht = issuedAtPst.ToString("yyyy-MM-dd HH:mm:ss 'PHT (UTC+8)'", CultureInfo.InvariantCulture),
             FormattedDualTimestamp = $"{issuedAtPst:yyyy-MM-dd HH:mm:ss} PST / {receipt.IssuedAtUtc:yyyy-MM-dd HH:mm:ss} UTC",
+            FormattedPaymentDate = formattedDate,
+            FormattedPaymentTime = formattedTime,
+            FormattedTimeZoneLabel = timeZoneLabel,
+            FormattedCustomerDateTime = $"{formattedDate} · {formattedTime} {timeZoneLabel}",
+            CustomerReceiptReference = customerReference,
             StatusBadgeText = "PAID",
             IssuerDepartment = "Corporate Accounting & Treasury",
             GrossAmount = receipt.VatBreakdown.GrossAmount,
@@ -114,8 +137,28 @@ public sealed record ReceiptDocumentViewModel
             FormattedVatExemptSales = exemptStr,
             FormattedZeroRatedSales = zeroStr,
             LineItems = [item],
-            AuditDigest = receipt.Digest.Value
+            AuditDigest = rawDigest
         };
+    }
+
+    private static string BuildCustomerReceiptReference(string orNumber, string rawDigest)
+    {
+        if (string.IsNullOrWhiteSpace(rawDigest))
+        {
+            return orNumber;
+        }
+
+        // Extract clean hex suffix from "sha256:v2:b728cea8..." -> first 8 hex chars in uppercase
+        int lastColon = rawDigest.LastIndexOf(':');
+        string hexPart = lastColon >= 0 && lastColon + 1 < rawDigest.Length
+            ? rawDigest[(lastColon + 1)..]
+            : rawDigest;
+
+        string shortCode = hexPart.Length >= 8
+            ? hexPart[..8].ToUpperInvariant()
+            : hexPart.ToUpperInvariant();
+
+        return $"{orNumber}-{shortCode}";
     }
 }
 

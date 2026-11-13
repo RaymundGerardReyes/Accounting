@@ -13,7 +13,18 @@ public sealed class JsonProductCatalog : IProductCatalog
         ["Product D"] = 203,
         ["Product E"] = 67,
         ["COST-ACC-TEXT-2026"] = 1850,
-        ["CPA-REV-AUDIT-2026"] = 1450
+        ["CPA-REV-AUDIT-2026"] = 1450,
+        ["Financial Accounting & Reporting Vol. 1 - ₱450.00"] = 450,
+        ["Financial Accounting & Reporting Vol. 1"] = 450,
+        ["Advanced Financial Accounting & Reporting - ₱520.00"] = 520,
+        ["Advanced Financial Accounting & Reporting"] = 520,
+        ["Auditing Theory & Practice - ₱480.00"] = 480,
+        ["Auditing Theory & Practice"] = 480,
+        ["Management Advisory Services - ₱420.00"] = 420,
+        ["Management Advisory Services"] = 420,
+        ["Philippine Tax Law & Principles - ₱500.00"] = 500,
+        ["Philippine Tax Law & Principles"] = 500,
+        ["CPA Reviewer Volume 1"] = 850
     };
 
     private readonly Dictionary<string, int> _loadedPrices = new(StringComparer.OrdinalIgnoreCase);

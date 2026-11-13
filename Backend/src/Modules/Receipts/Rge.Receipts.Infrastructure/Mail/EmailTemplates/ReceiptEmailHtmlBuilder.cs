@@ -35,15 +35,16 @@ public static class ReceiptEmailHtmlBuilder
 
         string safeOrNumber = Encode(vm.OfficialReceiptNumber);
         string safeAckNumber = Encode(vm.TreasuryAcknowledgementNumber);
-        string safeIssuedPst = Encode(vm.FormattedIssuedAtPst);
-        string safeIssuedUtc = Encode(vm.FormattedIssuedAtUtc);
+        string safePaymentDate = Encode(vm.FormattedPaymentDate);
+        string safePaymentTime = Encode(vm.FormattedPaymentTime);
+        string safeTimeZone = Encode(vm.FormattedTimeZoneLabel);
+        string safeCustomerDateTime = Encode(vm.FormattedCustomerDateTime);
+        string safeReceiptRef = Encode(vm.CustomerReceiptReference);
         string safePaymentMethod = Encode(vm.PaymentMethod);
 
         string safeCustomerName = Encode(vm.CustomerName);
         string safeCustomerEmail = Encode(vm.CustomerEmail);
         string safeOrderNumber = Encode(vm.OrderNumber);
-        string safeOrderId = Encode(vm.OrderId);
-        string safePaymentAttemptId = Encode(vm.PaymentAttemptId);
 
         string safeVatableSales = Encode(vm.FormattedVatableSales);
         string safeVatAmount = Encode(vm.FormattedVatAmount);
@@ -118,7 +119,7 @@ public static class ReceiptEmailHtmlBuilder
                 {{safeGrossAmount}}
               </div>
               <div style="font-size: 12px; color: #52525B; padding-top: 6px; line-height: 1.4;">
-                Payment successfully confirmed &bull; Issued: {{safeIssuedPst}}
+                Payment successfully confirmed &bull; Issued: {{safeCustomerDateTime}}
               </div>
             </td>
           </tr>
@@ -157,14 +158,14 @@ public static class ReceiptEmailHtmlBuilder
             </td>
           </tr>
 
-          <!-- 4. Payer & Transaction Grid -->
+          <!-- 4. Payer & Payment Details Grid -->
           <tr>
             <td style="padding: 20px 28px; border-bottom: 1px solid #E5E7EB;">
               <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse;">
                 <tr>
                   <td width="50%" valign="top" style="vertical-align: top; padding-right: 14px;">
                     <div style="font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.75px; color: #0A0A0A; margin-bottom: 8px;">
-                      Payer Information
+                      Customer Information
                     </div>
                     <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse;">
                       <tr>
@@ -178,14 +179,14 @@ public static class ReceiptEmailHtmlBuilder
                         <td align="right" style="font-size: 11px; color: #0A0A0A; padding: 3px 0;">{{safeCustomerEmail}}</td>
                       </tr>
                       <tr>
-                        <td style="font-size: 11px; color: #71717A; padding: 3px 0;">Order ID:</td>
-                        <td align="right" style="font-size: 11px; font-family: Consolas, monospace; color: #52525B; padding: 3px 0;">{{safeOrderId}}</td>
+                        <td style="font-size: 11px; color: #71717A; padding: 3px 0;">Order Reference:</td>
+                        <td align="right" style="font-size: 11px; font-family: Consolas, monospace; color: #52525B; padding: 3px 0;">{{safeOrderNumber}}</td>
                       </tr>
                     </table>
                   </td>
                   <td width="50%" valign="top" style="vertical-align: top; padding-left: 14px; border-left: 1px solid #E5E7EB;">
                     <div style="font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.75px; color: #0A0A0A; margin-bottom: 8px;">
-                      Settlement Details
+                      Payment Details
                     </div>
                     <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse;">
                       <tr>
@@ -197,8 +198,8 @@ public static class ReceiptEmailHtmlBuilder
                         <td align="right" style="font-size: 11px; font-weight: 600; color: #0A0A0A; padding: 3px 0;">PayMongo</td>
                       </tr>
                       <tr>
-                        <td style="font-size: 11px; color: #71717A; padding: 3px 0;">Payment Attempt ID:</td>
-                        <td align="right" style="font-size: 11px; font-family: Consolas, monospace; color: #52525B; padding: 3px 0;">{{safePaymentAttemptId}}</td>
+                        <td style="font-size: 11px; color: #71717A; padding: 3px 0;">Payment Date &amp; Time:</td>
+                        <td align="right" style="font-size: 11px; color: #0A0A0A; padding: 3px 0;">{{safePaymentDate}}, {{safePaymentTime}} ({{safeTimeZone}})</td>
                       </tr>
                     </table>
                   </td>
@@ -293,37 +294,27 @@ public static class ReceiptEmailHtmlBuilder
             </td>
           </tr>
 
-          <!-- 7. Compact PDF Attachment Preview -->
+          <!-- 7. Authentication, Verification & Confirmation Guidance -->
           <tr>
-            <td style="padding: 20px 28px; border-bottom: 1px solid #E5E7EB;">
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #FAFAFA; border: 1px solid #E5E7EB; border-radius: 6px; border-collapse: collapse;">
+            <td style="padding: 20px 28px 24px 28px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #FAFAFA; border: 1px solid #E5E7EB; border-radius: 6px; padding: 16px 18px; margin-bottom: 16px;">
                 <tr>
-                  <td width="42" align="center" style="padding: 12px 0 12px 14px; vertical-align: middle;">
-                    <div style="width: 30px; height: 36px; border: 1.5px solid #71717A; border-radius: 4px; background-color: #FFFFFF; text-align: center; line-height: 36px; font-size: 10px; font-weight: 700; color: #E11D48;">
-                      PDF
+                  <td>
+                    <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #15803d; margin-bottom: 4px;">
+                      Payment Confirmed
                     </div>
-                  </td>
-                  <td style="padding: 12px 14px; vertical-align: middle;">
-                    <div style="font-size: 12px; font-weight: 700; color: #0A0A0A; font-family: Consolas, monospace;">
-                      OfficialReceipt-{{safeOrNumber}}.pdf
+                    <div style="font-size: 12px; color: #0A0A0A; line-height: 1.4;">
+                      Your payment has been successfully recorded. A formal, printable PDF official receipt is attached to this email for your accounting and tax records.
                     </div>
-                    <div style="font-size: 10.5px; color: #71717A; padding-top: 2px;">
-                      Your official receipt document is attached to this email.
+                    <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #E5E7EB;">
+                      <span style="font-size: 10.5px; font-weight: 600; text-transform: uppercase; color: #71717A; letter-spacing: 0.5px;">Receipt Reference:</span>
+                      <span style="font-size: 12px; font-weight: 700; font-family: Consolas, monospace; color: #0A0A0A; margin-left: 6px;">{{safeReceiptRef}}</span>
+                      <div style="font-size: 10px; color: #71717A; margin-top: 2px;">Keep this receipt reference for future inquiries or treasury verification.</div>
                     </div>
-                  </td>
-                  <td align="right" style="padding: 12px 14px; vertical-align: middle;">
-                    <span style="display: inline-block; font-size: 10px; font-weight: 600; color: #047857; background-color: #ECFDF5; border: 1px solid #A7F3D0; border-radius: 4px; padding: 3px 8px; text-transform: uppercase;">
-                      Attached
-                    </span>
                   </td>
                 </tr>
               </table>
-            </td>
-          </tr>
 
-          <!-- 8. Cryptographic Audit Digest & Security Note -->
-          <tr>
-            <td style="padding: 20px 28px 24px 28px;">
               <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #71717A; margin-bottom: 4px;">
                 Authentication &amp; Verification
               </div>
@@ -339,7 +330,7 @@ public static class ReceiptEmailHtmlBuilder
             </td>
           </tr>
 
-          <!-- 9. Footer (Restrained Corporate) -->
+          <!-- 8. Footer (Restrained Corporate) -->
           <tr>
             <td style="background-color: #FAFAFA; border-top: 1px solid #E5E7EB; padding: 18px 28px; text-align: center;">
               <div style="font-size: 11px; font-weight: 700; color: #0A0A0A;">
