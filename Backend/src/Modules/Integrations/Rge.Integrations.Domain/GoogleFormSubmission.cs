@@ -60,11 +60,21 @@ public sealed class GoogleFormSubmission : AggregateRoot<string>
         IsDuplicate = isDuplicate;
     }
 
-    public void AttachOrder(string orderId, string orderNumber, string checkoutUrl)
+    public string? PaymentAttemptId { get; private set; }
+    public string? ProviderPaymentId { get; private set; }
+
+    public void AttachOrder(
+        string orderId,
+        string orderNumber,
+        string checkoutUrl,
+        string? paymentAttemptId = null,
+        string? providerPaymentId = null)
     {
         OrderId = Guard.AgainstNullOrWhiteSpace(orderId);
         OrderNumber = Guard.AgainstNullOrWhiteSpace(orderNumber);
         CheckoutUrl = Guard.AgainstNullOrWhiteSpace(checkoutUrl);
+        PaymentAttemptId = paymentAttemptId;
+        ProviderPaymentId = providerPaymentId;
     }
 }
 

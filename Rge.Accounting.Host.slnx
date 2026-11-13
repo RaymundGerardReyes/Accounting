@@ -8,25 +8,47 @@
     <Project Path="Backend/src/BuildingBlocks/Rge.BuildingBlocks.SharedKernel/Rge.BuildingBlocks.SharedKernel.csproj" />
   </Folder>
   <Folder Name="/Backend/src/Modules/" />
+  <Folder Name="/Backend/src/Modules/Audit/">
+    <Project Path="Backend/src/Modules/Audit/Rge.Audit.Api/Rge.Audit.Api.csproj" />
+    <Project Path="Backend/src/Modules/Audit/Rge.Audit.Application/Rge.Audit.Application.csproj" />
+    <Project Path="Backend/src/Modules/Audit/Rge.Audit.Contracts/Rge.Audit.Contracts.csproj" />
+    <Project Path="Backend/src/Modules/Audit/Rge.Audit.Domain/Rge.Audit.Domain.csproj" />
+    <Project Path="Backend/src/Modules/Audit/Rge.Audit.Infrastructure/Rge.Audit.Infrastructure.csproj" />
+  </Folder>
   <Folder Name="/Backend/src/Modules/CostAllocation/">
+    <Project Path="Backend/src/Modules/CostAllocation/Rge.CostAllocation.Api/Rge.CostAllocation.Api.csproj" />
     <Project Path="Backend/src/Modules/CostAllocation/Rge.CostAllocation.Application/Rge.CostAllocation.Application.csproj" />
     <Project Path="Backend/src/Modules/CostAllocation/Rge.CostAllocation.Contracts/Rge.CostAllocation.Contracts.csproj" />
     <Project Path="Backend/src/Modules/CostAllocation/Rge.CostAllocation.Domain/Rge.CostAllocation.Domain.csproj" />
     <Project Path="Backend/src/Modules/CostAllocation/Rge.CostAllocation.Infrastructure/Rge.CostAllocation.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/Backend/src/Modules/Documents/">
+    <Project Path="Backend/src/Modules/Documents/Rge.Documents.Api/Rge.Documents.Api.csproj" />
+    <Project Path="Backend/src/Modules/Documents/Rge.Documents.Application/Rge.Documents.Application.csproj" />
+    <Project Path="Backend/src/Modules/Documents/Rge.Documents.Contracts/Rge.Documents.Contracts.csproj" />
+    <Project Path="Backend/src/Modules/Documents/Rge.Documents.Domain/Rge.Documents.Domain.csproj" />
+    <Project Path="Backend/src/Modules/Documents/Rge.Documents.Infrastructure/Rge.Documents.Infrastructure.csproj" />
+  </Folder>
   <Folder Name="/Backend/src/Modules/Finance/">
+    <Project Path="Backend/src/Modules/Finance/Rge.Finance.Api/Rge.Finance.Api.csproj" />
+    <Project Path="Backend/src/Modules/Finance/Rge.Finance.Application/Rge.Finance.Application.csproj" />
+    <Project Path="Backend/src/Modules/Finance/Rge.Finance.Contracts/Rge.Finance.Contracts.csproj" />
     <Project Path="Backend/src/Modules/Finance/Rge.Finance.Domain/Rge.Finance.Domain.csproj" />
+    <Project Path="Backend/src/Modules/Finance/Rge.Finance.Infrastructure/Rge.Finance.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/Backend/src/Modules/Identity/">
+    <Project Path="Backend/src/Modules/Identity/Rge.Identity.Api/Rge.Identity.Api.csproj" />
     <Project Path="Backend/src/Modules/Identity/Rge.Identity.Application/Rge.Identity.Application.csproj" />
     <Project Path="Backend/src/Modules/Identity/Rge.Identity.Contracts/Rge.Identity.Contracts.csproj" />
     <Project Path="Backend/src/Modules/Identity/Rge.Identity.Domain/Rge.Identity.Domain.csproj" />
     <Project Path="Backend/src/Modules/Identity/Rge.Identity.Infrastructure/Rge.Identity.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/Backend/src/Modules/Integrations/">
+    <Project Path="Backend/src/Modules/Integrations/Rge.Integrations.Api/Rge.Integrations.Api.csproj" />
     <Project Path="Backend/src/Modules/Integrations/Rge.Integrations.Application/Rge.Integrations.Application.csproj" />
     <Project Path="Backend/src/Modules/Integrations/Rge.Integrations.Contracts/Rge.Integrations.Contracts.csproj" />
     <Project Path="Backend/src/Modules/Integrations/Rge.Integrations.Domain/Rge.Integrations.Domain.csproj" />
+    <Project Path="Backend/src/Modules/Integrations/Rge.Integrations.Infrastructure/Rge.Integrations.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/Backend/src/Modules/Payments/">
     <Project Path="Backend/src/Modules/Payments/Rge.Payments.Api/Rge.Payments.Api.csproj" />
@@ -36,6 +58,7 @@
     <Project Path="Backend/src/Modules/Payments/Rge.Payments.Infrastructure/Rge.Payments.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/Backend/src/Modules/Receipts/">
+    <Project Path="Backend/src/Modules/Receipts/Rge.Receipts.Api/Rge.Receipts.Api.csproj" />
     <Project Path="Backend/src/Modules/Receipts/Rge.Receipts.Application/Rge.Receipts.Application.csproj" />
     <Project Path="Backend/src/Modules/Receipts/Rge.Receipts.Contracts/Rge.Receipts.Contracts.csproj" />
     <Project Path="Backend/src/Modules/Receipts/Rge.Receipts.Domain/Rge.Receipts.Domain.csproj" />

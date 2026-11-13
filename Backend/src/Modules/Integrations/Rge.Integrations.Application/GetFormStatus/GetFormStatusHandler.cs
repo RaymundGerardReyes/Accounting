@@ -10,11 +10,13 @@ public sealed record GetGoogleFormsStatusQuery : IQuery<GoogleFormsStatusRespons
 public sealed class GetFormStatusHandler : IQueryHandler<GetGoogleFormsStatusQuery, GoogleFormsStatusResponse>
 {
     private readonly IGoogleFormsSubmissionStore _store;
+    private readonly IGoogleFormOrderBridge? _orderBridge;
 
-    public GetFormStatusHandler(IGoogleFormsSubmissionStore store)
+    public GetFormStatusHandler(IGoogleFormsSubmissionStore store, IGoogleFormOrderBridge? orderBridge = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         _store = store;
+        _orderBridge = orderBridge;
     }
 
     public async Task<Result<GoogleFormsStatusResponse>> HandleAsync(
@@ -26,7 +28,20 @@ public sealed class GetFormStatusHandler : IQueryHandler<GetGoogleFormsStatusQue
             .GetStatusAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        if (_orderBridge is not null)
+        {
+            var (total, paid, pending) = await _orderBridge
+                .GetGoogleFormOrderStatsAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            response = response with
+            {
+                IngestedOrdersCount = Math.Max(total, response.IngestedOrdersCount),
+                PaidOrdersCount = paid,
+                PendingOrdersCount = pending
+            };
+        }
+
         return Result.Success(response);
     }
 }
-

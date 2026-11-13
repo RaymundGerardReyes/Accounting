@@ -397,6 +397,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IOutboxWriter>(sp => sp.GetRequiredService<OutboxStore>());
 
         services.AddScoped<IReceiptSourceResolver, ReceiptSourceResolver>();
+        services.AddScoped<Rge.Integrations.Application.Ports.IGoogleFormOrderBridge, GoogleFormOrderBridge>();
 
         services.AddSingleton<OutboxDispatcher>(sp =>
         {

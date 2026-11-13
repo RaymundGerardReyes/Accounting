@@ -1,40 +1,50 @@
-using Rge.Integrations.Contracts;
+// File: Backend/src/Modules/Integrations/Rge.Integrations.Application/Ports/IIntegrationPorts.cs
+using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Integrations.Domain;
 
 namespace Rge.Integrations.Application.Ports;
 
-public interface ISecretStore
-{
-    Task<SaveCredentialsResponse> SaveCredentialsAsync(SaveCredentialsRequest request, CancellationToken cancellationToken = default);
-    string? GetSecret(string key);
-    bool HasGoogleFormsSecret();
-}
+public sealed record BridgedGoogleFormOrderResult(
+    string OrderId,
+    string OrderNumber,
+    string OrderTitle,
+    long AmountMinor,
+    string AmountPhp,
+    string PaymentAttemptId,
+    string? ProviderPaymentId,
+    string CheckoutUrl,
+    string Status);
 
-public interface ISmtpProbe
-{
-    Task<EmailTestResponse> TestSmtpAsync(EmailTestRequest request, CancellationToken cancellationToken = default);
-}
+public sealed record BridgedGoogleFormStatusResult(
+    string OrderId,
+    string OrderNumber,
+    string OrderStatus,
+    string? PaymentAttemptId,
+    string? ProviderPaymentId,
+    string PaymentStatus,
+    string? CheckoutUrl,
+    long AmountMinor,
+    string? OfficialReceiptNumber,
+    string? TreasuryAcknowledgementNumber,
+    DateTimeOffset? PaidAtUtc);
 
-public interface IPayMongoProbe
+public interface IGoogleFormOrderBridge
 {
-    Task<PayMongoTestResponse> TestPayMongoAsync(PayMongoTestRequest request, CancellationToken cancellationToken = default);
-}
+    Task<Result<BridgedGoogleFormOrderResult>> CreateOrderAndCheckoutSessionAsync(
+        string responseId,
+        int sheetRowIndex,
+        string customerName,
+        string customerEmail,
+        string? customerPhone,
+        string itemReference,
+        string category,
+        int quantity,
+        string paymentMethod,
+        string? notes,
+        CancellationToken cancellationToken = default);
 
-public interface IIntegrationDiagnosticProbe
-{
-    Task<IntegrationStatusResponse> ProbeAllAsync(CancellationToken cancellationToken = default);
+    Task<BridgedGoogleFormStatusResult?> ResolveLiveStatusAsync(
+        string orderId,
+        string? paymentAttemptId,
+        CancellationToken cancellationToken = default);
 }
-
-public interface IGoogleFormsSubmissionStore
-{
-    Task<GoogleFormsStatusResponse> GetStatusAsync(CancellationToken cancellationToken = default);
-    Task SaveSubmissionAsync(GoogleFormSubmission submission, CancellationToken cancellationToken = default);
-    Task<GoogleFormSubmission?> GetByResponseIdAsync(string responseId, CancellationToken cancellationToken = default);
-    Task<int> CountAsync(CancellationToken cancellationToken = default);
-}
-
-public interface IGoogleSheetsClient
-{
-    Task AppendRowAsync(IReadOnlyList<object?> row, CancellationToken cancellationToken = default);
-}
-
