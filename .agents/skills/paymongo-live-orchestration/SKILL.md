@@ -163,10 +163,10 @@ PayMongo sends `Paymongo-Signature: t=<timestamp>,te=<test_signature>,li=<live_s
   - Always register all 5 canonical events (`POST /api/v1/admin/webhooks/paymongo/setup`):
     `checkout_session.payment.paid`, `payment.paid`, `payment.failed`, `source.chargeable`, `qrph.expired` (plus handler support for `qr.paid` and `qr.expired`).
   - Use `GET /api/v1/admin/webhooks/paymongo/status` to audit registered webhook state (`key_mode`, `target_url`, `matches_host`, `missing_canonical_events`).
-- **Source-Expiry Grace Period (`SourceExpiryGraceSeconds = 30`)**:
+- **Source-Expiry Grace Period (`SourceExpiryGraceSeconds = 5`, capped at 3s in test mode)**:
   - PayMongo QR Ph sources (`src_...`) expire after 30 minutes (or immediately via test triggers), while Checkout Sessions (`cs_...`) remain active.
-  - If the client returns `awaiting_next_action` indefinitely, `PaymentExpirationWorker` polls PayMongo every 15 seconds until the 30-minute deadline.
-  - `PayMongoClient` tracks first observation of an expired source. If the Payment Intent remains bound to the dead source past the grace window (30s), it returns `Status: "expired"` (`qrph_source_expired`).
+  - PayMongo's hosted checkout page runs an isolated client-side JavaScript timer and does not receive server pushes to close already-open browser tabs when `POST /v1/checkout_sessions/{id}/expire` is called. It only validates session state upon refresh or user interaction.
+  - To prevent long polling delays while avoiding false positives, `PayMongoClient` enforces a 5s grace window (at most 3s in test mode). Past this grace, it authoritatively returns `Status: "expired"` (`qrph_source_expired`) and invokes `ExpireCheckoutSessionAsync`.
   - `PaymentExpirationWorker` catches this terminal status, invokes `ExpireCheckoutSessionAsync(cs_...)` to close the session on PayMongo, and records `MarkExpired(nowUtc, "qrph_source_expired", message)`.
 
 
