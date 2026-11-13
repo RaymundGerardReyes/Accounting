@@ -16,7 +16,10 @@
 
 var CONFIG = {
   // 1. Your live Cloudflare / NGINX / PaaS domain (must match NEXT_PUBLIC_APP_DOMAIN in .env)
-  BACKEND_URL: "https://rge-accounting-3aa707d5f496.herokuapp.com/api/v1/integrations/google-forms/submit",
+  BACKEND_URL: "https://accounting.raymundgerardestaca.dev/api/v1/integrations/google-forms/submit",
+
+  // 1b. Fallback (direct Heroku origin) used automatically when the primary domain fails (network / 404 / 5xx)
+  FALLBACK_BACKEND_URL: "https://rge-accounting-3aa707d5f496.herokuapp.com/api/v1/integrations/google-forms/submit",
 
   // 2. Shared secret key (must match GOOGLE_FORMS_SECRET in root .env)
   SECRET_KEY: "rge_gforms_live_sec_89f3a21",
@@ -28,7 +31,7 @@ var CONFIG = {
 
   // 4. Organization branding
   COMPANY_NAME: "R.G.E Accounting Firm Inc.",
-  SUPPORT_EMAIL: "support@rge-accounting.com",
+  SUPPORT_EMAIL: "raymundgerardrestaca@gmail.com",
 
   // 5. Email control:
   // Set to true if Apps Script should email the initial checkout link upon form submission.
@@ -60,21 +63,21 @@ function onFormSubmit(e) {
     // Extract form fields from Sheet row, Form event, or Manual test run
     var formData = extractFormDataSafely(e, sheet, rowIndex);
 
-    var customerEmail = extractField(formData, ["email", "email address", "customer email", "your email"]);
-    var customerName = extractField(formData, ["name", "full name", "customer name", "your name"]) || "Valued Client";
-    var customerPhone = extractField(formData, ["phone", "mobile", "mobile number", "contact number", "cellphone"]);
-    var itemReference = extractField(formData, ["book", "material", "course material", "textbook", "product", "item", "service", "package", "select package", "order category", "department"]) || "Product A";
-    var quantityStr = extractField(formData, ["quantity", "qty", "number of items"]);
+    var customerEmail = extractField(formData, ["customer email", "email address", "your email", "email"]);
+    var customerName = extractField(formData, ["customer name", "full name", "your name", "client name", "student name", "name"]) || "Valued Client";
+    var customerPhone = extractField(formData, ["mobile phone number", "mobile number", "contact number", "phone number", "cellphone", "mobile", "phone"]);
+    var itemReference = extractField(formData, ["book / course material selection", "book / material", "course material", "item reference", "textbook", "book", "material", "product", "service", "package", "select package", "order category", "department", "item"]) || "Product A";
+    var quantityStr = extractField(formData, ["quantity", "qty", "number of items", "copies"]);
     var quantity = parseInt(quantityStr, 10);
     if (isNaN(quantity) || quantity < 1) quantity = 1;
-    var instructorCredit = extractField(formData, ["instructor", "instructor credit", "enrolled instructor", "enrolled instructor to credit", "professor", "teacher", "faculty"]);
-    var studentId = extractField(formData, ["student id", "enrollee id", "student / enrollee id number", "student / enrollee id", "id number", "student number", "student no"]);
-    var notes = extractField(formData, ["delivery address", "campus pickup", "delivery address / campus pickup notes", "notes", "remarks", "instructions", "comments"]) || "";
+    var instructorCredit = extractField(formData, ["enrolled instructor to credit", "instructor credit", "enrolled instructor", "instructor", "professor", "teacher", "faculty"]);
+    var studentId = extractField(formData, ["student / enrollee id number", "student / enrollee id", "student id", "enrollee id", "id number", "student number", "student no"]);
+    var notes = extractField(formData, ["delivery address / campus pickup notes", "delivery address", "campus pickup", "notes", "remarks", "instructions", "comments"]) || "";
 
-    // Generate deterministic Response ID for atomic idempotency
-    var rawTimestamp = formData["timestamp"] || new Date().toISOString();
-    var parsedTime = new Date(rawTimestamp).getTime();
-    if (isNaN(parsedTime)) parsedTime = new Date().getTime();
+    // Generate deterministic Response ID for atomic idempotency (locale-safe timestamp parsing)
+    var rawTimestamp = formData["timestamp"] || new Date();
+    var parsedTime = parseSafeTimestampMillis(rawTimestamp);
+    var displayTimestamp = formatSafeTimestamp(rawTimestamp);
     var responseId = (e && e.response && typeof e.response.getId === "function")
       ? "gf_" + e.response.getId()
       : "gf_" + (rowIndex || "manual") + "_" + parsedTime;
@@ -85,7 +88,7 @@ function onFormSubmit(e) {
       Logger.log("Error: No customer email found in row " + rowIndex);
       if (sheet && rowIndex >= 2) {
         ensureAndWriteColumns(sheet, rowIndex, {
-          "Timestamp": rawTimestamp ? new Date(rawTimestamp).toLocaleString() : new Date().toLocaleString(),
+          "Timestamp": displayTimestamp,
           "Customer Name": customerName,
           "Contact Number": customerPhone || "",
           "Book / Material": itemReference,
@@ -137,26 +140,48 @@ function onFormSubmit(e) {
       headers: {
         "X-Google-Forms-Secret": CONFIG.SECRET_KEY,
         "X-Google-Forms-Signature": hmacSignature,
+        "Idempotency-Key": responseId,
         "Accept": "application/json"
       },
       payload: payloadJson,
       muteHttpExceptions: true
     };
 
-    // Call Cloud FastAPI Backend
-    var response = UrlFetchApp.fetch(CONFIG.BACKEND_URL, options);
+    // Call Backend (primary domain, then automatic fallback to direct Heroku origin)
+    var response = fetchWithFallback(options);
     var responseCode = response.getResponseCode();
-    var responseText = response.getContentText();
+    var responseText = response.getContentText() || "";
 
     Logger.log("Backend response (" + responseCode + "): " + responseText);
 
-    if (responseCode === 201 || responseCode === 200) {
-      var data = JSON.parse(responseText);
+    if (responseCode >= 200 && responseCode < 300) {
+      var data = {};
+      try {
+        data = JSON.parse(responseText || "{}");
+      } catch (parseErr) {
+        Logger.log("Notice: backend returned non-JSON body: " + parseErr);
+      }
+      var orderNumber = data.order_number || data.orderNumber || "";
+      var checkoutUrl = data.checkout_url || data.checkoutUrl || "";
+      if (checkoutUrl && checkoutUrl.charAt(0) === "/") {
+        checkoutUrl = getAppBaseUrl() + checkoutUrl;
+      }
+      var amountPhp = data.amount_php || data.amountPhp || "";
+      var rawStatus = data.status || data.payment_status || data.paymentStatus || "PENDING";
+      var attemptId = data.payment_attempt_id || data.paymentAttemptId || "";
+      var normalizedData = {
+        order_id: data.order_id || data.orderId || "",
+        order_number: orderNumber,
+        order_title: data.order_title || data.orderTitle || itemReference,
+        amount_php: amountPhp,
+        checkout_url: checkoutUrl,
+        payment_attempt_id: attemptId
+      };
 
       // Write initial PENDING status & PayMongo Checkout Link to Google Sheet
       if (sheet && rowIndex >= 2) {
         ensureAndWriteColumns(sheet, rowIndex, {
-          "Timestamp": rawTimestamp ? new Date(rawTimestamp).toLocaleString() : new Date().toLocaleString(),
+          "Timestamp": displayTimestamp,
           "Customer Name": customerName,
           "Email Address": customerEmail,
           "Contact Number": customerPhone || "",
@@ -166,11 +191,11 @@ function onFormSubmit(e) {
           "Student ID": studentId || "N/A",
           "Notes": notes || "",
           "Response ID": responseId,
-          "Order Number": data.order_number || "",
-          "PayMongo Checkout Link": data.checkout_url || "",
-          "Amount": data.amount_php || "",
-          "Payment Status": String(data.status || "PENDING").toUpperCase(),
-          "Payment Attempt ID": data.payment_attempt_id || "",
+          "Order Number": orderNumber,
+          "PayMongo Checkout Link": checkoutUrl,
+          "Amount": amountPhp,
+          "Payment Status": String(rawStatus).toUpperCase(),
+          "Payment Attempt ID": attemptId,
           "Official Receipt No": "",
           "Webhook Outcome Details": "Awaiting PayMongo payment webhook...",
           "Synchronized At": new Date().toLocaleString()
@@ -178,13 +203,13 @@ function onFormSubmit(e) {
       }
 
       // Send initial payment instructions email if enabled
-      if (CONFIG.SEND_INITIAL_CHECKOUT_EMAIL_FROM_GAS && data.checkout_url) {
-        sendPaymentInstructionsEmail(customerEmail, customerName, data);
+      if (CONFIG.SEND_INITIAL_CHECKOUT_EMAIL_FROM_GAS && checkoutUrl) {
+        sendPaymentInstructionsEmail(customerEmail, customerName, normalizedData);
       }
     } else {
       if (sheet && rowIndex >= 2) {
         ensureAndWriteColumns(sheet, rowIndex, {
-          "Timestamp": rawTimestamp ? new Date(rawTimestamp).toLocaleString() : new Date().toLocaleString(),
+          "Timestamp": displayTimestamp,
           "Customer Name": customerName,
           "Email Address": customerEmail,
           "Contact Number": customerPhone || "",
@@ -377,7 +402,10 @@ function resolveSheetSafely(e) {
     }
     if (sheet && !rowIndex) {
       var last = sheet.getLastRow();
-      rowIndex = (last < 1) ? 2 : last + 1;
+      // Synthetic simulations (namedValues only) append a NEW row; real Form/manual
+      // runs target the row Google Forms already wrote (the last row).
+      var isSyntheticSimulation = !!(e && e.namedValues && !e.range && !e.source);
+      rowIndex = isSyntheticSimulation ? ((last < 1) ? 2 : last + 1) : Math.max(last, 2);
     }
   }
 
@@ -461,22 +489,87 @@ function extractFormDataSafely(e, sheet, rowIndex) {
 
 /**
  * Extracts a value from the formData map matching any candidate aliases.
+ * Pass 1: exact header match across ALL aliases in priority order.
+ * Pass 2: guarded substring match (prevents "name" stealing "Product Name",
+ *         and "item" stealing "Number of Items").
  */
 function extractField(formData, candidateAliases) {
-  for (var i = 0; i < candidateAliases.length; i++) {
-    var alias = candidateAliases[i].toLowerCase();
-    if (formData[alias] !== undefined && String(formData[alias]).trim() !== "") {
+  var i, alias;
+  for (i = 0; i < candidateAliases.length; i++) {
+    alias = candidateAliases[i].toLowerCase();
+    if (formData[alias] !== undefined && formData[alias] !== null && String(formData[alias]).trim() !== "") {
       return String(formData[alias]).trim();
     }
+  }
+
+  var nameCollisions = ["product name", "item name", "department name", "company name", "book name", "course name"];
+  for (i = 0; i < candidateAliases.length; i++) {
+    alias = candidateAliases[i].toLowerCase();
     for (var key in formData) {
-      if (Object.prototype.hasOwnProperty.call(formData, key)) {
-        if (key.indexOf(alias) !== -1 && formData[key] !== undefined && String(formData[key]).trim() !== "") {
-          return String(formData[key]).trim();
-        }
+      if (!Object.prototype.hasOwnProperty.call(formData, key)) continue;
+      if (alias === "item" && key.indexOf("number of items") !== -1) continue;
+      if (alias === "name" && nameCollisions.some(function(c) { return key.indexOf(c) !== -1; })) continue;
+      if (key.indexOf(alias) !== -1 && formData[key] !== undefined && formData[key] !== null && String(formData[key]).trim() !== "") {
+        return String(formData[key]).trim();
       }
     }
   }
   return "";
+}
+
+/**
+ * Locale-safe timestamp parsing: supports Date objects, ISO strings,
+ * and DD/MM/YYYY HH:mm:ss (Philippine / UK sheet locales). Never returns NaN.
+ */
+function parseSafeTimestampMillis(rawTs) {
+  if (rawTs instanceof Date && !isNaN(rawTs.getTime())) return rawTs.getTime();
+  var str = String(rawTs || "").trim();
+  var m = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (m) {
+    var a = parseInt(m[1], 10), b = parseInt(m[2], 10);
+    // Prefer DD/MM when first part > 12, otherwise assume DD/MM (PH locale) unless second part > 12
+    var day = a, month = b;
+    if (b > 12 && a <= 12) { day = b; month = a; }
+    var d = new Date(parseInt(m[3], 10), month - 1, day,
+      parseInt(m[4] || "0", 10), parseInt(m[5] || "0", 10), parseInt(m[6] || "0", 10));
+    if (!isNaN(d.getTime())) return d.getTime();
+  }
+  var parsed = Date.parse(str);
+  return isNaN(parsed) ? new Date().getTime() : parsed;
+}
+
+function formatSafeTimestamp(rawTs) {
+  return new Date(parseSafeTimestampMillis(rawTs)).toLocaleString();
+}
+
+/**
+ * POSTs to CONFIG.BACKEND_URL, retrying once against CONFIG.FALLBACK_BACKEND_URL
+ * on network errors, 404, or 5xx responses.
+ */
+function fetchWithFallback(options) {
+  var urls = [CONFIG.BACKEND_URL];
+  if (CONFIG.FALLBACK_BACKEND_URL && CONFIG.FALLBACK_BACKEND_URL !== CONFIG.BACKEND_URL) {
+    urls.push(CONFIG.FALLBACK_BACKEND_URL);
+  }
+  var lastResponse = null;
+  var lastError = null;
+  for (var u = 0; u < urls.length; u++) {
+    try {
+      var resp = UrlFetchApp.fetch(urls[u], options);
+      var code = resp.getResponseCode();
+      lastResponse = resp;
+      if (code === 404 || code >= 500) {
+        Logger.log("Backend " + urls[u] + " returned " + code + "; trying fallback if available.");
+        continue;
+      }
+      return resp;
+    } catch (fetchErr) {
+      lastError = fetchErr;
+      Logger.log("Network error calling " + urls[u] + ": " + fetchErr);
+    }
+  }
+  if (lastResponse) return lastResponse;
+  throw lastError || new Error("All backend URLs failed.");
 }
 
 /**
