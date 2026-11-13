@@ -171,7 +171,8 @@ public static class ReceiptEmailHtmlBuilder
                       <tr>
                         <td style="font-size: 11px; color: #71717A; padding: 3px 0;">Customer Name:</td>
                         <td align="right" style="font-size: 12px; font-weight: 600; color: #0A0A0A; padding: 3px 0;">
-                          <span style="display: inline-block; width: 6px; height: 6px; background-color: #E11D48; border-radius: 50%; vertical-align: middle; margin-right: 4px;"></span>{{safeCustomerName}}
+                          <span style="display: inline-block; width: 6px; height: 6px; background-color: #E11D48; border-radius: 50%; vertical-align: middle; margin-right: 4px;"></span>
+                          {{safeCustomerName}}
                         </td>
                       </tr>
                       <tr>
