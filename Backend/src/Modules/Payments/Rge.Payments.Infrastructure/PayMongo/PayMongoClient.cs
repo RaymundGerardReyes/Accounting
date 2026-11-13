@@ -510,7 +510,9 @@ public sealed class PayMongoClient : IPaymentGateway
                     string trackingKey = $"{sessionData.Id}|{srcId}";
                     DateTimeOffset nowUtc = DateTimeOffset.UtcNow;
                     DateTimeOffset firstSeenUtc = SourceExpiryFirstSeen.GetOrAdd(trackingKey, nowUtc);
-                    TimeSpan grace = TimeSpan.FromSeconds(Math.Max(0, _options.SourceExpiryGraceSeconds));
+                    bool isTestMode = _options.SecretKey.StartsWith("sk_test_", StringComparison.OrdinalIgnoreCase);
+                    int effectiveGraceSeconds = isTestMode ? Math.Min(3, _options.SourceExpiryGraceSeconds) : _options.SourceExpiryGraceSeconds;
+                    TimeSpan grace = TimeSpan.FromSeconds(Math.Max(0, effectiveGraceSeconds));
                     TimeSpan elapsed = nowUtc - firstSeenUtc;
 
                     if (intentStillBoundToDeadSource && elapsed >= grace)
