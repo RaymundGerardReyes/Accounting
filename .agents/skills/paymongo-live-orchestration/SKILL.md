@@ -77,8 +77,9 @@ PayMongo sends `Paymongo-Signature: t=<timestamp>,te=<test_signature>,li=<live_s
     - `dob`: `["dob", "dob_ubp"]`
     - `hosted_checkout`: `["qrph", "card", "gcash", "paymaya", "dob", "dob_ubp"]`
 - **QR Source Expiry vs. Checkout Session Expiry Separation (`PayMongoClient.cs` & `PaymentExpirationWorker.cs`)**:
-  - Inside an active Checkout Session (`cs_...` with `cs_status == "active"` and before `attempt.ExpiresAt`), a child QR Ph / source (`src_...`) expiring (`src_status == "expired"` or `pi_status` returning from `awaiting_next_action` to `awaiting_payment_method` without `last_payment_error`) is a **recoverable payment-method timeout** (`Status = "awaiting_next_action"`, `FailureCode = "qrph_source_expired"`), NOT a terminal Checkout Session expiration.
-  - Never mark an active `cs_...` `PaymentAttempt` as `Expired` or call `ExpireCheckoutSessionAsync(cs_...)` solely because its child `src_...` expired while the parent Checkout Session remains active.
+  - Inside an active Checkout Session (`cs_...` with `cs_status == "active"` and before `attempt.ExpiresAt`), a child QR Ph / source (`src_...`) expiring (`src_status == "expired"` or `pi_status` returning from `awaiting_next_action` to `awaiting_payment_method` without `last_payment_error`) is initially a **recoverable payment-method timeout** (`Status = "awaiting_next_action"`, `FailureCode = "qrph_source_expired"`), NOT an immediate terminal Checkout Session expiration.
+  - However, if the session is abandoned (Payment Intent remains bound to the dead source past `SourceExpiryGraceSeconds`, default 30s), `PayMongoClient` authoritatively transitions to `Status = "expired"` (`qrph_source_expired`).
+  - Upon receiving `expired` with `qrph_source_expired`, `PaymentExpirationWorker` invokes `ExpireCheckoutSessionAsync(cs_...)` to close the session on PayMongo before recording `MarkExpired(...)`, permanently halting both background worker polling and frontend client polling.
 - **Active `/poll` Reconciliation Default (`GetPaymentEndpoint.cs` & `use-paymongo-realtime-sync.ts`)**:
   - `POST /api/v1/payments/{payment_id}/poll` MUST default `auto_reconcile` to `true`, and `use-paymongo-realtime-sync.ts` must pass `?auto_reconcile=true` (plus `&force_reconcile=true` on mount, window focus, tab visibility, and manual verify triggers) so `/poll` actively queries PayMongo instead of returning a cached DB row.
 - **Simulator Parity**:
@@ -149,6 +150,25 @@ PayMongo sends `Paymongo-Signature: t=<timestamp>,te=<test_signature>,li=<live_s
   - In `Frontend/patch-fs.cjs`, wrap `target.realpathSync` and `target.realpathSync.native` so that when `err.code === "EPERM"` or `err.code === "EACCES"` occurs during pnpm junction/symlink resolution, the function safely returns the input path `p`.
 - **Preload in Vitest & Next.js**:
   - Ensure `require('./patch-fs.cjs')` is executed at the entry of `vitest.config.ts` and in Next.js build scripts (`node --require ./patch-fs.cjs ... next build`) to prevent Vite/Rollup crashes on Windows.
+
+## 15. Cancel Redirect Forwarding & Abandoned Attempt Cleanup
+- **Cancel Redirect Handling (`?cancelled=true`)**:
+  - When returning to `/checkout?order_id={id}&cancelled=true`, the frontend forwards `client_reported_redirect_status=cancelled` to `POST /api/v1/payments/{id}/poll`.
+  - `PollAndReconcileHandler` queries PayMongo first to ensure an already-paid session is never marked failed. If unpaid, it marks the attempt `Failed` (`source_cancelled`) and expires the `cs_...` session on PayMongo.
+- **Superseding Prior Attempts on Reset or Re-initiation**:
+  - When a customer initiates a new payment attempt on an order (`InitiateAttemptHandler`) or resets their selected method (`handleResetAttempt`), prior non-terminal attempts are superseded (`superseded_by_new_attempt`) and their remote `cs_...` session is expired on PayMongo so background workers stop polling dead sessions.
+
+## 16. Canonical Webhook Subscriptions & QR Ph Source-Expiry Grace Period
+- **5 Canonical Webhook Events**:
+  - Always register all 5 canonical events (`POST /api/v1/admin/webhooks/paymongo/setup`):
+    `checkout_session.payment.paid`, `payment.paid`, `payment.failed`, `source.chargeable`, `qrph.expired` (plus handler support for `qr.paid` and `qr.expired`).
+  - Use `GET /api/v1/admin/webhooks/paymongo/status` to audit registered webhook state (`key_mode`, `target_url`, `matches_host`, `missing_canonical_events`).
+- **Source-Expiry Grace Period (`SourceExpiryGraceSeconds = 30`)**:
+  - PayMongo QR Ph sources (`src_...`) expire after 30 minutes (or immediately via test triggers), while Checkout Sessions (`cs_...`) remain active.
+  - If the client returns `awaiting_next_action` indefinitely, `PaymentExpirationWorker` polls PayMongo every 15 seconds until the 30-minute deadline.
+  - `PayMongoClient` tracks first observation of an expired source. If the Payment Intent remains bound to the dead source past the grace window (30s), it returns `Status: "expired"` (`qrph_source_expired`).
+  - `PaymentExpirationWorker` catches this terminal status, invokes `ExpireCheckoutSessionAsync(cs_...)` to close the session on PayMongo, and records `MarkExpired(nowUtc, "qrph_source_expired", message)`.
+
 
 
 
