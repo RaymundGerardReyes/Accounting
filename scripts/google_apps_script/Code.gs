@@ -8,8 +8,8 @@
  * 1. Absorbs 5,000+ concurrent Google Form submissions without server crashes.
  * 2. Eliminates "Cannot read properties of null (reading 'getActiveSheet')".
  * 3. Protects Google Sheets against CSV / Formula Injection (=, +, -, @).
- * 4. Sends HMAC-authenticated payloads to FastAPI (/api/v1/integrations/google-forms/submit).
- * 5. Exposes doPost(e) Reverse-Webhook so FastAPI PayMongo Webhooks can update
+ * 4. Sends HMAC-authenticated payloads to Backend (/api/v1/integrations/google-forms/submit).
+ * 5. Exposes doPost(e) Reverse-Webhook so PayMongo Webhooks can update
  *    the Google Sheet row live for PAID, FAILED, and EXPIRED transactions!
  * ==============================================================================
  */
@@ -43,7 +43,7 @@ var CONFIG = {
  * ==============================================================================
  * 1. OUTBOUND ORCHESTRATOR: Triggered when a user submits the Google Form
  * ==============================================================================
- * @param {Object} e - The Google Sheets or Google Forms submission event object.
+ * @param {Object} [e] - The Google Sheets or Google Forms submission event object.
  */
 function onFormSubmit(e) {
   var lock = LockService.getScriptLock();
@@ -61,9 +61,13 @@ function onFormSubmit(e) {
     var rowIndex = context.rowIndex;
 
     // Extract form fields from Sheet row, Form event, or Manual test run
-    var formData = extractFormDataSafely(e, sheet, rowIndex);
+    var extraction = extractFormDataSafely(e, sheet, rowIndex);
+    var formData = extraction.formData;
+    if (extraction.targetRowIndex) {
+      rowIndex = extraction.targetRowIndex;
+    }
 
-    var customerEmail = extractField(formData, ["customer email", "email address", "your email", "email"]);
+    var customerEmail = extractField(formData, ["customer email", "email address", "your email", "respondent email", "email"]);
     var customerName = extractField(formData, ["customer name", "full name", "your name", "client name", "student name", "name"]) || "Valued Client";
     var customerPhone = extractField(formData, ["mobile phone number", "mobile number", "contact number", "phone number", "cellphone", "mobile", "phone"]);
     var itemReference = extractField(formData, ["book / course material selection", "book / material", "course material", "item reference", "textbook", "book", "material", "product", "service", "package", "select package", "order category", "department", "item"]) || "Product A";
@@ -82,14 +86,22 @@ function onFormSubmit(e) {
       ? "gf_" + e.response.getId()
       : "gf_" + (rowIndex || "manual") + "_" + parsedTime;
 
-    Logger.log("Processing submission for: " + customerName + " (" + customerEmail + ") | Book: " + itemReference + " | Credit: " + (instructorCredit || "None") + " | Response ID: " + responseId);
+    Logger.log(
+      "Processing submission for: " + customerName +
+      " (" + customerEmail + ") | Book: " + itemReference +
+      " | Qty: " + quantity +
+      " | Credit: " + (instructorCredit || "None") +
+      " | Row: " + rowIndex +
+      " | Response ID: " + responseId
+    );
 
-    if (!customerEmail) {
-      Logger.log("Error: No customer email found in row " + rowIndex);
+    if (!customerEmail || customerEmail.indexOf("@") === -1) {
+      Logger.log("Error: No valid customer email found in row " + rowIndex);
       if (sheet && rowIndex >= 2) {
         ensureAndWriteColumns(sheet, rowIndex, {
           "Timestamp": displayTimestamp,
           "Customer Name": customerName,
+          "Email Address": "",
           "Contact Number": customerPhone || "",
           "Book / Material": itemReference,
           "Quantity": quantity,
@@ -99,7 +111,7 @@ function onFormSubmit(e) {
           "Response ID": responseId,
           "Payment Status": "ERROR (MISSING EMAIL)",
           "Webhook Outcome Details": "Customer email address was not provided in the form.",
-          "Synchronized At": new Date().toLocaleString()
+          "Synchronized At": formatSafeTimestamp(new Date())
         });
       }
       return;
@@ -110,10 +122,10 @@ function onFormSubmit(e) {
       orderTitle += " [Credit: " + instructorCredit + "]";
     }
 
-    // Build authoritative payload matching Backend/google_forms_routes.py
+    // Build authoritative payload for POST /api/v1/integrations/google-forms/submit
     var payload = {
       response_id: responseId,
-      sheet_row_index: rowIndex || 0,
+      sheet_row_index: rowIndex || 2,
       customer_name: customerName,
       customer_email: customerEmail,
       customer_phone: customerPhone || null,
@@ -161,16 +173,24 @@ function onFormSubmit(e) {
       } catch (parseErr) {
         Logger.log("Notice: backend returned non-JSON body: " + parseErr);
       }
+
+      var orderId = data.order_id || data.orderId || "";
       var orderNumber = data.order_number || data.orderNumber || "";
       var checkoutUrl = data.checkout_url || data.checkoutUrl || "";
       if (checkoutUrl && checkoutUrl.charAt(0) === "/") {
         checkoutUrl = getAppBaseUrl() + checkoutUrl;
       }
+      if (!checkoutUrl && orderId) {
+        checkoutUrl = getAppBaseUrl() + "/checkout?order_id=" + encodeURIComponent(orderId);
+      }
+
       var amountPhp = data.amount_php || data.amountPhp || "";
       var rawStatus = data.status || data.payment_status || data.paymentStatus || "PENDING";
+      var normalizedInitialStatus = normalizeDisplayStatus(rawStatus);
       var attemptId = data.payment_attempt_id || data.paymentAttemptId || "";
+
       var normalizedData = {
-        order_id: data.order_id || data.orderId || "",
+        order_id: orderId,
         order_number: orderNumber,
         order_title: data.order_title || data.orderTitle || itemReference,
         amount_php: amountPhp,
@@ -178,7 +198,7 @@ function onFormSubmit(e) {
         payment_attempt_id: attemptId
       };
 
-      // Write initial PENDING status & PayMongo Checkout Link to Google Sheet
+      // Write initial status & PayMongo Checkout Link to Google Sheet
       if (sheet && rowIndex >= 2) {
         ensureAndWriteColumns(sheet, rowIndex, {
           "Timestamp": displayTimestamp,
@@ -194,11 +214,11 @@ function onFormSubmit(e) {
           "Order Number": orderNumber,
           "PayMongo Checkout Link": checkoutUrl,
           "Amount": amountPhp,
-          "Payment Status": String(rawStatus).toUpperCase(),
+          "Payment Status": normalizedInitialStatus,
           "Payment Attempt ID": attemptId,
-          "Official Receipt No": "",
+          "Official Receipt No": data.official_receipt_number || data.official_receipt_no || "",
           "Webhook Outcome Details": "Awaiting PayMongo payment webhook...",
-          "Synchronized At": new Date().toLocaleString()
+          "Synchronized At": formatSafeTimestamp(new Date())
         });
       }
 
@@ -221,11 +241,10 @@ function onFormSubmit(e) {
           "Response ID": responseId,
           "Payment Status": "ERROR (" + responseCode + ")",
           "Webhook Outcome Details": "Backend Error (" + responseCode + "): " + responseText.substring(0, 150),
-          "Synchronized At": new Date().toLocaleString()
+          "Synchronized At": formatSafeTimestamp(new Date())
         });
       }
     }
-
   } catch (error) {
     Logger.log("Unhandled Exception in onFormSubmit: " + (error && error.stack ? error.stack : error.toString()));
   } finally {
@@ -240,7 +259,7 @@ function onFormSubmit(e) {
 /**
  * ==============================================================================
  * 2. INBOUND WEBHOOK RECEIVER (doPost):
- *    Called automatically by your FastAPI Backend AFTER a PayMongo Webhook
+ *    Called automatically by Backend AFTER a PayMongo Webhook
  *    verifies a PAID, FAILED, or EXPIRED transaction!
  * ==============================================================================
  */
@@ -261,7 +280,8 @@ function doPost(e) {
     var body = JSON.parse(rawBody);
 
     // Verify shared secret to prevent unauthorized tampering
-    if (!body.secret || body.secret !== CONFIG.SECRET_KEY) {
+    var providedSecret = body.secret || (e.parameter && e.parameter.secret) || "";
+    if (!providedSecret || providedSecret !== CONFIG.SECRET_KEY) {
       return createJsonResponse({ ok: false, error: "Unauthorized webhook secret" });
     }
 
@@ -274,10 +294,10 @@ function doPost(e) {
     // Locate the exact row by Response ID, Order Number, Payment Attempt ID, or sheet_row_index
     var targetRow = findMatchingRow(
       sheet,
-      body.response_id,
-      body.order_number,
-      body.payment_attempt_id,
-      body.sheet_row_index
+      body.response_id || body.responseId,
+      body.order_number || body.orderNumber,
+      body.payment_attempt_id || body.paymentAttemptId,
+      body.sheet_row_index || body.sheetRowIndex
     );
 
     if (!targetRow) {
@@ -287,11 +307,14 @@ function doPost(e) {
       });
     }
 
-    // Format authoritative PayMongo webhook status (PAID, FAILED, EXPIRED)
-    var normalizedStatus = String(body.payment_status || "PENDING").toUpperCase();
+    var rawStatus = body.payment_status || body.status || "PENDING";
+    var normalizedStatus = normalizeDisplayStatus(rawStatus);
+    var receiptNo = body.official_receipt_no || body.official_receipt_number || "";
     var outcomeDetails = body.outcome_details || "";
+
     if (normalizedStatus === "PAID") {
-      outcomeDetails = "Verified via PayMongo Webhook (" + (body.provider_event_id || "checkout_session.payment.paid") + ")";
+      outcomeDetails = "Verified via PayMongo Webhook (" + (body.provider_event_id || "checkout_session.payment.paid") + ")" +
+        (receiptNo ? " | OR: " + receiptNo : "");
     } else if (normalizedStatus === "FAILED") {
       outcomeDetails = "Failed (" + (body.failure_code || "DECLINED") + "): " + (body.failure_message || "Payment declined");
     } else if (normalizedStatus === "EXPIRED") {
@@ -300,19 +323,18 @@ function doPost(e) {
 
     ensureAndWriteColumns(sheet, targetRow, {
       "Payment Status": normalizedStatus,
-      "Official Receipt No": body.official_receipt_no || "",
+      "Official Receipt No": receiptNo,
       "Webhook Outcome Details": outcomeDetails,
-      "Synchronized At": new Date().toLocaleString()
+      "Synchronized At": formatSafeTimestamp(new Date())
     });
 
     return createJsonResponse({
       ok: true,
       row_updated: targetRow,
-      order_number: body.order_number,
+      order_number: body.order_number || body.orderNumber,
       payment_status: normalizedStatus,
-      official_receipt_no: body.official_receipt_no || null
+      official_receipt_no: receiptNo || null
     });
-
   } catch (err) {
     Logger.log("Error in doPost webhook receiver: " + err.toString());
     return createJsonResponse({ ok: false, error: err.toString() });
@@ -328,6 +350,16 @@ function doPost(e) {
  * HELPER FUNCTIONS: Safe Sheet Resolution, Sanitization & Email Dispatch
  * ==============================================================================
  */
+
+/**
+ * Normalizes backend/gateway statuses (e.g. "succeeded", "requires_action") into clean Sheet badges.
+ */
+function normalizeDisplayStatus(rawStatus) {
+  var s = String(rawStatus || "PENDING").trim().toUpperCase();
+  if (s === "SUCCEEDED" || s === "PAID") return "PAID";
+  if (s === "REQUIRES_ACTION" || s === "REQUIRESACTION" || s === "AWAITING_NEXT_ACTION" || s === "ACTIVE") return "PENDING";
+  return s;
+}
 
 /**
  * Multi-layer sheet resolution to prevent:
@@ -366,8 +398,11 @@ function resolveSheetSafely(e) {
       var form = (e && e.source && typeof e.source.getDestinationId === "function")
         ? e.source
         : FormApp.getActiveForm();
-      if (form && form.getDestinationId()) {
-        spreadsheet = SpreadsheetApp.openById(form.getDestinationId());
+      if (form) {
+        var destId = form.getDestinationId();
+        if (destId) {
+          spreadsheet = SpreadsheetApp.openById(destId);
+        }
       }
     } catch (_) {
       spreadsheet = null;
@@ -391,19 +426,21 @@ function resolveSheetSafely(e) {
       var allSheets = spreadsheet.getSheets();
       for (var s = 0; s < allSheets.length; s++) {
         var sName = allSheets[s].getName().toLowerCase();
-        if (sName.indexOf("form responses") !== -1 || sName.indexOf("response") !== -1) {
+        if (sName.indexOf("form responses") !== -1 || sName.indexOf("response") !== -1 || sName.indexOf("orders") !== -1) {
           sheet = allSheets[s];
           break;
         }
       }
     }
     if (!sheet) {
-      sheet = spreadsheet.getActiveSheet() || spreadsheet.getSheets()[0];
+      try {
+        sheet = spreadsheet.getActiveSheet() || spreadsheet.getSheets()[0];
+      } catch (_) {
+        sheet = spreadsheet.getSheets()[0];
+      }
     }
     if (sheet && !rowIndex) {
       var last = sheet.getLastRow();
-      // Synthetic simulations (namedValues only) append a NEW row; real Form/manual
-      // runs target the row Google Forms already wrote (the last row).
       var isSyntheticSimulation = !!(e && e.namedValues && !e.range && !e.source);
       rowIndex = isSyntheticSimulation ? ((last < 1) ? 2 : last + 1) : Math.max(last, 2);
     }
@@ -414,6 +451,7 @@ function resolveSheetSafely(e) {
 
 /**
  * Safely extracts form key-value pairs whether triggered from a Sheet, a Form, or a manual test run.
+ * Ignores blank rows or error-only rows when running manually so diagnostic runs never get stuck.
  */
 function extractFormDataSafely(e, sheet, rowIndex) {
   var formData = {};
@@ -423,37 +461,49 @@ function extractFormDataSafely(e, sheet, rowIndex) {
     for (var key in e.namedValues) {
       if (Object.prototype.hasOwnProperty.call(e.namedValues, key)) {
         var val = e.namedValues[key];
-        formData[key.trim().toLowerCase()] = Array.isArray(val) ? val[0] : val;
+        var strVal = Array.isArray(val) ? val[0] : val;
+        if (strVal !== undefined && strVal !== null && String(strVal).trim() !== "") {
+          formData[key.trim().toLowerCase()] = strVal;
+        }
       }
     }
   }
 
   // Layer 2: e.response (FormApp Form Submit event)
   if (e && e.response && typeof e.response.getItemResponses === "function") {
-    if (typeof e.response.getRespondentEmail === "function" && e.response.getRespondentEmail()) {
-      var respEmail = e.response.getRespondentEmail();
-      if (!formData["email address"]) formData["email address"] = respEmail;
-      if (!formData["email"]) formData["email"] = respEmail;
-    }
+    try {
+      if (typeof e.response.getTimestamp === "function" && e.response.getTimestamp()) {
+        formData["timestamp"] = e.response.getTimestamp();
+      }
+      if (typeof e.response.getRespondentEmail === "function" && e.response.getRespondentEmail()) {
+        var respEmail = e.response.getRespondentEmail();
+        if (!formData["email address"]) formData["email address"] = respEmail;
+        if (!formData["email"]) formData["email"] = respEmail;
+      }
+    } catch (_) {}
+
     var items = e.response.getItemResponses();
     for (var j = 0; j < items.length; j++) {
       var itemTitle = String(items[j].getItem().getTitle() || "").trim().toLowerCase();
-      if (!formData[itemTitle]) {
-        formData[itemTitle] = items[j].getResponse();
+      var respVal = items[j].getResponse();
+      if (itemTitle && respVal !== undefined && respVal !== null && String(respVal).trim() !== "") {
+        formData[itemTitle] = Array.isArray(respVal) ? respVal.join(", ") : respVal;
       }
     }
   }
 
-  // Layer 3: Sheet available with at least 1 data row (supplementary/fallback columns)
-  if (sheet && rowIndex && rowIndex >= 2 && sheet.getLastColumn() >= 1) {
+  // Layer 3: Sheet available with an actual populated data row
+  if (sheet && rowIndex && rowIndex >= 2 && sheet.getLastRow() >= rowIndex && sheet.getLastColumn() >= 1) {
     try {
       var lastCol = sheet.getLastColumn();
       var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
       var rowValues = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
       for (var i = 0; i < headers.length; i++) {
         var headerName = String(headers[i] || "").trim().toLowerCase();
-        if (headerName && (formData[headerName] === undefined || formData[headerName] === "")) {
-          formData[headerName] = rowValues[i];
+        var cellVal = rowValues[i];
+        var hasValue = cellVal !== undefined && cellVal !== null && String(cellVal).trim() !== "";
+        if (headerName && hasValue && (formData[headerName] === undefined || formData[headerName] === "")) {
+          formData[headerName] = cellVal;
         }
       }
     } catch (sheetReadErr) {
@@ -461,29 +511,44 @@ function extractFormDataSafely(e, sheet, rowIndex) {
     }
   }
 
-  // If any fields were captured from Layer 1, 2, or 3, return them
-  if (Object.keys(formData).length > 0) {
-    return formData;
+  // Verify whether captured data actually has a customer email or submission payload
+  var capturedEmail = extractField(formData, ["customer email", "email address", "your email", "respondent email", "email"]);
+  if (capturedEmail && capturedEmail.indexOf("@") !== -1) {
+    return { formData: formData, targetRowIndex: rowIndex };
   }
 
-  // Layer 4: Manual click on "Run" button in Apps Script Editor with an empty sheet
-  Logger.log("Manual test run detected: Using diagnostic bookstore sample submission.");
+  // If this was a real trigger event (not a manual editor run), return whatever was captured
+  if (e && (e.range || e.namedValues || e.response)) {
+    return { formData: formData, targetRowIndex: rowIndex };
+  }
+
+  // Layer 4: Manual click on "Run" button in Apps Script Editor when sheet has no valid email row
+  Logger.log("Manual test run detected: Initializing diagnostic bookstore sample submission.");
+  var nextRow = 2;
+  if (sheet) {
+    var lastRow = sheet.getLastRow();
+    nextRow = lastRow < 2 ? 2 : (capturedEmail ? lastRow : lastRow + 1);
+  }
+
   return {
-    "timestamp": new Date().toISOString(),
-    "customer name": "Juan Dela Cruz (Test Enrollee)",
-    "full name": "Juan Dela Cruz (Test Enrollee)",
-    "email address": CONFIG.SUPPORT_EMAIL.indexOf("@") !== -1 ? CONFIG.SUPPORT_EMAIL : "test.client@example.com",
-    "contact number": "09171234567",
-    "mobile number": "09171234567",
-    "book / material": "Financial Accounting & Reporting Vol. 1 - ₱450.00",
-    "book / course material selection": "Financial Accounting & Reporting Vol. 1 - ₱450.00",
-    "quantity": "1",
-    "instructor credit": "Prof. Maria Santos (Taxation)",
-    "enrolled instructor to credit": "Prof. Maria Santos (Taxation)",
-    "student id": "2026-ACCT-1049",
-    "student / enrollee id number": "2026-ACCT-1049",
-    "notes": "Diagnostic test run from Apps Script IDE",
-    "delivery address / campus pickup notes": "Diagnostic test run from Apps Script IDE"
+    targetRowIndex: nextRow,
+    formData: {
+      "timestamp": new Date().toISOString(),
+      "customer name": "Juan Dela Cruz (Test Enrollee)",
+      "full name": "Juan Dela Cruz (Test Enrollee)",
+      "email address": CONFIG.SUPPORT_EMAIL.indexOf("@") !== -1 ? CONFIG.SUPPORT_EMAIL : "test.client@example.com",
+      "contact number": "09171234567",
+      "mobile number": "09171234567",
+      "book / material": "Financial Accounting & Reporting Vol. 1 - ₱450.00",
+      "book / course material selection": "Financial Accounting & Reporting Vol. 1 - ₱450.00",
+      "quantity": "1",
+      "instructor credit": "Prof. Maria Santos (Taxation)",
+      "enrolled instructor to credit": "Prof. Maria Santos (Taxation)",
+      "student id": "2026-ACCT-1049",
+      "student / enrollee id number": "2026-ACCT-1049",
+      "notes": "Diagnostic test run from Apps Script IDE",
+      "delivery address / campus pickup notes": "Diagnostic test run from Apps Script IDE"
+    }
   };
 }
 
@@ -527,11 +592,16 @@ function parseSafeTimestampMillis(rawTs) {
   var m = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
   if (m) {
     var a = parseInt(m[1], 10), b = parseInt(m[2], 10);
-    // Prefer DD/MM when first part > 12, otherwise assume DD/MM (PH locale) unless second part > 12
     var day = a, month = b;
     if (b > 12 && a <= 12) { day = b; month = a; }
-    var d = new Date(parseInt(m[3], 10), month - 1, day,
-      parseInt(m[4] || "0", 10), parseInt(m[5] || "0", 10), parseInt(m[6] || "0", 10));
+    var d = new Date(
+      parseInt(m[3], 10),
+      month - 1,
+      day,
+      parseInt(m[4] || "0", 10),
+      parseInt(m[5] || "0", 10),
+      parseInt(m[6] || "0", 10)
+    );
     if (!isNaN(d.getTime())) return d.getTime();
   }
   var parsed = Date.parse(str);
@@ -585,13 +655,13 @@ function sanitizeForSpreadsheet(val) {
 }
 
 /**
- * Standard column aliases map for robust header recognition across Form question titles,
+ * Standard 18-column aliases map for robust header recognition across Form question titles,
  * short headers, and legacy spreadsheet schemas.
  */
 var COLUMN_ALIASES = {
   "timestamp": ["timestamp", "time", "date", "submission time"],
   "customer name": ["customer name", "full name", "name", "your name", "student name", "client name"],
-  "email address": ["email address", "email", "customer email", "your email"],
+  "email address": ["email address", "email", "customer email", "your email", "respondent email"],
   "contact number": ["contact number", "mobile phone number", "mobile number", "mobile", "phone", "cellphone"],
   "book / material": ["book / material", "book / course material selection", "course material", "material", "book", "product", "item"],
   "quantity": ["quantity", "qty", "number of items", "copies"],
@@ -610,7 +680,7 @@ var COLUMN_ALIASES = {
 };
 
 /**
- * Resolves column index using exact match, known alias dictionary, or substring containment.
+ * Resolves column index using exact match, known alias dictionary, or safe substring containment.
  */
 function resolveColumnIndex(headerMap, colName) {
   var key = colName.trim().toLowerCase();
@@ -623,8 +693,19 @@ function resolveColumnIndex(headerMap, colName) {
   }
 
   for (var existingHeader in headerMap) {
-    if (existingHeader.indexOf(key) !== -1 || key.indexOf(existingHeader) !== -1) {
+    if (!Object.prototype.hasOwnProperty.call(headerMap, existingHeader)) continue;
+    // Prevent cross-matching distinct ID columns ("student id", "response id", "payment attempt id")
+    if (key.indexOf("id") !== -1 && existingHeader.indexOf("id") !== -1 && existingHeader.indexOf(key) === -1) {
+      continue;
+    }
+    if (existingHeader.indexOf(key) !== -1) {
       return headerMap[existingHeader];
+    }
+    for (var b = 0; b < aliases.length; b++) {
+      var aliasCandidate = aliases[b].toLowerCase();
+      if (aliasCandidate.length >= 5 && existingHeader.indexOf(aliasCandidate) !== -1) {
+        return headerMap[existingHeader];
+      }
     }
   }
 
@@ -632,20 +713,26 @@ function resolveColumnIndex(headerMap, colName) {
 }
 
 /**
- * Ensures target columns exist in the header row, then writes sanitized values to the specific row.
- * Uses intelligent alias matching to prevent creating redundant or duplicate columns.
+ * Builds a lowercase header -> 1-based column index map from a sheet.
  */
-function ensureAndWriteColumns(sheet, rowIndex, columnMap) {
+function buildHeaderMap(sheet) {
   var lastCol = Math.max(sheet.getLastColumn(), 1);
   var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   var headerMap = {};
-
   for (var i = 0; i < headers.length; i++) {
     var h = String(headers[i] || "").trim();
     if (h) {
       headerMap[h.toLowerCase()] = i + 1;
     }
   }
+  return headerMap;
+}
+
+/**
+ * Ensures target columns exist in the header row, then writes sanitized values to the specific row.
+ */
+function ensureAndWriteColumns(sheet, rowIndex, columnMap) {
+  var headerMap = buildHeaderMap(sheet);
 
   for (var colName in columnMap) {
     if (Object.prototype.hasOwnProperty.call(columnMap, colName)) {
@@ -664,34 +751,34 @@ function ensureAndWriteColumns(sheet, rowIndex, columnMap) {
 }
 
 /**
- * Finds the target row in the Google Sheet for a PayMongo webhook callback.
+ * Finds the target row in the Google Sheet for a PayMongo webhook callback using alias-aware column resolution.
  */
 function findMatchingRow(sheet, responseId, orderNumber, paymentAttemptId, sheetRowIndex) {
   var lastRow = sheet.getLastRow();
   var lastCol = sheet.getLastColumn();
   if (lastRow < 2 || lastCol < 1) return null;
 
-  var allValues = sheet.getRange(1, 1, lastRow, lastCol).getValues();
-  var headers = allValues[0].map(function(h) { return String(h || "").trim().toLowerCase(); });
+  var headerMap = buildHeaderMap(sheet);
+  var respCol = (resolveColumnIndex(headerMap, "Response ID") || 0) - 1;
+  var orderCol = (resolveColumnIndex(headerMap, "Order Number") || 0) - 1;
+  var attemptCol = (resolveColumnIndex(headerMap, "Payment Attempt ID") || 0) - 1;
 
-  var respCol = headers.indexOf("response id");
-  var orderCol = headers.indexOf("order number");
-  var attemptCol = headers.indexOf("payment attempt id");
+  var allValues = sheet.getRange(1, 1, lastRow, lastCol).getValues();
 
   for (var r = 1; r < allValues.length; r++) {
     var row = allValues[r];
-    if (orderCol !== -1 && orderNumber && String(row[orderCol]).trim() === String(orderNumber).trim()) {
+    if (orderCol >= 0 && orderNumber && String(row[orderCol]).trim() === String(orderNumber).trim()) {
       return r + 1;
     }
-    if (respCol !== -1 && responseId && String(row[respCol]).trim() === String(responseId).trim()) {
+    if (respCol >= 0 && responseId && String(row[respCol]).trim() === String(responseId).trim()) {
       return r + 1;
     }
-    if (attemptCol !== -1 && paymentAttemptId && String(row[attemptCol]).trim() === String(paymentAttemptId).trim()) {
+    if (attemptCol >= 0 && paymentAttemptId && String(row[attemptCol]).trim() === String(paymentAttemptId).trim()) {
       return r + 1;
     }
   }
 
-  if (sheetRowIndex && sheetRowIndex >= 2 && sheetRowIndex <= lastRow) {
+  if (sheetRowIndex && Number(sheetRowIndex) >= 2 && Number(sheetRowIndex) <= lastRow) {
     return Number(sheetRowIndex);
   }
   return null;
@@ -724,22 +811,19 @@ function getAppBaseUrl() {
 
 /**
  * Sends a responsive HTML email to the customer with their direct PayMongo link.
- * Built with headless/IDE resilience: If executed directly from Apps Script editor
- * without parameters, safely initializes diagnostic test payload with a live application checkout link.
  *
  * @param {string} [recipientEmail]
  * @param {string} [recipientName]
  * @param {Object} [orderData]
  */
 function sendPaymentInstructionsEmail(recipientEmail, recipientName, orderData) {
-  // Guard against direct invocation from Apps Script IDE toolbar or missing arguments
   if (!orderData || typeof orderData !== "object") {
     Logger.log("Notice: sendPaymentInstructionsEmail was executed directly without arguments. Initializing diagnostic test payload...");
     var diagOrderNo = "ORD-SIM-" + Math.floor(1000 + Math.random() * 9000);
     orderData = {
       order_number: diagOrderNo,
       order_title: "Financial Accounting & Reporting Vol. 1",
-      amount_php: "450.00",
+      amount_php: "₱450.00",
       checkout_url: getAppBaseUrl() + "/checkout?order_number=" + diagOrderNo + "&amount=450.00&simulated=true"
     };
     var activeEmail = "";
@@ -752,7 +836,7 @@ function sendPaymentInstructionsEmail(recipientEmail, recipientName, orderData) 
 
   var orderNo = (orderData && orderData.order_number) ? String(orderData.order_number) : "PENDING";
   var orderTitle = (orderData && (orderData.order_title || orderData.title)) ? String(orderData.order_title || orderData.title) : "Product Order";
-  var amountDisplay = (orderData && orderData.amount_php) ? String(orderData.amount_php) : "0.00";
+  var amountDisplay = (orderData && orderData.amount_php) ? String(orderData.amount_php) : "₱0.00";
   var checkoutUrl = (orderData && orderData.checkout_url) ? String(orderData.checkout_url) : "#";
   var customer = recipientName ? String(recipientName) : "Valued Client";
   var targetEmail = recipientEmail ? String(recipientEmail).trim() : "";
@@ -819,7 +903,7 @@ function testSendPaymentInstructionsEmail() {
   var sampleOrder = {
     order_number: diagOrderNo,
     order_title: "Financial Accounting & Reporting Vol. 1 (Diagnostic)",
-    amount_php: "450.00",
+    amount_php: "₱450.00",
     checkout_url: getAppBaseUrl() + "/checkout?order_number=" + diagOrderNo + "&amount=450.00&simulated=true"
   };
   sendPaymentInstructionsEmail(testRecipient, "Diagnostic Test Customer", sampleOrder);
@@ -828,7 +912,6 @@ function testSendPaymentInstructionsEmail() {
 
 /**
  * Convenience entry point to run FormBuilder directly from Code.gs.
- * Creates the R.G.E Bookstore Order Form, binds spreadsheet, and sets triggers.
  */
 function runBookstoreFormBuilder() {
   if (typeof generateBookstoreOrderForm === "function") {
@@ -839,8 +922,7 @@ function runBookstoreFormBuilder() {
 }
 
 /**
- * Safely displays an alert in spreadsheet UI, or falls back to Logger.log if executed
- * directly from the Apps Script code editor, automated trigger, or headless context.
+ * Safely displays an alert in spreadsheet UI, or falls back to Logger.log in headless/trigger contexts.
  * @param {string} message
  */
 function showAlertSafely(message) {
@@ -898,20 +980,40 @@ function runSingleRandomOrder() {
 
 function repairTriggersMenuAction() {
   var context = resolveSheetSafely(null);
-  var spreadsheet = context.spreadsheet || (context.sheet ? context.sheet.getParent() : SpreadsheetApp.getActiveSpreadsheet());
-  if (spreadsheet) {
-    if (typeof ensureFormSubmitTrigger === "function") {
-      ensureFormSubmitTrigger(spreadsheet);
-    }
-    showAlertSafely("Trigger verified for spreadsheet: " + spreadsheet.getName());
+  var spreadsheet = context.spreadsheet || (context.sheet ? context.sheet.getParent() : null);
+  if (!spreadsheet) {
+    try {
+      spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    } catch (_) {}
   }
+  if (!spreadsheet) {
+    showAlertSafely("Error: Could not resolve spreadsheet. Open Apps Script from your Google Sheet or set FALLBACK_SPREADSHEET_ID.");
+    return;
+  }
+  if (typeof ensureFormSubmitTrigger === "function") {
+    ensureFormSubmitTrigger(spreadsheet);
+  } else {
+    // Built-in fallback trigger installer if FormBuilder.gs is not present
+    var triggers = ScriptApp.getProjectTriggers();
+    var exists = false;
+    for (var i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === "onFormSubmit") {
+        exists = true;
+        break;
+      }
+    }
+    if (!exists) {
+      ScriptApp.newTrigger("onFormSubmit").forSpreadsheet(spreadsheet).onFormSubmit().create();
+    }
+  }
+  showAlertSafely("✅ Trigger verified for spreadsheet: " + spreadsheet.getName());
 }
 
 /**
  * Setup Bookstore Sheet Headers and triggers.
  */
 function setupBookstoreSheet() {
-  var context = resolveSheetSafely();
+  var context = resolveSheetSafely(null);
   var spreadsheet = context.spreadsheet;
   var sheet = context.sheet;
   if (!spreadsheet && sheet) {
@@ -926,9 +1028,7 @@ function setupBookstoreSheet() {
   if (typeof formatBookstoreSheetHeaders === "function") {
     formatBookstoreSheetHeaders(spreadsheet);
   }
-  if (typeof ensureFormSubmitTrigger === "function") {
-    ensureFormSubmitTrigger(spreadsheet);
-  }
+  repairTriggersMenuAction();
   showAlertSafely("✅ R.G.E Bookstore Sheet headers formatted and onFormSubmit trigger registered successfully!");
 }
 
@@ -936,13 +1036,7 @@ function setupBookstoreSheet() {
  * Simulate 1 student bookstore submission.
  */
 function simulateSingleBookstoreSubmission() {
-  if (typeof generateRandomBookstoreSubmissions === "function") {
-    generateRandomBookstoreSubmissions(1);
-    showAlertSafely("✅ 1 simulated student order submitted to PayMongo & recorded to sheet!");
-  } else {
-    onFormSubmit();
-    showAlertSafely("✅ Diagnostic test run processed!");
-  }
+  runSingleRandomOrder();
 }
 
 /**
@@ -958,16 +1052,18 @@ function simulateFiveBookstoreSubmissions() {
 }
 
 /**
- * Reconciles selected row in the spreadsheet with the Backend API.
+ * Reconciles selected row in the spreadsheet with the .NET Backend API
+ * and fetches the BIR Official Receipt number when PAID/SUCCEEDED.
  */
 function reconcileActiveRowWithBackend() {
-  var context = resolveSheetSafely();
+  var context = resolveSheetSafely(null);
   var sheet = context.sheet;
   if (!sheet) {
     showAlertSafely("No active sheet found.");
     return;
   }
-  var row = sheet.getActiveRange().getRow();
+  var activeRange = sheet.getActiveRange();
+  var row = activeRange ? activeRange.getRow() : sheet.getLastRow();
   if (row < 2) {
     showAlertSafely("Please select an order row (row 2 or below) to reconcile.");
     return;
@@ -979,39 +1075,65 @@ function reconcileActiveRowWithBackend() {
     return;
   }
 
-  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h) {
-    return String(h || "").trim().toLowerCase();
-  });
+  var headerMap = buildHeaderMap(sheet);
   var rowValues = sheet.getRange(row, 1, 1, lastCol).getValues()[0];
 
-  var attemptCol = headers.indexOf("payment attempt id");
-  var orderCol = headers.indexOf("order number");
-  var paymentId = (attemptCol !== -1 && rowValues[attemptCol]) ? String(rowValues[attemptCol]).trim() : "";
-  var orderNo = (orderCol !== -1 && rowValues[orderCol]) ? String(rowValues[orderCol]).trim() : "";
-  var refId = paymentId || orderNo;
+  var attemptCol = (resolveColumnIndex(headerMap, "Payment Attempt ID") || 0) - 1;
+  var orderCol = (resolveColumnIndex(headerMap, "Order Number") || 0) - 1;
+  var respCol = (resolveColumnIndex(headerMap, "Response ID") || 0) - 1;
+
+  var paymentId = (attemptCol >= 0 && rowValues[attemptCol]) ? String(rowValues[attemptCol]).trim() : "";
+  var orderNo = (orderCol >= 0 && rowValues[orderCol]) ? String(rowValues[orderCol]).trim() : "";
+  var responseId = (respCol >= 0 && rowValues[respCol]) ? String(rowValues[respCol]).trim() : "";
+  var refId = paymentId || orderNo || responseId;
 
   if (!refId) {
-    showAlertSafely("No Payment Attempt ID or Order Number found in selected row " + row + ".");
+    showAlertSafely("No Payment Attempt ID, Order Number, or Response ID found in selected row " + row + ".");
     return;
   }
 
-  var baseUrl = CONFIG.BACKEND_URL.replace(/\/api\/v1\/integrations\/google-forms\/submit\/?$/, "");
+  var baseUrl = getAppBaseUrl();
   var pollUrl = baseUrl + "/api/v1/payments/" + encodeURIComponent(refId) + "?auto_reconcile=true";
 
   try {
-    var response = UrlFetchApp.fetch(pollUrl, { muteHttpExceptions: true });
+    var response = UrlFetchApp.fetch(pollUrl, {
+      method: "get",
+      headers: { "Accept": "application/json" },
+      muteHttpExceptions: true
+    });
     var code = response.getResponseCode();
     if (code === 200) {
-      var data = JSON.parse(response.getContentText());
-      var status = (data.status || "UNKNOWN").toUpperCase();
-      var receiptNo = (data.receipt && data.receipt.official_receipt_number) ? data.receipt.official_receipt_number : "";
+      var data = JSON.parse(response.getContentText() || "{}");
+      var rawStatus = data.status || data.payment_status || "UNKNOWN";
+      var status = normalizeDisplayStatus(rawStatus);
+      var receiptNo = (data.receipt && data.receipt.official_receipt_number)
+        ? data.receipt.official_receipt_number
+        : (data.official_receipt_number || "");
+
+      // If PAID, query the Receipts endpoint to retrieve the issued BIR Official Receipt number
+      if (status === "PAID" && !receiptNo) {
+        var targetPaymentId = data.id || data.payment_attempt_id || paymentId || refId;
+        var receiptUrl = baseUrl + "/api/v1/payments/" + encodeURIComponent(targetPaymentId) + "/receipt";
+        var receiptResp = UrlFetchApp.fetch(receiptUrl, {
+          method: "get",
+          headers: { "Accept": "application/json" },
+          muteHttpExceptions: true
+        });
+        if (receiptResp.getResponseCode() === 200) {
+          var receiptData = JSON.parse(receiptResp.getContentText() || "{}");
+          receiptNo = receiptData.official_receipt_number || receiptData.OfficialReceiptNumber || "";
+        }
+      }
+
       var updateMap = {
         "Payment Status": status,
-        "Synchronized At": new Date().toLocaleString()
+        "Synchronized At": formatSafeTimestamp(new Date())
       };
       if (receiptNo) {
         updateMap["Official Receipt No"] = receiptNo;
         updateMap["Webhook Outcome Details"] = "Live reconciled with PayMongo. Receipt: " + receiptNo;
+      } else if (status === "PAID") {
+        updateMap["Webhook Outcome Details"] = "Live reconciled with PayMongo (Payment Confirmed).";
       }
       ensureAndWriteColumns(sheet, row, updateMap);
       showAlertSafely("✅ Row " + row + " successfully reconciled! Status: " + status + (receiptNo ? " | Receipt: " + receiptNo : ""));
@@ -1022,5 +1144,3 @@ function reconcileActiveRowWithBackend() {
     showAlertSafely("Reconciliation error: " + fetchErr.toString());
   }
 }
-
-
