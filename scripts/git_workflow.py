@@ -2,7 +2,7 @@
 r"""
 scripts/git_workflow.py
 Automation helper for Scoped Staging, Conventional Commits 1.0.0,
-and Semantic Versioning 2.0.0 Release Tagging in E:\Accounting.
+and Semantic Versioning 2.0.0 Release Tagging in Accounting-Checkout-test.
 """
 
 import argparse
@@ -15,9 +15,72 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
-# Functional scope mapping rules
-SCOPE_PATTERNS = {
-    "repo": [
+# Primary classification rules (ordered from most specific to broadest)
+PRIMARY_SCOPE_PATTERNS = [
+    ("agents", [r"^\.agents/.*"]),
+    ("migration", [r"^docs/migration/.*", r"^tools/migration/.*"]),
+    ("versioning", [
+        r"^scripts/git_workflow\.py$",
+        r"^tools/versioning/.*",
+        r"^commitlint\.config\.js$",
+        r"^\.githooks/.*",
+        r"^\.frontend-drift-allowlist$",
+        r"^\.release-line$",
+    ]),
+    ("release", [r"^docs/release/.*", r"^docs/runbooks/.*", r"^\.github/workflows/.*"]),
+    ("deploy", [
+        r"^Backend/deploy/.*",
+        r"^deploy/.*",
+        r"^nginx/.*",
+        r"^Procfile$",
+        r"^project\.toml$",
+    ]),
+    ("db", [r"^Backend/db/.*", r"^db/.*"]),
+    ("test", [
+        r"^Backend/tests/.*",
+        r"^Backend/test_.*",
+        r"^tests/.*",
+        r"^Frontend/.*\.test\.(ts|tsx|js|jsx)$",
+        r"^Frontend/scripts/test-.*",
+        r"^Frontend/vitest\..*",
+        r"^TESTING_QA_PROMPT\.md$",
+    ]),
+    ("docs", [
+        r"^docs/.*",
+        r"^Backend/docs/.*",
+        r"^INSTRUCTIONS\.txt$",
+        r"^Backend/README\.md$",
+        r"^scripts/google_apps_script/README\.md$",
+    ]),
+    ("payments", [
+        r"^Backend/src/Modules/Payments/.*",
+        r"^scripts/Test-PayMongoWebhookLocal\.ps1$",
+    ]),
+    ("receipts", [r"^Backend/src/Modules/Receipts/.*"]),
+    ("finance", [r"^Backend/src/Modules/Finance/.*"]),
+    ("identity", [r"^Backend/src/Modules/Identity/.*"]),
+    ("audit", [
+        r"^Backend/src/Modules/Audit/.*",
+        r"^Backend/tools/AuditChain\.Verifier/.*",
+    ]),
+    ("costalloc", [r"^Backend/src/Modules/CostAllocation/.*"]),
+    ("documents", [r"^Backend/src/Modules/Documents/.*"]),
+    ("integrations", [
+        r"^Backend/src/Modules/Integrations/.*",
+        r"^scripts/google_apps_script/.*",
+    ]),
+    ("dotnet", [
+        r"^Backend/.*",
+        r"^Rge\.Accounting\.Host\.slnx$",
+        r"^global\.json$",
+    ]),
+    ("backend", [
+        r"^Backend/.*",
+        r"^scripts/start_production\.py$",
+        r"^scaffold\.(sh|ps1)$",
+    ]),
+    ("frontend", [r"^Frontend/.*"]),
+    ("repo", [
         r"^\.gitignore$",
         r"^\.env\.example$",
         r"^README\.md$",
@@ -26,45 +89,62 @@ SCOPE_PATTERNS = {
         r"^VERSION$",
         r"^requirements\.txt$",
         r"^runtime\.txt$",
-        r"^Procfile$",
-        r"^nginx/.*",
+    ]),
+]
+
+# Broad alias scopes so `add --scope dotnet` or `add --scope backend` stages all relevant files
+BROAD_SCOPE_MATCHERS = {
+    "dotnet": [
+        r"^Backend/(?!tests/).*",
+        r"^Rge\.Accounting\.Host\.slnx$",
+        r"^global\.json$",
+        r"^project\.toml$",
     ],
-    "backend": [r"^Backend/(?!test_).*", r"^db/.*", r"^scaffold\.(sh|ps1)$"],
-    "dotnet": [r"^Backend/(?!test_).*", r"^Rge\.Accounting\.Host\.slnx$", r"^project\.toml$"],
-    "frontend": [r"^Frontend/.*"],
-    "test": [r"^Backend/test_.*", r"^tests/.*"],
-    "docs": [r"^docs/.*", r"^INSTRUCTIONS\.txt$"],
-    "agents": [r"^\.agents/.*"],
-    "versioning": [r"^scripts/.*", r"^tools/versioning/.*"],
+    "backend": [
+        r"^Backend/(?!tests/).*",
+        r"^db/.*",
+        r"^scripts/google_apps_script/.*",
+        r"^scripts/start_production\.py$",
+        r"^scaffold\.(sh|ps1)$",
+    ],
+    "web": [r"^Frontend/.*"],
+    "deps": [
+        r".*packages\.lock\.json$",
+        r".*package-lock\.json$",
+        r".*pnpm-lock\.yaml$",
+        r"^Directory\.Packages\.props$",
+        r"^Backend/Directory\.Packages\.props$",
+        r"^requirements\.txt$",
+    ],
 }
 
-ALLOWED_TYPES = ["feat", "fix", "chore", "docs", "test", "refactor", "style", "perf", "build", "ci", "revert"]
+ALLOWED_TYPES = [
+    "feat", "fix", "chore", "docs", "test", "refactor",
+    "style", "perf", "build", "ci", "revert"
+]
+
 ALLOWED_SCOPES = [
     # Core Monorepo Scopes
-    "repo", "backend", "dotnet", "frontend", "test", "docs", "agents", "versioning", "migration", "content-pack",
+    "repo", "backend", "dotnet", "frontend", "test", "docs",
+    "agents", "versioning", "migration", "content-pack",
     # Domain Module Scopes
-    "web", "payments", "receipts", "finance", "identity", "audit", "costalloc", "documents", "integrations", "db", "deploy", "release", "deps"
+    "web", "payments", "receipts", "finance", "identity",
+    "audit", "costalloc", "documents", "integrations",
+    "db", "deploy", "release", "deps"
 ]
 
 SEMVER_REGEX = re.compile(
-    r"^(?:(dotnet|python)/)?v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
+    r"^(?:(dotnet|python)/)?v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    r"(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?"
+    r"(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
 )
 
-
-def get_release_line():
-    """Determine the active technology line from .release-line or Git branch."""
-    line_file = ROOT_DIR / ".release-line"
-    if line_file.exists():
-        val = line_file.read_text(encoding="utf-8").strip()
-        if val:
-            return val
-    try:
-        branch = run_git_cmd(["branch", "--show-current"])
-        if "c#" in branch.lower() or "dotnet" in branch.lower() or "migrating" in branch.lower():
-            return "dotnet"
-        return "python"
-    except Exception:
-        return "dotnet"
+# Safe source/doc extensions that may contain the words "secret" or "password" in their filename
+SAFE_CODE_OR_DOC_EXTENSIONS = (
+    ".example", ".cs", ".ts", ".tsx", ".js", ".cjs", ".mjs",
+    ".py", ".ps1", ".sh", ".gs", ".md", ".txt", ".yaml", ".yml",
+    ".sql", ".json", ".html", ".css"
+)
 
 
 def run_git_cmd(args, capture_output=True, check=True):
@@ -75,7 +155,9 @@ def run_git_cmd(args, capture_output=True, check=True):
             cwd=str(ROOT_DIR),
             capture_output=capture_output,
             text=True,
-            check=check
+            encoding="utf-8",
+            errors="replace",
+            check=check,
         )
         return result.stdout.rstrip("\r\n") if capture_output else ""
     except subprocess.CalledProcessError as e:
@@ -84,9 +166,25 @@ def run_git_cmd(args, capture_output=True, check=True):
         raise
 
 
+def get_release_line():
+    """Determine the active technology line from .release-line or Git branch."""
+    line_file = ROOT_DIR / ".release-line"
+    if line_file.exists():
+        val = line_file.read_text(encoding="utf-8").strip().lower()
+        if val in ("dotnet", "python"):
+            return val
+    try:
+        branch = run_git_cmd(["branch", "--show-current"]).lower()
+        if "python" in branch:
+            return "python"
+        return "dotnet"
+    except Exception:
+        return "dotnet"
+
+
 def get_changed_files():
-    """Retrieve list of modified, added, deleted, and untracked files."""
-    status_output = run_git_cmd(["status", "--porcelain=v1"])
+    """Retrieve list of modified, added, deleted, and untracked files (expanding untracked dirs)."""
+    status_output = run_git_cmd(["status", "--porcelain=v1", "-uall"])
     files = []
     if not status_output:
         return files
@@ -94,34 +192,49 @@ def get_changed_files():
         if len(line) >= 4:
             status_code = line[:2]
             filepath = line[3:].strip()
-            # Handle quoted paths or renames
             if " -> " in filepath:
-                filepath = filepath.split(" -> ")[1].strip()
-            filepath = filepath.strip('"')
+                filepath = filepath.split(" -> ", 1)[1].strip()
+            filepath = filepath.strip('"').replace("\\", "/")
             files.append((status_code, filepath))
     return files
 
 
 def classify_file(filepath):
-    """Classify a filepath into a project scope."""
-    for scope, patterns in SCOPE_PATTERNS.items():
+    """Classify a filepath into its most specific primary project scope."""
+    norm_path = filepath.replace("\\", "/")
+    for scope, patterns in PRIMARY_SCOPE_PATTERNS:
         for pat in patterns:
-            if re.search(pat, filepath):
+            if re.search(pat, norm_path):
                 return scope
     return "other"
 
 
-def normalize_semver_tag(tag_str):
-    """Ensure the version segment of a tag string starts with 'v' (e.g. '0.5.9' -> 'v0.5.9', 'dotnet/0.5.9' -> 'dotnet/v0.5.9')."""
+def file_matches_scope(filepath, target_scope):
+    """Return True if filepath belongs to target_scope (either primary or broad alias scope)."""
+    norm_path = filepath.replace("\\", "/")
+    if classify_file(norm_path) == target_scope:
+        return True
+    for pat in BROAD_SCOPE_MATCHERS.get(target_scope, []):
+        if re.search(pat, norm_path):
+            return True
+    return False
+
+
+def normalize_semver_tag(tag_str, line=None):
+    """
+    Normalize a SemVer tag string and preserve the active release line prefix
+    (e.g. '0.5.18' -> 'dotnet/v0.5.18', 'dotnet/0.5.18' -> 'dotnet/v0.5.18').
+    """
     tag_str = tag_str.strip()
     if "/" in tag_str:
         prefix, ver = tag_str.split("/", 1)
         if not ver.startswith("v"):
             ver = "v" + ver
         return f"{prefix}/{ver}"
-    if not tag_str.startswith("v"):
-        return "v" + tag_str
-    return tag_str
+
+    active_line = line if line is not None else get_release_line()
+    ver = tag_str if tag_str.startswith("v") else f"v{tag_str}"
+    return f"{active_line}/{ver}" if active_line else ver
 
 
 def parse_semver(tag_str):
@@ -136,6 +249,16 @@ def parse_semver(tag_str):
     return (prefix, major, minor, patch, prerelease, build)
 
 
+def _semver_sort_key(parsed):
+    """
+    SemVer 2.0.0 precedence sort key:
+    Normal releases (prerelease == '') sort AFTER pre-releases of the same major.minor.patch.
+    """
+    _, major, minor, patch, prerelease, _ = parsed
+    is_stable = 1 if prerelease == "" else 0
+    return (major, minor, patch, is_stable, prerelease)
+
+
 def get_all_semver_tags(line=None):
     """Retrieve and semantically sort all git tags for the active release line."""
     if line is None:
@@ -143,7 +266,8 @@ def get_all_semver_tags(line=None):
     try:
         tags = run_git_cmd(["tag", "-l"]).splitlines()
     except Exception:
-        return []
+        tags = []
+
     semver_tags = []
     target_prefix = f"{line}/v"
     for t in tags:
@@ -157,7 +281,7 @@ def get_all_semver_tags(line=None):
             if parsed:
                 semver_tags.append((parsed, t_clean))
 
-    # If no line-specific tags found, fallback to legacy tags
+    # Fallback to legacy unprefixed tags if no line-prefixed tags exist
     if not semver_tags:
         for t in tags:
             t_clean = t.strip()
@@ -166,8 +290,16 @@ def get_all_semver_tags(line=None):
                 if parsed:
                     semver_tags.append((parsed, t_clean))
 
-    # Sort strictly by (major, minor, patch, prerelease)
-    semver_tags.sort(key=lambda x: (x[0][1], x[0][2], x[0][3], x[0][4]))
+    # Also check root VERSION file so we never regress below the committed VERSION
+    version_file = ROOT_DIR / "VERSION"
+    if version_file.exists():
+        raw_ver = version_file.read_text(encoding="utf-8").strip()
+        candidate_tag = f"{line}/v{raw_ver.lstrip('v')}" if line else f"v{raw_ver.lstrip('v')}"
+        parsed_ver = parse_semver(candidate_tag)
+        if parsed_ver and not any(t[1] == candidate_tag for t in semver_tags):
+            semver_tags.append((parsed_ver, candidate_tag))
+
+    semver_tags.sort(key=lambda x: _semver_sort_key(x[0]))
     return [t[1] for t in semver_tags]
 
 
@@ -187,13 +319,13 @@ def calculate_next_version(current_tag, bump_type="patch"):
     Preserves tag prefix (e.g. dotnet/v or python/v).
     """
     parsed = parse_semver(current_tag)
-    prefix = ""
+    line = get_release_line()
     if parsed:
-        prefix = f"{parsed[0]}/v" if parsed[0] else "v"
+        effective_line = parsed[0] or line
+        prefix = f"{effective_line}/v" if effective_line else "v"
         major, minor, patch = parsed[1], parsed[2], parsed[3]
     else:
-        line = get_release_line()
-        prefix = f"{line}/v"
+        prefix = f"{line}/v" if line else "v"
         major, minor, patch = 0, 1, 0
 
     if bump_type == "patch":
@@ -213,11 +345,11 @@ def calculate_next_version(current_tag, bump_type="patch"):
 def sync_version_files(version_str):
     """
     Synchronize version number across:
-    1. VERSION file (raw SemVer e.g. 0.5.1)
-    2. Frontend/.env.production.local (NEXT_PUBLIC_APP_VERSION, NEXT_PUBLIC_APP_LINE, NEXT_PUBLIC_GIT_SHA)
+    1. VERSION file (raw SemVer e.g. 0.5.18)
+    2. Frontend/.env.production.local (untracked local build metadata)
     Note: package.json and Frontend/package.json STRICTLY remain '0.0.0-managed' per ADR 0011.
     """
-    clean_version = version_str
+    clean_version = version_str.strip()
     if "/" in clean_version:
         clean_version = clean_version.split("/", 1)[1]
     clean_version = clean_version.lstrip("v")
@@ -243,7 +375,7 @@ def sync_version_files(version_str):
                     f.write("\n")
                 modified_files.append(str(pkg_path.relative_to(ROOT_DIR)).replace("\\", "/"))
 
-    # 3. Generate Frontend/.env.production.local
+    # 3. Generate Frontend/.env.production.local (not git-staged)
     try:
         line = get_release_line()
         git_sha = run_git_cmd(["rev-parse", "--short", "HEAD"])
@@ -256,7 +388,8 @@ def sync_version_files(version_str):
             f"NEXT_PUBLIC_BUILD_TIME={build_time}\n"
         )
         env_local = ROOT_DIR / "Frontend" / ".env.production.local"
-        env_local.write_text(env_content, encoding="utf-8")
+        if env_local.parent.exists():
+            env_local.write_text(env_content, encoding="utf-8")
     except Exception:
         pass
 
@@ -266,7 +399,8 @@ def sync_version_files(version_str):
 def cmd_status(args):
     """Group and display working tree changes by functional scope."""
     branch = run_git_cmd(["branch", "--show-current"])
-    print(f"\n[Git Workflow] Current branch: {branch or '(detached HEAD)'}")
+    line = get_release_line()
+    print(f"\n[Git Workflow] Current branch: {branch or '(detached HEAD)'} | Release line: {line}")
     files = get_changed_files()
     if not files:
         print("Working tree is completely clean. Nothing to stage or commit.\n")
@@ -286,26 +420,26 @@ def cmd_status(args):
         grouped[scope].append((status_code, fpath, is_staged))
 
     print(f"Summary: {staged_count} staged, {unstaged_count} unstaged/untracked file(s)\n")
-    print(f"{'SCOPE':<12} {'STATUS':<8} {'FILE PATH'}")
-    print("-" * 60)
+    print(f"{'SCOPE':<14} {'STATUS':<10} {'FILE PATH'}")
+    print("-" * 72)
     for scope in ALLOWED_SCOPES + ["other"]:
         items = grouped[scope]
         if items:
             for status_code, fpath, is_staged in items:
                 stage_indicator = "[STAGED]" if is_staged else "[UNSTAGED]"
-                print(f"{scope:<12} {stage_indicator:<10} {fpath}")
+                print(f"{scope:<14} {stage_indicator:<10} {fpath}")
     print("")
 
 
 def cmd_add_scope(args):
     """Stage all files belonging to a specific scope."""
-    scope = args.scope
+    scope = args.scope.lower()
     if scope not in ALLOWED_SCOPES:
         sys.stderr.write(f"Error: Invalid scope '{scope}'. Allowed: {', '.join(ALLOWED_SCOPES)}\n")
         sys.exit(1)
 
     files = get_changed_files()
-    matching_files = [fpath for _, fpath in files if classify_file(fpath) == scope]
+    matching_files = [fpath for _, fpath in files if file_matches_scope(fpath, scope)]
 
     if not matching_files:
         print(f"No unstaged or modified files found for scope '{scope}'.")
@@ -314,35 +448,46 @@ def cmd_add_scope(args):
     print(f"Staging {len(matching_files)} file(s) for scope '{scope}':")
     for f in matching_files:
         print(f"  + {f}")
-        run_git_cmd(["add", f])
+        run_git_cmd(["add", "--", f])
     print(f"Successfully staged scope '{scope}'.")
 
 
 def cmd_check_secrets(args):
-    """Check staged files for forbidden secrets, credentials, or binaries."""
+    """Check staged files for forbidden secrets, env files, private keys, or database binaries."""
     staged_output = run_git_cmd(["diff", "--cached", "--name-only"])
     if not staged_output:
         print("No files currently staged.")
         return
 
-    forbidden_patterns = [
-        r"\.env($|\..*)",
-        r".*\.db$",
-        r".*\.sqlite[3]?$",
-        r".*secret.*",
-        r".*id_rsa.*",
-        r".*password.*"
+    strict_forbidden_patterns = [
+        (r"(^|/)\.env($|\.(?!example$).*)", "Environment secret file (.env)"),
+        (r".*\.(db|sqlite|sqlite3)$", "SQLite/Database binary file"),
+        (r".*(id_rsa|id_ed25519|\.pem|\.pfx|\.p12|\.key)$", "Private key / certificate file"),
     ]
+    keyword_forbidden_patterns = [
+        (r".*secret.*", "Filename contains 'secret'"),
+        (r".*password.*", "Filename contains 'password'"),
+    ]
+
     violations = []
-    for fpath in staged_output.splitlines():
-        for pat in forbidden_patterns:
-            if re.search(pat, fpath, re.IGNORECASE) and not fpath.endswith((".example", ".cs")):
-                violations.append((fpath, pat))
+    for raw_path in staged_output.splitlines():
+        fpath = raw_path.strip().replace("\\", "/")
+        if not fpath:
+            continue
+
+        for pat, reason in strict_forbidden_patterns:
+            if re.search(pat, fpath, re.IGNORECASE):
+                violations.append((fpath, reason))
+
+        if not fpath.lower().endswith(SAFE_CODE_OR_DOC_EXTENSIONS):
+            for pat, reason in keyword_forbidden_patterns:
+                if re.search(pat, fpath, re.IGNORECASE):
+                    violations.append((fpath, reason))
 
     if violations:
         sys.stderr.write("\n[SECURITY ALERT] Staged files contain potential secrets or binary databases:\n")
-        for fpath, pat in violations:
-            sys.stderr.write(f"  - {fpath} (matched rule: {pat})\n")
+        for fpath, reason in violations:
+            sys.stderr.write(f"  - {fpath} ({reason})\n")
         sys.stderr.write("Commit aborted. Unstage these files with 'git reset HEAD <file>'.\n\n")
         sys.exit(1)
     else:
@@ -355,7 +500,10 @@ def cmd_commit(args):
 
     staged_output = run_git_cmd(["diff", "--cached", "--name-only"])
     if not staged_output:
-        sys.stderr.write("Error: No changes are staged. Use 'git add <files>' or 'python scripts/git_workflow.py add --scope <scope>' first.\n")
+        sys.stderr.write(
+            "Error: No changes are staged. Use 'git add <files>' or "
+            "'python scripts/git_workflow.py add --scope <scope>' first.\n"
+        )
         sys.exit(1)
 
     c_type = args.type.lower()
@@ -418,12 +566,13 @@ def cmd_version(args):
 
 
 def cmd_bump(args):
-    """Bump the semantic version in package.json, Frontend/package.json, and VERSION."""
-    latest = get_latest_semver()
+    """Bump the semantic version in VERSION and verify package.json ADR 0011 invariants."""
+    line = get_release_line()
+    latest = get_latest_semver(line)
     if args.version:
-        new_version = normalize_semver_tag(args.version)
+        new_version = normalize_semver_tag(args.version, line)
         if not parse_semver(new_version):
-            sys.stderr.write(f"Error: '{new_version}' is not a valid Semantic Version (e.g. v0.9.31).\n")
+            sys.stderr.write(f"Error: '{new_version}' is not a valid Semantic Version (e.g. dotnet/v0.5.18).\n")
             sys.exit(1)
     else:
         new_version = calculate_next_version(latest, args.type)
@@ -439,15 +588,19 @@ def cmd_bump(args):
 
     if args.stage:
         for m in modified:
-            run_git_cmd(["add", m])
+            run_git_cmd(["add", "--", m])
         print("Staged updated version files.")
 
 
 def cmd_tag(args):
     """Create an annotated Semantic Versioning 2.0.0 release tag."""
-    tag_name = normalize_semver_tag(args.version)
+    line = get_release_line()
+    tag_name = normalize_semver_tag(args.version, line)
     if not parse_semver(tag_name):
-        sys.stderr.write(f"Error: '{tag_name}' does not conform to Semantic Versioning 2.0.0 (expected e.g. v0.1.0, v1.0.0).\n")
+        sys.stderr.write(
+            f"Error: '{tag_name}' does not conform to Semantic Versioning 2.0.0 "
+            f"(expected e.g. {line}/v0.5.18).\n"
+        )
         sys.exit(1)
 
     existing_tags = run_git_cmd(["tag", "-l"]).splitlines()
@@ -464,15 +617,16 @@ def cmd_release(args):
     """
     Automate the full release cycle:
     1. Calculate next version (or use explicit version)
-    2. Synchronize version files (package.json, Frontend/package.json, VERSION)
+    2. Synchronize version files (VERSION, package.json invariant)
     3. Stage version files
     4. Commit using Conventional Commits chore(repo): release <version>: <message>
     5. Create annotated release tag
-    6. Optionally push branch and tags to remote
+    6. Optionally push branch and new tag to remote
     """
-    latest = get_latest_semver()
+    line = get_release_line()
+    latest = get_latest_semver(line)
     if args.version:
-        new_version = normalize_semver_tag(args.version)
+        new_version = normalize_semver_tag(args.version, line)
         if not parse_semver(new_version):
             sys.stderr.write(f"Error: '{new_version}' is not a valid Semantic Version.\n")
             sys.exit(1)
@@ -488,19 +642,20 @@ def cmd_release(args):
         print("Synchronized version files:")
         for m in modified:
             print(f"  + {m}")
-            run_git_cmd(["add", m])
+            run_git_cmd(["add", "--", m])
         print("Staged version files under scope 'repo'.")
 
-    # 2. Check if there are staged changes to commit
-    staged = run_git_cmd(["diff", "--cached", "--name-only"]).splitlines()
+    # 2. Commit staged changes if any exist
+    staged = [s for s in run_git_cmd(["diff", "--cached", "--name-only"]).splitlines() if s.strip()]
     if staged:
+        cmd_check_secrets(args)
         commit_msg = f"release {new_version}: {release_desc}"
         print(f"\nCommitting: chore(repo): {commit_msg}")
         run_git_cmd(["commit", "-m", f"chore(repo): {commit_msg}"], capture_output=False)
     else:
         print("No staged changes to commit; proceeding to tag creation.")
 
-    # 3. Create tag
+    # 3. Create annotated tag
     existing_tags = run_git_cmd(["tag", "-l"]).splitlines()
     if new_version in existing_tags:
         print(f"Tag '{new_version}' already exists.")
@@ -508,18 +663,20 @@ def cmd_release(args):
         run_git_cmd(["tag", "-a", new_version, "-m", f"Release {new_version}: {release_desc}"])
         print(f"Successfully created release tag: {new_version}")
 
-    # 4. Optional Push
+    # 4. Optional Push (pushes current branch and the specific release tag)
     if args.push:
         current_branch = run_git_cmd(["branch", "--show-current"]).strip() or "main"
-        print(f"\nPushing {current_branch} branch and tags to origin...")
-        run_git_cmd(["push", "origin", current_branch, "--tags"], capture_output=False)
+        print(f"\nPushing {current_branch} branch and tag {new_version} to origin...")
+        run_git_cmd(["push", "origin", current_branch, f"refs/tags/{new_version}"], capture_output=False)
         print("Successfully published release to origin!")
 
     print(f"\nRelease {new_version} successfully completed!\n")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Git workflow & SemVer tagging automation for Accounting repository.")
+    parser = argparse.ArgumentParser(
+        description="Git workflow & SemVer tagging automation for Accounting repository."
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # status
@@ -555,16 +712,19 @@ def main():
 
     # tag
     p_tag = subparsers.add_parser("tag", help="Create an annotated SemVer 2.0.0 release tag manually")
-    p_tag.add_argument("version", help="Version string (e.g. v0.1.0)")
+    p_tag.add_argument("version", help="Version string (e.g. v0.5.18 or dotnet/v0.5.18)")
     p_tag.add_argument("-m", "--message", help="Annotation message for the release tag")
     p_tag.set_defaults(func=cmd_tag)
 
     # release
-    p_rel = subparsers.add_parser("release", help="Automated release pipeline (calculate, sync files, commit, tag, push)")
-    p_rel.add_argument("--type", choices=["patch", "minor", "major"], default="patch", help="Semantic bump type (default: patch)")
-    p_rel.add_argument("-v", "--version", help="Explicit version string override (e.g. v1.0.0)")
+    p_rel = subparsers.add_parser(
+        "release",
+        help="Automated release pipeline (calculate, sync files, commit, tag, push)"
+    )
+    p_rel.add_argument("--type", choices=["patch", "minor", "major"], default="patch", help="Semantic bump type")
+    p_rel.add_argument("-v", "--version", help="Explicit version string override (e.g. dotnet/v0.5.18)")
     p_rel.add_argument("-m", "--message", help="Annotation message for the release")
-    p_rel.add_argument("--push", action="store_true", help="Push commit and tags to origin after release")
+    p_rel.add_argument("--push", action="store_true", help="Push commit and tag to origin after release")
     p_rel.set_defaults(func=cmd_release)
 
     args = parser.parse_args()
