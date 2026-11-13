@@ -7,8 +7,8 @@ using Rge.Receipts.Infrastructure.Pdf;
 namespace Rge.Receipts.Infrastructure.Mail.EmailTemplates;
 
 /// <summary>
-/// Builds a responsive, email-client-compatible HTML email template mirroring
-/// the BIR Official Receipt and Treasury Acknowledgement layout.
+/// Builds a responsive, email-client-compatible HTML email template implementing
+/// the "Quiet Financial Precision" minimalist corporate aesthetic.
 /// Compliant with BIR RMC No. 77-2024 and RA 11976 (Ease of Paying Taxes Act).
 /// All dynamic values are strictly HTML-encoded to protect against XSS injection.
 /// </summary>
@@ -65,144 +65,162 @@ public static class ReceiptEmailHtmlBuilder
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <title>{{safeDocumentTitle}} - {{safeOrNumber}}</title>
 </head>
-<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
-  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" bgcolor="#f8fafc" style="border-collapse: collapse;">
+<body style="margin: 0; padding: 0; background-color: #F6F6F4; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; color: #0A0A0A;">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" bgcolor="#F6F6F4" style="border-collapse: collapse;">
     <tr>
-      <td align="center" style="padding: 24px 12px;">
-        <table role="presentation" cellpadding="0" cellspacing="0" width="640" style="max-width: 640px; width: 100%; background-color: #ffffff; border: 1px solid #e2e8f0; border-collapse: separate; border-spacing: 0; border-radius: 6px; overflow: hidden;">
-          <!-- 1. Header Brand Bar -->
+      <td align="center" style="padding: 32px 12px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width: 600px; width: 100%; background-color: #FFFFFF; border: 1px solid #E5E7EB; border-collapse: separate; border-spacing: 0; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
+          
+          <!-- 1. Firm Brand Header (Clean White Surface, Quiet Precision) -->
           <tr>
-            <td bgcolor="#0f172a" style="background-color: #0f172a; padding: 16px 20px;">
+            <td style="padding: 28px 28px 20px 28px; border-bottom: 1px solid #E5E7EB;">
               <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse;">
                 <tr>
-                  <td style="color: #ffffff; font-size: 16px; font-weight: 700; line-height: 1.3;">
-                    {{safeIssuerName}}
+                  <td valign="top" style="vertical-align: top;">
+                    <div style="font-size: 16px; font-weight: 800; color: #0A0A0A; letter-spacing: 0.5px; line-height: 1.2;">
+                      R.G.E.
+                    </div>
+                    <div style="font-size: 13px; font-weight: 700; color: #0A0A0A; letter-spacing: 0.25px; padding-top: 1px; line-height: 1.3;">
+                      ACCOUNTING FIRM INC.
+                    </div>
+                    <div style="font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #71717A; padding-top: 4px;">
+                      Corporate Accounting &amp; Treasury
+                    </div>
+                    <div style="font-size: 10px; color: #71717A; padding-top: 4px; line-height: 1.4;">
+                      VAT Reg. TIN: {{safeTin}} &bull; BIR Permit No: {{safePermit}}
+                    </div>
+                    <div style="font-size: 10px; color: #71717A; padding-top: 2px; line-height: 1.4;">
+                      {{safeIssuerAddress}}
+                    </div>
                   </td>
-                </tr>
-                <tr>
-                  <td style="color: #94a3b8; font-size: 11px; padding-top: 4px; line-height: 1.4;">
-                    VAT Reg. TIN: {{safeTin}} | BIR Permit No: {{safePermit}}
-                  </td>
-                </tr>
-                <tr>
-                  <td style="color: #94a3b8; font-size: 11px; padding-top: 2px; line-height: 1.4;">
-                    {{safeIssuerAddress}}
+                  <td align="right" valign="top" style="vertical-align: top;">
+                    <!-- Emerald Payment Confirmation Pill -->
+                    <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse: collapse;">
+                      <tr>
+                        <td style="background-color: #dcfce7; border: 1px solid #86efac; border-radius: 9999px; padding: 4px 10px; color: #15803d; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; white-space: nowrap;">
+                          <span style="display: inline-block; width: 6px; height: 6px; background-color: #15803d; border-radius: 50%; vertical-align: middle; margin-right: 5px;"></span>{{safeStatusBadge}}
+                        </td>
+                      </tr>
+                    </table>
                   </td>
                 </tr>
               </table>
             </td>
           </tr>
 
-          <!-- Main Content Container -->
+          <!-- 2. Hero Payment Section -->
           <tr>
-            <td style="padding: 20px;">
-              <p style="font-size: 13px; color: #1e293b; margin: 0 0 14px 0; line-height: 1.4;">
-                Dear {{safeCustomerName}},
-              </p>
+            <td style="padding: 24px 28px 20px 28px; border-bottom: 1px solid #E5E7EB;">
+              <div style="font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: #71717A; margin-bottom: 6px;">
+                {{safeDocumentTitle}}
+              </div>
+              <div style="font-size: 38px; font-weight: 800; color: #0A0A0A; letter-spacing: -0.5px; line-height: 1.1; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;">
+                {{safeGrossAmount}}
+              </div>
+              <div style="font-size: 12px; color: #52525B; padding-top: 6px; line-height: 1.4;">
+                Payment successfully confirmed &bull; Issued: {{safeIssuedPst}}
+              </div>
+            </td>
+          </tr>
 
-              <!-- 2. Status Badge & Document Title -->
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse; margin-bottom: 16px;">
+          <!-- 3. Reference Summary Panel (Single Muted Container) -->
+          <tr>
+            <td style="padding: 20px 28px; border-bottom: 1px solid #E5E7EB;">
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #FAFAFA; border: 1px solid #E5E7EB; border-radius: 6px; border-collapse: collapse;">
                 <tr>
-                  <td valign="top" style="vertical-align: top;">
-                    <div style="font-size: 16px; font-weight: 700; color: #0f172a; line-height: 1.3;">
-                      {{safeDocumentTitle}}
+                  <td width="33.3%" style="padding: 12px 14px; border-right: 1px solid #E5E7EB; vertical-align: top;">
+                    <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #71717A; font-weight: 600;">
+                      Official Receipt No.
                     </div>
-                    <div style="font-size: 11px; color: #64748b; padding-top: 2px;">
-                      {{safeDocumentType}}
+                    <div style="font-size: 12px; font-weight: 700; font-family: Consolas, 'Courier New', monospace; color: #0A0A0A; padding-top: 3px;">
+                      {{safeOrNumber}}
                     </div>
                   </td>
-                  <td align="right" valign="top" style="vertical-align: top;">
-                    <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse: collapse;">
+                  <td width="33.3%" style="padding: 12px 14px; border-right: 1px solid #E5E7EB; vertical-align: top;">
+                    <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #71717A; font-weight: 600;">
+                      Acknowledgement No.
+                    </div>
+                    <div style="font-size: 12px; font-weight: 700; font-family: Consolas, 'Courier New', monospace; color: #0A0A0A; padding-top: 3px;">
+                      {{safeAckNumber}}
+                    </div>
+                  </td>
+                  <td width="33.3%" style="padding: 12px 14px; vertical-align: top;">
+                    <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #71717A; font-weight: 600;">
+                      Order Reference
+                    </div>
+                    <div style="font-size: 12px; font-weight: 700; font-family: Consolas, 'Courier New', monospace; color: #0A0A0A; padding-top: 3px;">
+                      {{safeOrderNumber}}
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- 4. Payer & Transaction Grid -->
+          <tr>
+            <td style="padding: 20px 28px; border-bottom: 1px solid #E5E7EB;">
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse;">
+                <tr>
+                  <td width="50%" valign="top" style="vertical-align: top; padding-right: 14px;">
+                    <div style="font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.75px; color: #0A0A0A; margin-bottom: 8px;">
+                      Payer Information
+                    </div>
+                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse;">
                       <tr>
-                        <td style="background-color: #dcfce7; border: 1px solid #86efac; border-radius: 4px; padding: 5px 10px; color: #15803d; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;">
-                          {{safeStatusBadge}}
+                        <td style="font-size: 11px; color: #71717A; padding: 3px 0;">Customer Name:</td>
+                        <td align="right" style="font-size: 12px; font-weight: 600; color: #0A0A0A; padding: 3px 0;">
+                          <span style="display: inline-block; width: 6px; height: 6px; background-color: #E11D48; border-radius: 50%; vertical-align: middle; margin-right: 4px;"></span>{{safeCustomerName}}
                         </td>
+                      </tr>
+                      <tr>
+                        <td style="font-size: 11px; color: #71717A; padding: 3px 0;">Customer Email:</td>
+                        <td align="right" style="font-size: 11px; color: #0A0A0A; padding: 3px 0;">{{safeCustomerEmail}}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size: 11px; color: #71717A; padding: 3px 0;">Order ID:</td>
+                        <td align="right" style="font-size: 11px; font-family: Consolas, monospace; color: #52525B; padding: 3px 0;">{{safeOrderId}}</td>
+                      </tr>
+                    </table>
+                  </td>
+                  <td width="50%" valign="top" style="vertical-align: top; padding-left: 14px; border-left: 1px solid #E5E7EB;">
+                    <div style="font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.75px; color: #0A0A0A; margin-bottom: 8px;">
+                      Settlement Details
+                    </div>
+                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse;">
+                      <tr>
+                        <td style="font-size: 11px; color: #71717A; padding: 3px 0;">Payment Method:</td>
+                        <td align="right" style="font-size: 12px; font-weight: 700; color: #0A0A0A; padding: 3px 0;">{{safePaymentMethod}}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size: 11px; color: #71717A; padding: 3px 0;">Payment Provider:</td>
+                        <td align="right" style="font-size: 11px; font-weight: 600; color: #0A0A0A; padding: 3px 0;">PayMongo</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size: 11px; color: #71717A; padding: 3px 0;">Payment Attempt ID:</td>
+                        <td align="right" style="font-size: 11px; font-family: Consolas, monospace; color: #52525B; padding: 3px 0;">{{safePaymentAttemptId}}</td>
                       </tr>
                     </table>
                   </td>
                 </tr>
               </table>
+            </td>
+          </tr>
 
-              <!-- 3. Two-Column Metadata Cards -->
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse; margin-bottom: 20px;">
-                <tr>
-                  <!-- Left Card: Receipt & Accounting Details -->
-                  <td width="48%" valign="top" style="vertical-align: top; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 12px;">
-                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse;">
-                      <tr>
-                        <td colspan="2" style="font-size: 11px; font-weight: 700; color: #334155; padding-bottom: 8px; border-bottom: 1px solid #e2e8f0; text-transform: uppercase;">
-                          RECEIPT &amp; ACCOUNTING DETAILS
-                        </td>
-                      </tr>
-                      <tr>
-                        <td style="font-size: 11px; color: #64748b; padding-top: 6px; width: 45%;">Official Receipt No:</td>
-                        <td style="font-size: 11px; font-weight: 700; color: #0f172a; padding-top: 6px; text-align: right;">{{safeOrNumber}}</td>
-                      </tr>
-                      <tr>
-                        <td style="font-size: 11px; color: #64748b; padding-top: 4px;">Treasury Ack No:</td>
-                        <td style="font-size: 11px; font-weight: 700; color: #0f172a; padding-top: 4px; text-align: right;">{{safeAckNumber}}</td>
-                      </tr>
-                      <tr>
-                        <td style="font-size: 11px; color: #64748b; padding-top: 4px;">Date Issued (PST):</td>
-                        <td style="font-size: 11px; font-weight: 600; color: #0f172a; padding-top: 4px; text-align: right;">{{safeIssuedPst}}</td>
-                      </tr>
-                      <tr>
-                        <td style="font-size: 11px; color: #64748b; padding-top: 4px;">Date Issued (UTC):</td>
-                        <td style="font-size: 11px; font-weight: 600; color: #0f172a; padding-top: 4px; text-align: right;">{{safeIssuedUtc}}</td>
-                      </tr>
-                      <tr>
-                        <td style="font-size: 11px; color: #64748b; padding-top: 4px;">Payment Method:</td>
-                        <td style="font-size: 11px; font-weight: 700; color: #0f172a; padding-top: 4px; text-align: right;">{{safePaymentMethod}}</td>
-                      </tr>
-                    </table>
-                  </td>
-
-                  <td width="4%">&nbsp;</td>
-
-                  <!-- Right Card: Customer & Order Information -->
-                  <td width="48%" valign="top" style="vertical-align: top; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 12px;">
-                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse;">
-                      <tr>
-                        <td colspan="2" style="font-size: 11px; font-weight: 700; color: #334155; padding-bottom: 8px; border-bottom: 1px solid #e2e8f0; text-transform: uppercase;">
-                          CUSTOMER &amp; ORDER INFORMATION
-                        </td>
-                      </tr>
-                      <tr>
-                        <td style="font-size: 11px; color: #64748b; padding-top: 6px; width: 45%;">Received From:</td>
-                        <td style="font-size: 11px; font-weight: 700; color: #0f172a; padding-top: 6px; text-align: right;">
-                          {{safeCustomerName}}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td style="font-size: 11px; color: #64748b; padding-top: 4px;">Customer Email:</td>
-                        <td style="font-size: 11px; font-weight: 600; color: #0f172a; padding-top: 4px; text-align: right;">{{safeCustomerEmail}}</td>
-                      </tr>
-                      <tr>
-                        <td style="font-size: 11px; color: #64748b; padding-top: 4px;">Order Number:</td>
-                        <td style="font-size: 11px; font-weight: 700; color: #0f172a; padding-top: 4px; text-align: right;">{{safeOrderNumber}}</td>
-                      </tr>
-                      <tr>
-                        <td style="font-size: 11px; color: #64748b; padding-top: 4px;">Order ID:</td>
-                        <td style="font-size: 11px; font-weight: 600; color: #0f172a; padding-top: 4px; text-align: right;">{{safeOrderId}}</td>
-                      </tr>
-                      <tr>
-                        <td style="font-size: 11px; color: #64748b; padding-top: 4px;">Payment Attempt ID:</td>
-                        <td style="font-size: 11px; font-weight: 600; color: #0f172a; padding-top: 4px; text-align: right;">{{safePaymentAttemptId}}</td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
-
-              <!-- 4. Styled Line-Item Table -->
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse; border: 1px solid #e2e8f0; margin-bottom: 16px;">
+          <!-- 5. Payment Particulars Table (Clean Minimal Table with Subtle Horizontal Dividers) -->
+          <tr>
+            <td style="padding: 20px 28px 12px 28px;">
+              <div style="font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.75px; color: #0A0A0A; margin-bottom: 10px;">
+                Payment Particulars
+              </div>
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse;">
                 <thead>
-                  <tr style="background-color: #f1f5f9;">
-                    <th align="left" style="padding: 8px 10px; font-size: 11px; font-weight: 700; color: #0f172a; border-bottom: 1px solid #e2e8f0;">Item Description</th>
-                    <th align="center" style="padding: 8px 10px; font-size: 11px; font-weight: 700; color: #0f172a; border-bottom: 1px solid #e2e8f0; width: 45px;">Qty</th>
-                    <th align="right" style="padding: 8px 10px; font-size: 11px; font-weight: 700; color: #0f172a; border-bottom: 1px solid #e2e8f0; width: 100px;">Unit Price</th>
-                    <th align="right" style="padding: 8px 10px; font-size: 11px; font-weight: 700; color: #0f172a; border-bottom: 1px solid #e2e8f0; width: 100px;">Amount</th>
-                    <th align="center" style="padding: 8px 10px; font-size: 11px; font-weight: 700; color: #0f172a; border-bottom: 1px solid #e2e8f0; width: 120px;">Tax Classification</th>
+                  <tr style="border-bottom: 1px solid #0A0A0A;">
+                    <th align="left" style="padding: 6px 0; font-size: 10.5px; font-weight: 700; color: #0A0A0A; text-transform: uppercase; letter-spacing: 0.5px;">Description</th>
+                    <th align="center" style="padding: 6px 8px; font-size: 10.5px; font-weight: 700; color: #0A0A0A; text-transform: uppercase; letter-spacing: 0.5px; width: 40px;">Qty</th>
+                    <th align="right" style="padding: 6px 8px; font-size: 10.5px; font-weight: 700; color: #0A0A0A; text-transform: uppercase; letter-spacing: 0.5px; width: 95px;">Unit Price</th>
+                    <th align="right" style="padding: 6px 8px; font-size: 10.5px; font-weight: 700; color: #0A0A0A; text-transform: uppercase; letter-spacing: 0.5px; width: 95px;">Amount</th>
+                    <th align="right" style="padding: 6px 0; font-size: 10.5px; font-weight: 700; color: #0A0A0A; text-transform: uppercase; letter-spacing: 0.5px; width: 110px;">Tax Classification</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -217,12 +235,12 @@ public static class ReceiptEmailHtmlBuilder
             string safeTax = Encode(item.TaxClassification);
 
             sb.Append(CultureInfo.InvariantCulture, $$"""
-                  <tr>
-                    <td align="left" style="padding: 8px 10px; font-size: 11px; color: #1e293b; border-bottom: 1px solid #e2e8f0;">{{safeDesc}}</td>
-                    <td align="center" style="padding: 8px 10px; font-size: 11px; color: #1e293b; border-bottom: 1px solid #e2e8f0;">{{safeQty}}</td>
-                    <td align="right" style="padding: 8px 10px; font-size: 11px; color: #1e293b; border-bottom: 1px solid #e2e8f0;">{{safeUnit}}</td>
-                    <td align="right" style="padding: 8px 10px; font-size: 11px; font-weight: 600; color: #0f172a; border-bottom: 1px solid #e2e8f0;">{{safeAmt}}</td>
-                    <td align="center" style="padding: 8px 10px; font-size: 11px; color: #64748b; border-bottom: 1px solid #e2e8f0;">{{safeTax}}</td>
+                  <tr style="border-bottom: 1px solid #E5E7EB;">
+                    <td align="left" style="padding: 10px 0; font-size: 12px; color: #0A0A0A;">{{safeDesc}}</td>
+                    <td align="center" style="padding: 10px 8px; font-size: 12px; color: #52525B;">{{safeQty}}</td>
+                    <td align="right" style="padding: 10px 8px; font-size: 12px; color: #52525B;">{{safeUnit}}</td>
+                    <td align="right" style="padding: 10px 8px; font-size: 12px; font-weight: 700; color: #0A0A0A;">{{safeAmt}}</td>
+                    <td align="right" style="padding: 10px 0; font-size: 11px; color: #71717A;">{{safeTax}}</td>
                   </tr>
 """);
         }
@@ -230,57 +248,112 @@ public static class ReceiptEmailHtmlBuilder
         sb.Append(CultureInfo.InvariantCulture, $$"""
                 </tbody>
               </table>
+            </td>
+          </tr>
 
-              <!-- 5. Right-Aligned VAT Breakdown Summary Card -->
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse; margin-bottom: 20px;">
+          <!-- 6. Financial Breakdown Summary -->
+          <tr>
+            <td style="padding: 12px 28px 24px 28px; border-bottom: 1px solid #E5E7EB;">
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse;">
                 <tr>
                   <td>&nbsp;</td>
                   <td width="260" align="right" style="width: 260px;">
-                    <table role="presentation" cellpadding="0" cellspacing="0" width="260" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 12px; border-collapse: collapse;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" width="260" style="border-collapse: collapse;">
                       <tr>
-                        <td style="font-size: 11px; color: #475569; padding-bottom: 4px;">VATable Sales:</td>
-                        <td align="right" style="font-size: 11px; color: #1e293b; padding-bottom: 4px; text-align: right;">{{safeVatableSales}}</td>
+                        <td style="font-size: 11px; color: #71717A; padding: 3px 0;">VATable Sales:</td>
+                        <td align="right" style="font-size: 11.5px; color: #0A0A0A; padding: 3px 0; text-align: right;">{{safeVatableSales}}</td>
                       </tr>
                       <tr>
-                        <td style="font-size: 11px; color: #475569; padding-bottom: 4px;">12% Value-Added Tax:</td>
-                        <td align="right" style="font-size: 11px; color: #1e293b; padding-bottom: 4px; text-align: right;">{{safeVatAmount}}</td>
+                        <td style="font-size: 11px; color: #71717A; padding: 3px 0;">12% Value-Added Tax:</td>
+                        <td align="right" style="font-size: 11.5px; color: #0A0A0A; padding: 3px 0; text-align: right;">{{safeVatAmount}}</td>
                       </tr>
                       <tr>
-                        <td style="font-size: 11px; color: #475569; padding-bottom: 4px;">VAT-Exempt Sales:</td>
-                        <td align="right" style="font-size: 11px; color: #1e293b; padding-bottom: 4px; text-align: right;">{{safeExemptSales}}</td>
+                        <td style="font-size: 11px; color: #71717A; padding: 3px 0;">VAT-Exempt Sales:</td>
+                        <td align="right" style="font-size: 11.5px; color: #0A0A0A; padding: 3px 0; text-align: right;">{{safeExemptSales}}</td>
                       </tr>
                       <tr>
-                        <td style="font-size: 11px; color: #475569; padding-bottom: 6px;">Zero-Rated Sales:</td>
-                        <td align="right" style="font-size: 11px; color: #1e293b; padding-bottom: 6px; text-align: right;">{{safeZeroRatedSales}}</td>
+                        <td style="font-size: 11px; color: #71717A; padding: 3px 0;">Zero-Rated Sales:</td>
+                        <td align="right" style="font-size: 11.5px; color: #0A0A0A; padding: 3px 0; text-align: right;">{{safeZeroRatedSales}}</td>
                       </tr>
                       <tr>
-                        <td colspan="2" style="border-top: 1px solid #cbd5e1; padding-top: 6px;"></td>
+                        <td style="font-size: 11px; color: #71717A; padding: 3px 0;">Processing Fee:</td>
+                        <td align="right" style="font-size: 11.5px; color: #0A0A0A; padding: 3px 0; text-align: right;">&#8369;0.00</td>
                       </tr>
                       <tr>
-                        <td style="font-size: 12px; font-weight: 700; color: #0f172a;">TOTAL AMOUNT PAID:</td>
-                        <td align="right" style="font-size: 13px; font-weight: 700; color: #0f172a; text-align: right;">{{safeGrossAmount}}</td>
+                        <td colspan="2" style="border-top: 1px solid #0A0A0A; padding-top: 8px; margin-top: 4px;"></td>
+                      </tr>
+                      <tr>
+                        <td style="font-size: 12px; font-weight: 700; color: #0A0A0A; text-transform: uppercase;">TOTAL AMOUNT PAID:</td>
+                        <td align="right" style="font-size: 16px; font-weight: 800; color: #0A0A0A; text-align: right; font-family: monospace, sans-serif;">{{safeGrossAmount}}</td>
                       </tr>
                     </table>
                   </td>
                 </tr>
               </table>
+            </td>
+          </tr>
 
-              <!-- 6. Shaded Cryptographic SHA-256 Digest Footer -->
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 4px; padding: 12px; border-collapse: collapse;">
+          <!-- 7. Compact PDF Attachment Preview -->
+          <tr>
+            <td style="padding: 20px 28px; border-bottom: 1px solid #E5E7EB;">
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #FAFAFA; border: 1px solid #E5E7EB; border-radius: 6px; border-collapse: collapse;">
                 <tr>
-                  <td style="font-size: 11px; color: #475569; font-weight: 700; width: 90px; vertical-align: top;">Audit Digest:</td>
-                  <td style="font-family: Consolas, 'Courier New', monospace; font-size: 10.5px; color: #0f172a; word-break: break-all; line-height: 1.4;">
-                    {{safeAuditDigest}}
+                  <td width="42" align="center" style="padding: 12px 0 12px 14px; vertical-align: middle;">
+                    <div style="width: 30px; height: 36px; border: 1.5px solid #71717A; border-radius: 4px; background-color: #FFFFFF; text-align: center; line-height: 36px; font-size: 10px; font-weight: 700; color: #E11D48;">
+                      PDF
+                    </div>
                   </td>
-                </tr>
-                <tr>
-                  <td colspan="2" style="font-size: 10px; color: #64748b; padding-top: 8px; line-height: 1.4;">
-                    {{safeLegalNote}} &bull; Official BIR-compliant electronic receipt PDF is attached (<code>OfficialReceipt-{{safeOrNumber}}.pdf</code>).
+                  <td style="padding: 12px 14px; vertical-align: middle;">
+                    <div style="font-size: 12px; font-weight: 700; color: #0A0A0A; font-family: Consolas, monospace;">
+                      OfficialReceipt-{{safeOrNumber}}.pdf
+                    </div>
+                    <div style="font-size: 10.5px; color: #71717A; padding-top: 2px;">
+                      Your official receipt document is attached to this email.
+                    </div>
+                  </td>
+                  <td align="right" style="padding: 12px 14px; vertical-align: middle;">
+                    <span style="display: inline-block; font-size: 10px; font-weight: 600; color: #047857; background-color: #ECFDF5; border: 1px solid #A7F3D0; border-radius: 4px; padding: 3px 8px; text-transform: uppercase;">
+                      Attached
+                    </span>
                   </td>
                 </tr>
               </table>
             </td>
           </tr>
+
+          <!-- 8. Cryptographic Audit Digest & Security Note -->
+          <tr>
+            <td style="padding: 20px 28px 24px 28px;">
+              <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #71717A; margin-bottom: 4px;">
+                Authentication &amp; Verification
+              </div>
+              <div style="font-size: 10px; color: #71717A; margin-bottom: 2px;">
+                Audit Digest:
+              </div>
+              <div style="font-family: Consolas, 'Courier New', monospace; font-size: 10px; color: #0A0A0A; word-break: break-all; background-color: #FAFAFA; border: 1px solid #E5E7EB; border-radius: 4px; padding: 8px 10px; line-height: 1.4;">
+                {{safeAuditDigest}}
+              </div>
+              <div style="font-size: 10px; color: #71717A; padding-top: 8px; line-height: 1.4;">
+                {{safeLegalNote}} &bull; Certified electronic issuance under RA 11976 (Ease of Paying Taxes Act).
+              </div>
+            </td>
+          </tr>
+
+          <!-- 9. Footer (Restrained Corporate) -->
+          <tr>
+            <td style="background-color: #FAFAFA; border-top: 1px solid #E5E7EB; padding: 18px 28px; text-align: center;">
+              <div style="font-size: 11px; font-weight: 700; color: #0A0A0A;">
+                {{safeIssuerName}}
+              </div>
+              <div style="font-size: 10px; color: #71717A; padding-top: 3px; line-height: 1.4;">
+                {{safeIssuerAddress}} &bull; VAT Reg. TIN: {{safeTin}} &bull; BIR Permit No: {{safePermit}}
+              </div>
+              <div style="font-size: 10px; color: #94A3B8; padding-top: 6px;">
+                This automated financial record was issued upon settlement confirmation.
+              </div>
+            </td>
+          </tr>
+
         </table>
       </td>
     </tr>
