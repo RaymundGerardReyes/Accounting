@@ -179,7 +179,7 @@ export function PayMongoCheckoutGuard({
               <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-left text-xs text-amber-800 dark:text-amber-300">
                 <div className="flex items-start gap-2">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <div className="space-y-1">
+                  <div className="space-y-1.5 flex-1">
                     <p className="font-semibold">
                       QR Code Timed Out — Checkout Session Still Active
                     </p>
@@ -187,6 +187,19 @@ export function PayMongoCheckoutGuard({
                       {failureMessage ||
                         "The child QR/source payment resource expired, while the parent PayMongo Checkout Session remains active. Click Open PayMongo Gateway to generate a new QR code on the hosted page, or click Change Payment Method below to expire this session and start fresh."}
                     </p>
+                    {handleRetry && (
+                      <div className="pt-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleRetry}
+                          className="h-7 border-amber-500/60 bg-amber-500/20 text-xs text-amber-900 hover:bg-amber-500/30 dark:text-amber-200"
+                        >
+                          <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                          Expire Now & Start Fresh
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -194,7 +207,11 @@ export function PayMongoCheckoutGuard({
 
             <div className="flex items-center justify-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               <Clock className="h-3.5 w-3.5" />
-              <span>Authoritative Session Countdown</span>
+              <span>
+                {failureCode === "qrph_source_expired"
+                  ? "Hosted Session Lifetime (QR Code Expired)"
+                  : "Authoritative Session Countdown"}
+              </span>
             </div>
 
             <div
