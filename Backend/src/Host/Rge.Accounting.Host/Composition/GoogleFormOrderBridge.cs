@@ -10,13 +10,12 @@ using Rge.Payments.Application.Ports;
 using Rge.Payments.Domain.Orders;
 using Rge.Payments.Domain.PaymentAttempts;
 using Rge.Payments.Domain.Pricing;
-using Rge.Receipts.Contracts;
 
 namespace Rge.Accounting.Host.Composition;
 
 /// <summary>
-/// Cross-module bridge that creates real PostgreSQL/in-memory Orders and live PayMongo
-/// Checkout Sessions when a Google Form is submitted, and resolves live payment/receipt status.
+/// Cross-module bridge that persists Google Form submissions as real Orders in PostgreSQL/memory
+/// and initiates live PayMongo Checkout Sessions.
 /// </summary>
 public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
 {
@@ -24,7 +23,6 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
     private readonly IPaymentAttemptRepository _attemptRepository;
     private readonly IPricingPolicy _pricingPolicy;
     private readonly IPaymentGateway _paymentGateway;
-    private readonly IReceiptLookup _receiptLookup;
     private readonly IClock _clock;
     private readonly IConfiguration _configuration;
 
@@ -33,7 +31,6 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
         IPaymentAttemptRepository attemptRepository,
         IPricingPolicy pricingPolicy,
         IPaymentGateway paymentGateway,
-        IReceiptLookup receiptLookup,
         IClock clock,
         IConfiguration configuration)
     {
@@ -41,7 +38,6 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
         ArgumentNullException.ThrowIfNull(attemptRepository);
         ArgumentNullException.ThrowIfNull(pricingPolicy);
         ArgumentNullException.ThrowIfNull(paymentGateway);
-        ArgumentNullException.ThrowIfNull(receiptLookup);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(configuration);
 
@@ -49,62 +45,59 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
         _attemptRepository = attemptRepository;
         _pricingPolicy = pricingPolicy;
         _paymentGateway = paymentGateway;
-        _receiptLookup = receiptLookup;
         _clock = clock;
         _configuration = configuration;
     }
 
-    public async Task<Result<BridgedGoogleFormOrderResult>> CreateOrderAndCheckoutSessionAsync(
-        string responseId,
-        int sheetRowIndex,
-        string customerName,
-        string customerEmail,
-        string? customerPhone,
-        string itemReference,
-        string category,
-        int quantity,
-        string paymentMethod,
-        string? notes,
+    public async Task<GoogleFormOrderCreationResult> CreateOrderAndInitiateCheckoutAsync(
+        GoogleFormOrderCreationRequest request,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         DateTimeOffset nowUtc = _clock.UtcNow;
-        string normalizedCategory = string.Equals(category, OrderCategory.DepartmentInvoice, StringComparison.OrdinalIgnoreCase)
+        string normalizedCategory = string.Equals(request.Category, OrderCategory.DepartmentInvoice, StringComparison.OrdinalIgnoreCase)
             ? OrderCategory.DepartmentInvoice
             : OrderCategory.ProductOrder;
 
-        string cleanReference = string.IsNullOrWhiteSpace(itemReference) ? "Product A" : itemReference.Trim();
-        int safeQty = Math.Max(1, quantity);
+        string cleanReference = string.IsNullOrWhiteSpace(request.ItemReference)
+            ? "CPA Reviewer Volume 1"
+            : request.ItemReference.Trim();
+
+        int safeQty = Math.Max(1, request.Quantity);
 
         Result<Money> priceResult = _pricingPolicy.CalculateAuthoritativeAmount(
             normalizedCategory,
             cleanReference,
-            safeQty);
+            safeQty,
+            request.AmountMinor);
 
-        if (priceResult.IsFailure)
-        {
-            return Result.Failure<BridgedGoogleFormOrderResult>(priceResult.Error);
-        }
+        Money totalAmount = priceResult.IsSuccess
+            ? priceResult.Value
+            : Money.Php(request.AmountMinor is > 0 ? request.AmountMinor.Value : safeQty * 450_00L);
 
-        Money totalAmount = priceResult.Value;
         string prefix = normalizedCategory == OrderCategory.ProductOrder ? "ORD" : "INV";
         string yearMonth = nowUtc.ToString("yyyyMM", CultureInfo.InvariantCulture);
         long seq = await _orderRepository.NextOrderSequenceAsync(prefix, yearMonth, cancellationToken).ConfigureAwait(false);
         OrderNumber orderNumber = OrderNumber.Create(normalizedCategory, nowUtc, seq);
 
-        string orderTitle = safeQty > 1
-            ? $"{cleanReference} (x{safeQty})"
-            : cleanReference;
+        string orderTitle = !string.IsNullOrWhiteSpace(request.Title)
+            ? request.Title.Trim()
+            : (safeQty > 1 ? $"{cleanReference} (x{safeQty})" : cleanReference);
 
         var metadataObj = new
         {
             source = "google_forms",
-            google_form_response_id = responseId,
-            sheet_row_index = sheetRowIndex,
-            customer_name = customerName,
-            customer_email = customerEmail,
-            customer_phone = customerPhone ?? string.Empty,
+            google_form_response_id = request.ResponseId,
+            sheet_row_index = request.SheetRowIndex ?? 0,
+            customer_name = request.CustomerName,
+            customer_email = request.CustomerEmail,
+            customer_phone = request.CustomerPhone ?? string.Empty,
+            student_id = request.StudentId ?? string.Empty,
+            instructor_credit = request.InstructorCredit ?? string.Empty,
+            book_title = request.BookTitle ?? cleanReference,
             quantity = safeQty,
-            notes = notes ?? string.Empty
+            notes = request.Notes ?? string.Empty
         };
 
         string metadataJson = JsonSerializer.Serialize(metadataObj);
@@ -121,8 +114,8 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
 
         await _orderRepository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
 
-        string normalizedMethod = PaymentMethod.Normalize(paymentMethod);
-        string idempotencyKey = $"gf_attempt_{responseId}";
+        string normalizedMethod = PaymentMethod.Normalize(request.PaymentMethod);
+        string idempotencyKey = $"gf_attempt_{request.ResponseId}";
 
         PaymentAttempt attempt = PaymentAttempt.CreatePending(
             orderId: order.Id,
@@ -131,17 +124,6 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
             idempotencyKey: idempotencyKey,
             nowUtc: nowUtc);
 
-        long unitAmountMinor = totalAmount.AmountMinor / safeQty;
-        var lineItems = new List<CheckoutLineItemRequest>
-        {
-            new(
-                Name: cleanReference,
-                Quantity: safeQty,
-                AmountMinor: unitAmountMinor,
-                Currency: totalAmount.CurrencyCode,
-                Description: string.IsNullOrWhiteSpace(notes) ? orderTitle : notes)
-        };
-
         var gatewayRequest = new CreateCheckoutSessionRequest(
             OrderId: order.Id,
             OrderNumber: order.OrderNumber,
@@ -149,10 +131,10 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
             Amount: totalAmount,
             RequestedPaymentMethod: normalizedMethod,
             IdempotencyKey: idempotencyKey,
-            CustomerName: customerName,
-            CustomerEmail: customerEmail,
-            CustomerPhone: customerPhone,
-            LineItems: lineItems,
+            CustomerName: request.CustomerName,
+            CustomerEmail: request.CustomerEmail,
+            CustomerPhone: request.CustomerPhone,
+            LineItems: [],
             SuccessUrl: null,
             CancelUrl: null,
             PaymentAttemptId: attempt.Id);
@@ -181,76 +163,113 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
 
         await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
 
-        decimal amountPesos = totalAmount.AmountMinor / 100m;
-        string formattedAmountPhp = $"₱{amountPesos.ToString("N2", CultureInfo.InvariantCulture)}";
-
-        return Result.Success(new BridgedGoogleFormOrderResult(
+        return new GoogleFormOrderCreationResult(
             OrderId: order.Id,
             OrderNumber: order.OrderNumber,
-            OrderTitle: orderTitle,
+            OrderTitle: order.Title,
             AmountMinor: totalAmount.AmountMinor,
-            AmountPhp: formattedAmountPhp,
-            PaymentAttemptId: attempt.Id,
-            ProviderPaymentId: providerPaymentId,
+            Currency: totalAmount.CurrencyCode,
             CheckoutUrl: checkoutUrl,
-            Status: order.Status));
+            PaymentAttemptId: attempt.Id,
+            ProviderPaymentId: providerPaymentId);
     }
 
-    public async Task<BridgedGoogleFormStatusResult?> ResolveLiveStatusAsync(
-        string orderId,
-        string? paymentAttemptId,
+    public async Task<GoogleFormOrderCreationResult?> FindExistingByResponseIdAsync(
+        string responseId,
         CancellationToken cancellationToken = default)
     {
-        Order? order = await _orderRepository.GetByIdAsync(orderId, cancellationToken).ConfigureAwait(false);
-        PaymentAttempt? attempt = null;
-
-        if (!string.IsNullOrWhiteSpace(paymentAttemptId))
-        {
-            attempt = await _attemptRepository.GetByIdAsync(paymentAttemptId, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (attempt is null && !string.IsNullOrWhiteSpace(orderId))
-        {
-            attempt = await _attemptRepository.GetLatestByOrderIdAsync(orderId, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (order is null && attempt is null)
+        if (string.IsNullOrWhiteSpace(responseId))
         {
             return null;
         }
 
-        ReceiptSummaryContract? receipt = null;
-        if (attempt is not null)
+        string idempotencyKey = $"gf_attempt_{responseId.Trim()}";
+        PaymentAttempt? existingAttempt = await _attemptRepository
+            .GetByIdempotencyKeyAsync(idempotencyKey, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (existingAttempt is not null)
         {
-            receipt = await _receiptLookup.FindByPaymentAttemptIdAsync(attempt.Id, cancellationToken).ConfigureAwait(false);
+            Order? matchedOrder = await _orderRepository
+                .GetByIdAsync(existingAttempt.OrderId, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (matchedOrder is not null)
+            {
+                return new GoogleFormOrderCreationResult(
+                    OrderId: matchedOrder.Id,
+                    OrderNumber: matchedOrder.OrderNumber,
+                    OrderTitle: matchedOrder.Title,
+                    AmountMinor: matchedOrder.Amount.AmountMinor,
+                    Currency: matchedOrder.Amount.CurrencyCode,
+                    CheckoutUrl: existingAttempt.CheckoutUrl ?? $"/checkout?order_id={matchedOrder.Id}",
+                    PaymentAttemptId: existingAttempt.Id,
+                    ProviderPaymentId: existingAttempt.ProviderPaymentId);
+            }
         }
 
-        if (receipt is null && order is not null)
+        IReadOnlyList<Order> recentOrders = await _orderRepository
+            .ListAsync(status: null, limit: 100, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach (Order order in recentOrders)
         {
-            receipt = await _receiptLookup.FindByOrderIdAsync(order.Id, cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(order.MetadataJson) &&
+                order.MetadataJson.Contains(responseId.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                PaymentAttempt? latestAttempt = await _attemptRepository
+                    .GetLatestByOrderIdAsync(order.Id, cancellationToken)
+                    .ConfigureAwait(false);
+
+                return new GoogleFormOrderCreationResult(
+                    OrderId: order.Id,
+                    OrderNumber: order.OrderNumber,
+                    OrderTitle: order.Title,
+                    AmountMinor: order.Amount.AmountMinor,
+                    Currency: order.Amount.CurrencyCode,
+                    CheckoutUrl: latestAttempt?.CheckoutUrl ?? $"/checkout?order_id={order.Id}",
+                    PaymentAttemptId: latestAttempt?.Id ?? $"att_{order.Id[..Math.Min(8, order.Id.Length)]}",
+                    ProviderPaymentId: latestAttempt?.ProviderPaymentId);
+            }
         }
 
-        string effectivePaymentStatus = attempt?.Status.ToString().ToLowerInvariant()
-            ?? order?.Status
-            ?? "pending";
+        return null;
+    }
 
-        if (string.Equals(order?.Status, OrderStatus.Paid, StringComparison.OrdinalIgnoreCase) ||
-            attempt?.Status == PaymentAttemptStatus.Succeeded)
+    public async Task<(int Total, int Paid, int Pending)> GetGoogleFormOrderStatsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<Order> orders = await _orderRepository
+            .ListAsync(status: null, limit: 100, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        int total = 0;
+        int paid = 0;
+        int pending = 0;
+
+        foreach (Order order in orders)
         {
-            effectivePaymentStatus = "paid";
+            bool isGoogleFormOrder =
+                string.Equals(order.UserId, "google_forms_bridge", StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrWhiteSpace(order.MetadataJson) &&
+                 order.MetadataJson.Contains("google_forms", StringComparison.OrdinalIgnoreCase));
+
+            if (!isGoogleFormOrder)
+            {
+                continue;
+            }
+
+            total++;
+            if (string.Equals(order.Status, OrderStatus.Paid, StringComparison.OrdinalIgnoreCase))
+            {
+                paid++;
+            }
+            else if (string.Equals(order.Status, OrderStatus.Pending, StringComparison.OrdinalIgnoreCase))
+            {
+                pending++;
+            }
         }
 
-        return new BridgedGoogleFormStatusResult(
-            OrderId: order?.Id ?? attempt!.OrderId,
-            OrderNumber: order?.OrderNumber ?? receipt?.OrderNumber ?? string.Empty,
-            OrderStatus: order?.Status ?? effectivePaymentStatus,
-            PaymentAttemptId: attempt?.Id,
-            ProviderPaymentId: attempt?.ProviderPaymentId,
-            PaymentStatus: effectivePaymentStatus,
-            CheckoutUrl: attempt?.CheckoutUrl,
-            AmountMinor: order?.Amount.AmountMinor ?? attempt?.Amount.AmountMinor ?? 0,
-            OfficialReceiptNumber: receipt?.OfficialReceiptNumber,
-            TreasuryAcknowledgementNumber: receipt?.TreasuryAcknowledgementNumber,
-            PaidAtUtc: attempt?.PaidAt ?? receipt?.IssuedAtUtc);
+        return (total, paid, pending);
     }
 }

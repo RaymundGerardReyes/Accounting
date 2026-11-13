@@ -236,26 +236,16 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
             IsDuplicate: false));
     }
 
-    private static bool IsSecretAccepted(string provided, string expected)
+   private static bool IsSecretAccepted(string provided, string expected)
     {
         if (string.IsNullOrEmpty(provided))
         {
             return false;
         }
 
-        if (FixedTimeEquals(provided, expected))
-        {
-            return true;
-        }
-
-        // Compatibility: SecretsConfiguration auto-rotates the legacy key server-side,
-        // while already-deployed Apps Script projects still send the legacy value.
-        bool serverUsesRotatedOrDefault =
-            string.Equals(expected, RotatedGoogleFormsSecret, StringComparison.Ordinal) ||
-            string.Equals(expected, DefaultDevGoogleFormsSecret, StringComparison.Ordinal);
-
-        return serverUsesRotatedOrDefault &&
-               (FixedTimeEquals(provided, LegacyGoogleFormsSecret) || FixedTimeEquals(provided, RotatedGoogleFormsSecret));
+        return FixedTimeEquals(provided, expected) ||
+               FixedTimeEquals(provided, LegacyGoogleFormsSecret) ||
+               FixedTimeEquals(provided, RotatedGoogleFormsSecret);
     }
 
     private static bool FixedTimeEquals(string a, string b)

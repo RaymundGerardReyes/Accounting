@@ -1,52 +1,27 @@
 // File: Backend/src/Modules/Integrations/Rge.Integrations.Infrastructure/FormSecretVerifier.cs
-using Microsoft.Extensions.Configuration;
 using Rge.BuildingBlocks.Infrastructure.Crypto;
-using Rge.Integrations.Application.Ports;
 
 namespace Rge.Integrations.Infrastructure;
 
-public sealed class FormSecretVerifier : IFormSecretVerifier
+public static class FormSecretVerifier
 {
     public const string DefaultLiveSecret = "rge_gforms_live_sec_89f3a21";
-    private readonly IConfiguration? _configuration;
 
-    public FormSecretVerifier(IConfiguration? configuration = null)
-    {
-        _configuration = configuration;
-    }
-
-    public string GetActiveSecret()
-    {
-        string?[] candidates =
-        [
-            _configuration?["Secrets:GoogleFormsSecret"],
-            _configuration?["GoogleForms:Secret"],
-            _configuration?["GOOGLE_FORMS_SECRET"],
-            Environment.GetEnvironmentVariable("GOOGLE_FORMS_SECRET")
-        ];
-
-        foreach (string? candidate in candidates)
-        {
-            if (!string.IsNullOrWhiteSpace(candidate))
-            {
-                return candidate.Trim().Trim('"', '\'');
-            }
-        }
-
-        return DefaultLiveSecret;
-    }
-
-    public bool IsValidSecret(string? providedSecret)
+    public static bool VerifySecret(string? providedSecret, string? expectedSecret)
     {
         if (string.IsNullOrWhiteSpace(providedSecret))
         {
             return false;
         }
 
-        string cleanProvided = providedSecret.Trim().Trim('"', '\'');
-        string activeSecret = GetActiveSecret();
+        string effectiveExpected = string.IsNullOrWhiteSpace(expectedSecret)
+            ? (Environment.GetEnvironmentVariable("GOOGLE_FORMS_SECRET") ?? DefaultLiveSecret)
+            : expectedSecret;
 
-        return ConstantTimeComparer.EqualsConstantTime(cleanProvided, activeSecret) ||
+        string cleanProvided = providedSecret.Trim().Trim('"', '\'');
+        string cleanExpected = effectiveExpected.Trim().Trim('"', '\'');
+
+        return ConstantTimeComparer.EqualsConstantTime(cleanProvided, cleanExpected) ||
                ConstantTimeComparer.EqualsConstantTime(cleanProvided, DefaultLiveSecret);
     }
 }
