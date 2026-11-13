@@ -107,7 +107,7 @@ function CheckoutPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const orderId = searchParams.get("order_id") || "";
+  const orderId = searchParams.get("order_id") || searchParams.get("order_number") || "";
   const urlAttemptId = searchParams.get("attempt_id") || "";
   const isCancelledRedirect =
     searchParams.get("cancelled") === "true" ||
