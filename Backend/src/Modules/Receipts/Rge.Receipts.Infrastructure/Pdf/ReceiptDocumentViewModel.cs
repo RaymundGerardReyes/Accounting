@@ -14,9 +14,11 @@ public sealed record ReceiptDocumentViewModel
     public string DocumentTitle { get; init; } = "BIR OFFICIAL RECEIPT & TREASURY ACKNOWLEDGEMENT";
     public string DocumentType { get; init; } = "Electronic Official Receipt";
     public string StatusBadge { get; init; } = "OFFICIAL RECEIPT — PAID";
+    public string StatusBadgeText { get; init; } = "PAID";
 
     // Issuer (BIR RMC No. 77-2024 & RA 11976)
     public string IssuerRegisteredName { get; init; } = BirRmc77_2024Policy.IssuerRegisteredName;
+    public string IssuerDepartment { get; init; } = "Corporate Accounting & Treasury";
     public string IssuerTin { get; init; } = BirRmc77_2024Policy.IssuerTin;
     public string BirPermitNumber { get; init; } = BirRmc77_2024Policy.BirPermitNumber;
     public string IssuerAddress { get; init; } = "Level 24, Tower One, Ayala Triangle, Ayala Ave, Makati, Metro Manila, Philippines";
@@ -37,6 +39,7 @@ public sealed record ReceiptDocumentViewModel
     public DateTimeOffset IssuedAtPst { get; init; }
     public string FormattedIssuedAtUtc { get; init; } = string.Empty;
     public string FormattedIssuedAtPst { get; init; } = string.Empty;
+    public string FormattedIssuedAtPht { get; init; } = string.Empty;
     public string FormattedDualTimestamp { get; init; } = string.Empty;
 
     // Domain Money
@@ -96,7 +99,10 @@ public sealed record ReceiptDocumentViewModel
             IssuedAtPst = issuedAtPst,
             FormattedIssuedAtUtc = receipt.IssuedAtUtc.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture),
             FormattedIssuedAtPst = issuedAtPst.ToString("yyyy-MM-dd HH:mm:ss 'PST (UTC+8)'", CultureInfo.InvariantCulture),
+            FormattedIssuedAtPht = issuedAtPst.ToString("yyyy-MM-dd HH:mm:ss 'PHT (UTC+8)'", CultureInfo.InvariantCulture),
             FormattedDualTimestamp = $"{issuedAtPst:yyyy-MM-dd HH:mm:ss} PST / {receipt.IssuedAtUtc:yyyy-MM-dd HH:mm:ss} UTC",
+            StatusBadgeText = "PAID",
+            IssuerDepartment = "Corporate Accounting & Treasury",
             GrossAmount = receipt.VatBreakdown.GrossAmount,
             VatableSales = receipt.VatBreakdown.VatableSales,
             VatAmount = receipt.VatBreakdown.VatAmount,
