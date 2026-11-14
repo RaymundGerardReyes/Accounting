@@ -1,3 +1,8 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Rge.BuildingBlocks.Application.Abstractions;
 using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Payments.Application.Mapping;
@@ -9,6 +14,21 @@ namespace Rge.Payments.Application.Orders.ListOrders;
 
 public sealed class ListOrdersHandler : IQueryHandler<ListOrdersQuery, IReadOnlyList<OrderDto>>
 {
+    private static readonly HashSet<string> PrivilegedLedgerRoles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Admin",
+        "SuperAdmin",
+        "SystemAdmin",
+        "system_admin",
+        "Finance",
+        "FinanceAdmin",
+        "finance_admin",
+        "FinanceManager",
+        "Accountant",
+        "Treasury",
+        "Auditor"
+    };
+
     private readonly IOrderRepository _orderRepository;
     private readonly IPaymentAttemptRepository _attemptRepository;
     private readonly ICurrentActor _currentActor;
@@ -35,14 +55,21 @@ public sealed class ListOrdersHandler : IQueryHandler<ListOrdersQuery, IReadOnly
 
         int effectiveLimit = Math.Clamp(query.Limit, 1, 100);
 
-        bool isPrivileged = _currentActor.IsInRole("admin")
+        bool isPrivilegedViewer = _currentActor.IsInRole("admin")
             || _currentActor.IsInRole("finance_admin")
-            || _currentActor.IsInRole("system_admin");
+            || _currentActor.IsInRole("system_admin")
+            || (_currentActor.Roles is not null && _currentActor.Roles.Any(r => PrivilegedLedgerRoles.Contains(r)));
 
-        string? userIdFilter = isPrivileged ? null : _currentActor.UserId;
+        bool isSystemBridge = string.IsNullOrWhiteSpace(_currentActor.UserId)
+            || _currentActor.UserId == Guid.Empty.ToString()
+            || _currentActor.UserId == "00000000-0000-0000-0000-000000000000";
+
+        string? tenantUserIdFilter = isPrivilegedViewer || isSystemBridge
+            ? null
+            : _currentActor.UserId;
 
         IReadOnlyList<Order> orders = await _orderRepository
-            .ListAsync(query.Status, effectiveLimit, userIdFilter, cancellationToken)
+            .ListAsync(query.Status, effectiveLimit, tenantUserIdFilter, cancellationToken)
             .ConfigureAwait(false);
 
         if (orders.Count == 0)
@@ -65,4 +92,3 @@ public sealed class ListOrdersHandler : IQueryHandler<ListOrdersQuery, IReadOnly
         return Result.Success<IReadOnlyList<OrderDto>>(dtos);
     }
 }
-

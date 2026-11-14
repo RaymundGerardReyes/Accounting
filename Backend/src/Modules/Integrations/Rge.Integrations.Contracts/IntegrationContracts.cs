@@ -85,7 +85,23 @@ public sealed record GoogleFormsStatusResponse(
     int IngestedOrdersCount,
     int PaidOrdersCount,
     int PendingOrdersCount,
-    bool SecretConfigured);
+    bool SecretConfigured,
+    string? MaskedSecret = null,
+    bool Enabled = true,
+    string WebhookEndpoint = "/api/v1/integrations/google-forms/submit",
+    string AuthHeaderName = "X-Google-Forms-Secret",
+    string HeartbeatInterval = "Active (4s interval)",
+    string ScriptTemplatePath = "scripts/google_apps_script/Code.gs");
+
+public sealed record GoogleFormStatusResponse(
+    bool Enabled,
+    string WebhookEndpoint,
+    string AuthHeaderName,
+    int IngestedOrdersCount,
+    string HeartbeatInterval,
+    string ScriptTemplatePath,
+    bool SecretConfigured = false,
+    string? MaskedSecret = null);
 
 public sealed record GoogleFormSubmissionRequest(
     string ResponseId,

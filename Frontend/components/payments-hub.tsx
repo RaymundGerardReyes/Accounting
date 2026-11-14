@@ -872,6 +872,33 @@ export function PaymentsHub() {
   const [mounted, setMounted] = useState(false)
   const [gformsIngestUrl, setGformsIngestUrl] = useState<string>("/api/v1/integrations/google-forms/submit")
   const [gformsSecret, setGformsSecret] = useState<string>("")
+  const [googleFormsStatus, setGoogleFormsStatus] = useState<{
+    secretConfigured: boolean
+    maskedSecret?: string
+    ingestedOrdersCount?: number
+  } | null>(null)
+
+  const loadGoogleFormsStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/v1/integrations/google-forms/status", {
+        method: "GET",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+      })
+      if (!res.ok) return
+      const data = await res.json()
+      setGoogleFormsStatus(data)
+      if (data.maskedSecret) {
+        setGformsSecret(data.maskedSecret)
+      }
+    } catch {
+      // Keep last known status during transient network blips
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadGoogleFormsStatus()
+  }, [loadGoogleFormsStatus, activeTab])
 
   // Auto-reset activeTab to "orders" if non-admin attempts to view admin tabs
   useEffect(() => {
@@ -2240,18 +2267,15 @@ export function PaymentsHub() {
                     Authentication Header (X-Google-Forms-Secret)
                   </label>
                   <div className="flex items-center gap-2">
-                    <code className="p-2 rounded bg-muted/80 font-mono text-[11px] flex-1 border border-border select-all">
-                      {gformsSecret}
-                    </code>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => copyToClipboard(gformsSecret, "gforms_secret")}
-                      className="shrink-0"
-                    >
-                      {copiedKey === "gforms_secret" ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                    </Button>
+                    {googleFormsStatus?.secretConfigured ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 font-mono">
+                        Configured ({googleFormsStatus.maskedSecret ?? "••••••••"})
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400 font-mono">
+                        Not Configured — Set in Configuration or GOOGLE_FORMS_SECRET
+                      </span>
+                    )}
                   </div>
                 </div>
 

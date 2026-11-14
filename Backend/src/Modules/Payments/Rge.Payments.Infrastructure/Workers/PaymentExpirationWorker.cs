@@ -15,6 +15,7 @@ public sealed class PaymentExpirationWorker : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(15);
     private const int BatchSize = 50;
+    private const int DefaultExpirationMinutes = 15;
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<PaymentExpirationWorker> _logger;
@@ -117,10 +118,13 @@ public sealed class PaymentExpirationWorker : BackgroundService
                 continue;
             }
 
-            double remainingSeconds = attempt.ExpiresAt.HasValue
-                ? (attempt.ExpiresAt.Value - nowUtc).TotalSeconds
-                : 0;
-            bool isDeadlineReached = attempt.ExpiresAt.HasValue && (nowUtc >= attempt.ExpiresAt.Value || remainingSeconds <= 0);
+            // Fallback to CreatedAt + 15m when legacy/orphaned rows have null or default ExpiresAt
+            var effectiveExpiresAt = attempt.ExpiresAt.HasValue && attempt.ExpiresAt.Value > DateTimeOffset.MinValue
+                ? attempt.ExpiresAt.Value
+                : attempt.CreatedAt.AddMinutes(DefaultExpirationMinutes);
+
+            var remainingSeconds = (long)Math.Max(0, Math.Ceiling((effectiveExpiresAt - nowUtc).TotalSeconds));
+            var isDeadlineReached = nowUtc > effectiveExpiresAt;
 
             // Clean up superseded attempts on the same order (e.g. cs_33ab872df98fd94f8ee87338 when cs_1753341df564a3c58fb3cc49 is created)
             if (latestAttemptIdByOrder.TryGetValue(attempt.OrderId, out string? newestId) &&
@@ -305,7 +309,21 @@ public sealed class PaymentExpirationWorker : BackgroundService
 
             if (!string.IsNullOrWhiteSpace(attempt.ProviderPaymentId))
             {
-                _ = await gateway.ExpireCheckoutSessionAsync(attempt.ProviderPaymentId, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    _ = await gateway.ExpireCheckoutSessionAsync(attempt.ProviderPaymentId, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    if (_logger.IsEnabled(LogLevel.Warning))
+                    {
+                        _logger.LogWarning(
+                            ex,
+                            "[PAYMONGO-WORKER-EXPIRE-WARN] Remote expire failed for cs_id={CsId}; marking local attempt={AttemptId} Expired.",
+                            attempt.ProviderPaymentId,
+                            attempt.Id);
+                    }
+                }
             }
 
             if (attempt.MarkExpired(nowUtc).IsSuccess)
