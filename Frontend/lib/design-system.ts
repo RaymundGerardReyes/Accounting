@@ -67,3 +67,45 @@ export const designSystem = {
 } as const
 
 export type DesignSystem = typeof designSystem
+
+export const DESIGN_SYSTEM_TOKENS = {
+  colors: {
+    background: "var(--background)",
+    foreground: "var(--foreground)",
+    card: "var(--card)",
+    cardForeground: "var(--card-foreground)",
+    popover: "var(--popover)",
+    popoverForeground: "var(--popover-foreground)",
+    primary: "var(--primary)",
+    primaryForeground: "var(--primary-foreground)",
+    secondary: "var(--secondary)",
+    secondaryForeground: "var(--secondary-foreground)",
+    accent: "var(--accent)",
+    accentForeground: "var(--accent-foreground)",
+    accentSubtle: "var(--accent-subtle)",
+    accentText: "var(--accent-text)",
+    muted: "var(--muted)",
+    mutedForeground: "var(--muted-foreground)",
+    destructive: "var(--destructive)",
+    destructiveForeground: "var(--destructive-foreground)",
+    border: "var(--border)",
+    borderSubtle: "var(--border-subtle)",
+    input: "var(--input)",
+    ring: "var(--ring)",
+    surfaceSubtle: "var(--surface-subtle)",
+    surfaceElevated: "var(--surface-elevated)",
+  },
+  charts: {
+    primary: "var(--chart-1)",
+    accent: "var(--chart-2)",
+    neutral: "var(--chart-3)",
+    muted: "var(--chart-4)",
+    highlight: "var(--chart-5)",
+  },
+  radius: {
+    sm: "var(--radius-sm)",
+    md: "var(--radius-md)",
+    lg: "var(--radius-lg)",
+    xl: "var(--radius-xl)",
+  },
+} as const

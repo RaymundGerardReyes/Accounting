@@ -1,7 +1,8 @@
 "use client"
 
-import React, { useState, useEffect, useMemo } from "react"
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
+import { useAuth } from "@/lib/auth-context"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
@@ -58,13 +59,14 @@ interface OrderMobileCardProps {
   order: Order
   copiedKey: string | null
   onCopy: (text: string, key: string) => void
-  onReconcile: (attemptId: string) => void
+  onReconcile?: (attemptId: string) => void
   onView: (attemptId: string) => void
   onPay: (orderId: string) => void
   onExpire?: (attemptId: string) => void
+  isAdmin?: boolean
 }
 
-function OrderMobileCard({ order, copiedKey, onCopy, onReconcile, onView, onPay, onExpire }: OrderMobileCardProps) {
+function OrderMobileCard({ order, copiedKey, onCopy, onReconcile, onView, onPay, onExpire, isAdmin }: OrderMobileCardProps) {
   const latest = order.latest_attempt
   return (
     <div className="p-4 space-y-3 bg-card hover:bg-muted/10 transition-colors">
@@ -219,7 +221,7 @@ function OrderMobileCard({ order, copiedKey, onCopy, onReconcile, onView, onPay,
               : "Pay Now"}
           </Button>
         )}
-        {latest && latest.status !== "succeeded" && (
+        {isAdmin && latest && latest.status !== "succeeded" && onReconcile && (
           <Button
             variant="outline"
             size="sm"
@@ -271,13 +273,14 @@ interface OrderDesktopRowProps {
   order: Order
   copiedKey: string | null
   onCopy: (text: string, key: string) => void
-  onReconcile: (attemptId: string) => void
+  onReconcile?: (attemptId: string) => void
   onView: (attemptId: string) => void
   onPay: (orderId: string) => void
   onExpire?: (attemptId: string) => void
+  isAdmin?: boolean
 }
 
-function OrderDesktopRow({ order, copiedKey, onCopy, onReconcile, onView, onPay, onExpire }: OrderDesktopRowProps) {
+function OrderDesktopRow({ order, copiedKey, onCopy, onReconcile, onView, onPay, onExpire, isAdmin }: OrderDesktopRowProps) {
   const latest = order.latest_attempt
   return (
     <tr className="hover:bg-muted/30 transition-colors">
@@ -477,7 +480,7 @@ function OrderDesktopRow({ order, copiedKey, onCopy, onReconcile, onView, onPay,
                 : "Pay Now"}
             </Button>
           )}
-          {latest && latest.status !== "succeeded" && (
+          {isAdmin && latest && latest.status !== "succeeded" && onReconcile && (
             <Button
               variant="outline"
               size="sm"
@@ -838,6 +841,24 @@ function WebhookMobileCard({ webhook, copiedKey, onCopy }: WebhookItemProps) {
 
 export function PaymentsHub() {
   const router = useRouter()
+
+  // Safely consume useAuth
+  let currentUser: any = null
+  try {
+    const auth = useAuth()
+    currentUser = auth?.user
+  } catch {
+    // Graceful fallback if called outside AuthProvider
+  }
+
+  const isAdmin = useMemo(() => {
+    if (!currentUser?.roles || !Array.isArray(currentUser.roles)) return false
+    return currentUser.roles.some((r: string) => {
+      const lower = String(r).toLowerCase()
+      return lower === "admin" || lower === "finance_admin" || lower === "system_admin"
+    })
+  }, [currentUser?.roles])
+
   const [activeTab, setActiveTab] = useState<"orders" | "webhooks" | "checklist">("orders")
   const [orders, setOrders] = useState<Order[]>([])
   const [webhooks, setWebhooks] = useState<WebhookEventRecord[]>([])
@@ -851,6 +872,99 @@ export function PaymentsHub() {
   const [mounted, setMounted] = useState(false)
   const [gformsIngestUrl, setGformsIngestUrl] = useState<string>("/api/v1/integrations/google-forms/submit")
   const [gformsSecret, setGformsSecret] = useState<string>("")
+
+  // Auto-reset activeTab to "orders" if non-admin attempts to view admin tabs
+  useEffect(() => {
+    if (!isAdmin && (activeTab === "webhooks" || activeTab === "checklist")) {
+      setActiveTab("orders")
+    }
+  }, [isAdmin, activeTab])
+
+  const inFlightOrdersRef = useRef(false)
+  const inFlightDiagnosticsRef = useRef(false)
+  const isAdminRef = useRef(isAdmin)
+
+  useEffect(() => {
+    isAdminRef.current = isAdmin
+  }, [isAdmin])
+
+  const loadOrders = useCallback(async (isInitial = false) => {
+    if (inFlightOrdersRef.current) return
+    inFlightOrdersRef.current = true
+    if (isInitial) {
+      setLoading(true)
+    }
+    try {
+      const data = await fetchOrders()
+      if (Array.isArray(data)) {
+        setOrders(data)
+      }
+    } catch (err) {
+      console.error("Error loading orders:", err)
+    } finally {
+      inFlightOrdersRef.current = false
+      if (isInitial) {
+        setLoading(false)
+      }
+    }
+  }, [])
+
+  const loadAdminDiagnostics = useCallback(async () => {
+    if (!isAdminRef.current) return
+    if (inFlightDiagnosticsRef.current) return
+    inFlightDiagnosticsRef.current = true
+    try {
+      const [whData, outboxData] = await Promise.all([
+        fetchWebhookEvents().catch(() => []),
+        fetchFulfillmentOutbox().catch(() => []),
+      ])
+      if (Array.isArray(whData)) setWebhooks(whData)
+      if (Array.isArray(outboxData)) setOutbox(outboxData)
+    } catch (err) {
+      console.error("Error loading admin diagnostics:", err)
+    } finally {
+      inFlightDiagnosticsRef.current = false
+    }
+  }, [])
+
+  const loadAllData = useCallback(async () => {
+    setActionLoading(true)
+    try {
+      await Promise.all([
+        loadOrders(false),
+        isAdminRef.current ? loadAdminDiagnostics() : Promise.resolve(),
+      ])
+    } finally {
+      setActionLoading(false)
+    }
+  }, [loadOrders, loadAdminDiagnostics])
+
+  // Initial order load on mount
+  useEffect(() => {
+    loadOrders(true)
+  }, [loadOrders])
+
+  // Admin diagnostics initial / persona-switch load
+  useEffect(() => {
+    if (isAdmin && (typeof document === "undefined" || document.visibilityState === "visible")) {
+      loadAdminDiagnostics()
+    }
+  }, [isAdmin, loadAdminDiagnostics])
+
+  // Background polling loop: 4 seconds, guarded by visibility and inFlight
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        return
+      }
+      loadOrders(false)
+      if (isAdminRef.current) {
+        loadAdminDiagnostics()
+      }
+    }, 4000)
+
+    return () => clearInterval(interval)
+  }, [loadOrders, loadAdminDiagnostics])
 
   useEffect(() => {
     setMounted(true)
@@ -924,39 +1038,7 @@ export function PaymentsHub() {
     { slug: "logistics", name: "Logistics (CC-004)", defaultCost: 10000 },
   ]
 
-  const loadAllData = async () => {
-    try {
-      const [ordersData, whData, outboxData] = await Promise.all([
-        fetchOrders(),
-        fetchWebhookEvents().catch(() => []),
-        fetchFulfillmentOutbox().catch(() => []),
-      ])
-      setOrders(ordersData)
-      setWebhooks(whData)
-      setOutbox(outboxData)
-    } catch (err: any) {
-      console.error("Error loading payment hub data:", err)
-    } finally {
-      setLoading(false)
-    }
-  }
 
-  useEffect(() => {
-    loadAllData()
-    // Live background polling loop every 4 seconds to sync Google Form & PayMongo updates
-    const interval = setInterval(() => {
-      fetchOrders().then((data) => {
-        if (Array.isArray(data)) setOrders(data)
-      }).catch(() => {})
-      fetchWebhookEvents().then((data) => {
-        if (Array.isArray(data)) setWebhooks(data)
-      }).catch(() => {})
-      fetchFulfillmentOutbox().then((data) => {
-        if (Array.isArray(data)) setOutbox(data)
-      }).catch(() => {})
-    }, 4000)
-    return () => clearInterval(interval)
-  }, [])
 
   // Filtered Orders Calculation
   const filteredOrders = useMemo(() => {
@@ -1025,6 +1107,7 @@ export function PaymentsHub() {
   }
 
   const handleReconcileSingle = async (attemptId: string) => {
+    if (!isAdmin) return
     setActionLoading(true)
     try {
       const res = await reconcilePayment(attemptId)
@@ -1038,6 +1121,7 @@ export function PaymentsHub() {
   }
 
   const handleBatchReconcile = async () => {
+    if (!isAdmin) return
     setActionLoading(true)
     try {
       const res = await reconcileAllPayments()
@@ -1051,6 +1135,7 @@ export function PaymentsHub() {
   }
 
   const handleProcessOutbox = async (retryFailed = false) => {
+    if (!isAdmin) return
     setActionLoading(true)
     try {
       const res = await processFulfillmentOutbox(retryFailed)
@@ -1234,7 +1319,7 @@ export function PaymentsHub() {
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className={`grid grid-cols-1 sm:grid-cols-2 ${isAdmin ? "lg:grid-cols-4" : "lg:grid-cols-3"} gap-4`}>
         <Card className="shadow-none border-border/90">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -1279,30 +1364,34 @@ export function PaymentsHub() {
           </CardContent>
         </Card>
 
-        <Card className="shadow-none border-border/90">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Webhook Events
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold font-mono tabular-nums text-foreground">
-              {webhooks.length}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1 font-mono">
-              {outbox.length} Outbox records ({pendingOutboxCount} pending)
-            </p>
-          </CardContent>
-        </Card>
+        {isAdmin && (
+          <Card className="shadow-none border-border/90">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Webhook Events
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold font-mono tabular-nums text-foreground">
+                {webhooks.length}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1 font-mono">
+                {outbox.length} Outbox records ({pendingOutboxCount} pending)
+              </p>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Minimalist Tab Navigation */}
       <div role="tablist" aria-label="Payment Hub Sections" className="flex gap-4 sm:gap-6 border-b border-border overflow-x-auto whitespace-nowrap scrollbar-none pb-0.5">
         {[
-          { id: "orders", label: "Orders & Invoices", icon: FileText },
-          { id: "webhooks", label: "Live Orchestrator & Webhooks", icon: Activity },
-          { id: "checklist", label: "Sandbox & Go-Live Checklist", icon: ShieldCheck },
-        ].map((tab) => {
+          { id: "orders", label: "Orders & Invoices", icon: FileText, adminOnly: false },
+          { id: "webhooks", label: "Live Orchestrator & Webhooks", icon: Activity, adminOnly: true },
+          { id: "checklist", label: "Sandbox & Go-Live Checklist", icon: ShieldCheck, adminOnly: true },
+        ]
+          .filter((tab) => !tab.adminOnly || isAdmin)
+          .map((tab) => {
           const Icon = tab.icon
           const isActive = activeTab === tab.id
           return (
@@ -1408,6 +1497,7 @@ export function PaymentsHub() {
                         onView={(attemptId) => router.push(`/payment/result/${attemptId}`)}
                         onPay={(orderId) => router.push(`/checkout?order_id=${orderId}`)}
                         onExpire={handleExpireAttempt}
+                        isAdmin={isAdmin}
                       />
                     ))}
                   </div>
@@ -1437,6 +1527,7 @@ export function PaymentsHub() {
                             onView={(attemptId) => router.push(`/payment/result/${attemptId}`)}
                             onPay={(orderId) => router.push(`/checkout?order_id=${orderId}`)}
                             onExpire={handleExpireAttempt}
+                            isAdmin={isAdmin}
                           />
                         ))}
                       </tbody>
@@ -1450,7 +1541,7 @@ export function PaymentsHub() {
       )}
 
       {/* Tab 2: Live Orchestrator & Webhooks */}
-      {activeTab === "webhooks" && (
+      {isAdmin && activeTab === "webhooks" && (
         <div id="tabpanel-webhooks" role="tabpanel" aria-labelledby="tab-webhooks" className="space-y-6">
           <Card className="shadow-none border-border/90 overflow-hidden">
             <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/60 pb-4">
@@ -1641,7 +1732,7 @@ export function PaymentsHub() {
       )}
 
       {/* Tab 3: Sandbox & Go-Live Checklist */}
-      {activeTab === "checklist" && (
+      {isAdmin && activeTab === "checklist" && (
         <div id="tabpanel-checklist" role="tabpanel" aria-labelledby="tab-checklist" className="space-y-6">
           <Card className="shadow-none border-border/90">
             <CardHeader className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-border/60 pb-4">

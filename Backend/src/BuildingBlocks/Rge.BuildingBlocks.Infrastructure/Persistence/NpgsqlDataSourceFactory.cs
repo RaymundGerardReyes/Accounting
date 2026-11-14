@@ -38,8 +38,11 @@ public sealed class NpgsqlDataSourceFactory : IAsyncDisposable, IDisposable
             cleaned.Contains("Database=", StringComparison.OrdinalIgnoreCase))
         {
             var kvBuilder = new NpgsqlConnectionStringBuilder(cleaned);
+            if (string.Equals(kvBuilder.Host, "localhost", StringComparison.OrdinalIgnoreCase))
+            {
+                kvBuilder.Host = "127.0.0.1";
+            }
             if (kvBuilder.SslMode == SslMode.Disable &&
-                !string.Equals(kvBuilder.Host, "localhost", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(kvBuilder.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
             {
                 kvBuilder.SslMode = SslMode.Require;
@@ -59,25 +62,27 @@ public sealed class NpgsqlDataSourceFactory : IAsyncDisposable, IDisposable
                 string password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : string.Empty;
                 string database = uri.AbsolutePath.Trim('/');
 
+                string host = string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+                    ? "127.0.0.1"
+                    : uri.Host;
+
                 var csb = new NpgsqlConnectionStringBuilder
                 {
-                    Host = uri.Host,
+                    Host = host,
                     Port = uri.Port > 0 ? uri.Port : 5432,
                     Database = database,
                     Username = username,
                     Password = password,
                     Pooling = true,
-                    MinPoolSize = 1,
-                    MaxPoolSize = 20,
+                    MinPoolSize = 5,
+                    MaxPoolSize = 50,
+                    SslMode = SslMode.Require,
+#pragma warning disable CS0618 // TrustServerCertificate is obsolete in Npgsql
+                    TrustServerCertificate = true,
+#pragma warning restore CS0618
                     NoResetOnClose = true,
                     MaxAutoPrepare = 0
                 };
-
-                if (!string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(uri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
-                {
-                    csb.SslMode = SslMode.Require;
-                }
 
                 return csb.ConnectionString;
             }

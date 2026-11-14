@@ -1,50 +1,69 @@
-@import 'tailwindcss';
-@import 'tw-animate-css';
+/* ==========================================================================
+   Frontend/app/globals.css
+   Enterprise Minimalist Design System (Black + White + Vibrant Red + Neutral Gray)
+   ========================================================================== */
 
+/* --------------------------------------------------------------------------
+   1. Tailwind Imports and Plugins
+   -------------------------------------------------------------------------- */
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* --------------------------------------------------------------------------
+   2. Custom Variants
+   -------------------------------------------------------------------------- */
 @custom-variant dark (&:is(.dark *));
 
+/* --------------------------------------------------------------------------
+   3. Light-Theme Design Tokens (Authoritative OKLCH Palette)
+   -------------------------------------------------------------------------- */
 :root {
-  /* Strictly aligned with Frontend/lib/design-system.ts */
-  --background: oklch(0.98 0 0);       /* Off-white canvas */
-  --foreground: oklch(0.15 0 0);       /* Deep Black text */
-  
-  --card: oklch(1 0 0);                /* Pure White surface for elevation */
+  /* Core Canvas & Text */
+  --background: oklch(0.98 0 0);
+  --foreground: oklch(0.15 0 0);
+
+  /* Card & Elevated Surfaces */
+  --card: oklch(1 0 0);
   --card-foreground: oklch(0.15 0 0);
-  
+
+  /* Popovers, Dropdowns & Dialogs */
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.15 0 0);
-  
-  /* Primary: Deep Black */
+
+  /* Primary Brand Action (Minimalist Black) */
   --primary: oklch(0.15 0 0);
   --primary-foreground: oklch(0.98 0 0);
-  
-  /* Secondary & Accent: Vibrant Red */
+
+  /* Secondary & Vibrant Red Accent */
   --secondary: oklch(0.55 0.2 25);
   --secondary-foreground: oklch(0.985 0 0);
-  
+
   --accent: oklch(0.55 0.2 25);
   --accent-foreground: oklch(0.985 0 0);
-  
-  /* Neutrals: Light Gray & Border Gray */
+
+  /* Muted Neutral Gray Surfaces & Metadata */
   --muted: oklch(0.92 0 0);
   --muted-foreground: oklch(0.45 0 0);
-  
+
+  /* Destructive & Critical States */
   --destructive: oklch(0.55 0.2 25);
   --destructive-foreground: oklch(0.985 0 0);
-  
+
+  /* Borders, Inputs & Focus Rings */
   --border: oklch(0.88 0 0);
   --input: oklch(0.88 0 0);
   --ring: oklch(0.55 0.2 25);
-  
-  /* Chart Palette: Minimalist Black, Red, and Neutral Grays */
-  --chart-1: oklch(0.15 0 0);          /* Primary Black */
-  --chart-2: oklch(0.55 0.2 25);       /* Accent Red */
-  --chart-3: oklch(0.45 0 0);          /* Slate Neutral */
-  --chart-4: oklch(0.68 0.14 25);      /* Soft Red */
-  --chart-5: oklch(0.75 0 0);          /* Light Neutral */
-  
-  --radius: 0.5rem;                    /* 8px default from design-system.ts */
-  
+
+  /* Corner Radius Foundation */
+  --radius: 0.5rem;
+
+  /* Chart Palette (Preserved Neutral + Red Spectrum) */
+  --chart-1: oklch(0.15 0 0);
+  --chart-2: oklch(0.55 0.2 25);
+  --chart-3: oklch(0.45 0 0);
+  --chart-4: oklch(0.70 0 0);
+  --chart-5: oklch(0.62 0.16 25);
+
   /* Sidebar Tokens */
   --sidebar: oklch(1 0 0);
   --sidebar-foreground: oklch(0.15 0 0);
@@ -54,46 +73,88 @@
   --sidebar-accent-foreground: oklch(0.15 0 0);
   --sidebar-border: oklch(0.88 0 0);
   --sidebar-ring: oklch(0.55 0.2 25);
+
+  /* Derived Surface & Contrast Aliases (Strictly derived from core palette) */
+  --surface-subtle: oklch(0.955 0 0);
+  --surface-elevated: oklch(1 0 0);
+  --border-subtle: oklch(0.92 0 0);
+  --accent-subtle: oklch(0.55 0.2 25 / 0.08);
+  --accent-text: oklch(0.48 0.2 25);
+
+  /* Restrained Enterprise Elevation */
+  --shadow-xs: 0 1px 2px 0 oklch(0.15 0 0 / 0.04);
+  --shadow-sm: 0 1px 3px 0 oklch(0.15 0 0 / 0.06), 0 1px 2px -1px oklch(0.15 0 0 / 0.04);
+  --shadow-md: 0 4px 8px -2px oklch(0.15 0 0 / 0.08), 0 2px 4px -2px oklch(0.15 0 0 / 0.04);
 }
 
+/* --------------------------------------------------------------------------
+   4. Dark-Theme Design Tokens
+   -------------------------------------------------------------------------- */
 .dark {
   --background: oklch(0.12 0 0);
   --foreground: oklch(0.98 0 0);
-  --card: oklch(0.15 0 0);
+
+  --card: oklch(0.16 0 0);
   --card-foreground: oklch(0.98 0 0);
-  --popover: oklch(0.15 0 0);
+
+  --popover: oklch(0.18 0 0);
   --popover-foreground: oklch(0.98 0 0);
+
   --primary: oklch(0.98 0 0);
   --primary-foreground: oklch(0.15 0 0);
+
   --secondary: oklch(0.55 0.2 25);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.22 0 0);
-  --muted-foreground: oklch(0.68 0 0);
+
   --accent: oklch(0.55 0.2 25);
   --accent-foreground: oklch(0.985 0 0);
+
+  --muted: oklch(0.22 0 0);
+  --muted-foreground: oklch(0.68 0 0);
+
   --destructive: oklch(0.55 0.2 25);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.24 0 0);
-  --input: oklch(0.24 0 0);
+
+  --border: oklch(0.26 0 0);
+  --input: oklch(0.26 0 0);
   --ring: oklch(0.55 0.2 25);
+
+  /* Dark Mode Chart Palette */
   --chart-1: oklch(0.98 0 0);
-  --chart-2: oklch(0.62 0.22 25);
-  --chart-3: oklch(0.65 0 0);
-  --chart-4: oklch(0.45 0.15 25);
-  --chart-5: oklch(0.40 0 0);
+  --chart-2: oklch(0.60 0.2 25);
+  --chart-3: oklch(0.68 0 0);
+  --chart-4: oklch(0.45 0 0);
+  --chart-5: oklch(0.70 0.16 25);
+
+  /* Dark Mode Sidebar Tokens */
   --sidebar: oklch(0.14 0 0);
   --sidebar-foreground: oklch(0.98 0 0);
   --sidebar-primary: oklch(0.55 0.2 25);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.20 0 0);
+  --sidebar-accent: oklch(0.22 0 0);
   --sidebar-accent-foreground: oklch(0.98 0 0);
-  --sidebar-border: oklch(0.24 0 0);
+  --sidebar-border: oklch(0.26 0 0);
   --sidebar-ring: oklch(0.55 0.2 25);
+
+  /* Dark Mode Derived Surface & Contrast Aliases */
+  --surface-subtle: oklch(0.15 0 0);
+  --surface-elevated: oklch(0.20 0 0);
+  --border-subtle: oklch(0.22 0 0);
+  --accent-subtle: oklch(0.55 0.2 25 / 0.15);
+  --accent-text: oklch(0.68 0.19 25);
+
+  --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.3);
+  --shadow-sm: 0 1px 3px 0 oklch(0 0 0 / 0.4), 0 1px 2px -1px oklch(0 0 0 / 0.3);
+  --shadow-md: 0 4px 8px -2px oklch(0 0 0 / 0.5), 0 2px 4px -2px oklch(0 0 0 / 0.35);
 }
 
+/* --------------------------------------------------------------------------
+   5. Tailwind Theme-Variable Mappings
+   -------------------------------------------------------------------------- */
 @theme inline {
-  --font-sans: 'Geist', 'Geist Fallback', sans-serif;
-  --font-mono: 'Geist Mono', 'Geist Mono Fallback', monospace;
+  --font-sans: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", "Geist Mono Fallback", ui-monospace, SFMono-Regular, monospace;
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -113,15 +174,13 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
-  --radius-sm: calc(var(--radius) - 2px);
-  --radius-md: var(--radius);
-  --radius-lg: calc(var(--radius) + 4px);
-  --radius-xl: calc(var(--radius) + 8px);
+
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -130,15 +189,291 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-surface-subtle: var(--surface-subtle);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-border-subtle: var(--border-subtle);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-accent-text: var(--accent-text);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* --------------------------------------------------------------------------
+   6. Base Document Styles & Responsive Safeguards
+   -------------------------------------------------------------------------- */
 @layer base {
-  * {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
     @apply border-border outline-ring/50;
   }
+
+  html {
+    min-width: 320px;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    font-synthesis-weight: none;
+    text-rendering: optimizeLegibility;
+  }
+
   body {
-    @apply bg-background text-foreground antialiased selection:bg-accent/15 selection:text-accent;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    min-width: 320px;
+    min-height: 100dvh;
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Responsive media safeguards */
+  img,
+  picture,
+  video,
+  canvas,
+  svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* Prevent flex and grid children from forcing horizontal document overflow */
+  main,
+  section,
+  article,
+  aside,
+  header,
+  footer,
+  div {
+    min-width: 0;
+  }
+
+  /* High-contrast text selection using restrained red accent */
+  ::selection {
+    background-color: var(--accent-subtle);
+    color: var(--foreground);
   }
 }
 
+/* --------------------------------------------------------------------------
+   7. Typography Foundation
+   -------------------------------------------------------------------------- */
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-semibold tracking-tight text-foreground;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  code,
+  kbd,
+  samp,
+  pre {
+    @apply font-mono;
+  }
+}
+
+@layer utilities {
+  .text-display {
+    font-size: clamp(1.75rem, 2.5vw + 1rem, 2.5rem);
+    line-height: 1.15;
+    letter-spacing: -0.025em;
+    font-weight: 600;
+  }
+
+  .page-title {
+    font-size: clamp(1.375rem, 2vw + 0.875rem, 2rem);
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+  }
+
+  .section-title {
+    font-size: clamp(1.125rem, 1.2vw + 0.75rem, 1.375rem);
+    line-height: 1.3;
+    letter-spacing: -0.015em;
+    font-weight: 600;
+  }
+
+  .card-title-scale {
+    font-size: clamp(0.9375rem, 0.5vw + 0.8rem, 1.0625rem);
+    line-height: 1.4;
+    font-weight: 600;
+  }
+
+  .page-description {
+    font-size: clamp(0.875rem, 0.5vw + 0.75rem, 1rem);
+    line-height: 1.6;
+    color: var(--muted-foreground);
+  }
+
+  /* Financial & numeric alignment for PHP / centavo columns */
+  .financial-figure {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  /* Safe wrapping for UUIDs, SHA-256 audit hashes, and PayMongo references */
+  .break-identifiers {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   8. Responsive Layout Primitives
+   -------------------------------------------------------------------------- */
+@layer utilities {
+  .page-container {
+    width: min(100% - 1.5rem, 1440px);
+    margin-inline: auto;
+  }
+
+  @media (min-width: 640px) {
+    .page-container {
+      width: min(100% - 2.5rem, 1440px);
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .page-container {
+      width: min(100% - 4rem, 1440px);
+    }
+  }
+
+  .responsive-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+    gap: 1rem;
+  }
+
+  @media (min-width: 640px) {
+    .responsive-card-grid {
+      gap: 1.5rem;
+    }
+  }
+}
+
+/* --------------------------------------------------------------------------
+   9. Form and Interactive Defaults
+   -------------------------------------------------------------------------- */
+@layer base {
+  button,
+  [role="button"],
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"] {
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+
+  button:disabled,
+  [role="button"][aria-disabled="true"],
+  input:disabled,
+  select:disabled,
+  textarea:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  input,
+  select,
+  textarea {
+    @apply text-foreground placeholder:text-muted-foreground;
+    max-width: 100%;
+  }
+
+  /* Invalid input border & ring reinforcement */
+  input[aria-invalid="true"],
+  select[aria-invalid="true"],
+  textarea[aria-invalid="true"] {
+    border-color: var(--destructive);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   10. Accessibility and Focus States (WCAG 2.2 AA)
+   -------------------------------------------------------------------------- */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  /* Ensure interactive pointer targets meet WCAG 2.2 AA minimum 24x24px */
+  button,
+  [role="button"],
+  input[type="checkbox"],
+  input[type="radio"],
+  select {
+    min-height: 24px;
+    min-width: 24px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   11. Motion Preferences
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   12. Surface Elevation & Component Polish Utilities
+   -------------------------------------------------------------------------- */
+@layer utilities {
+  .surface-card {
+    background-color: var(--card);
+    color: var(--card-foreground);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-xs);
+  }
+
+  .surface-nested {
+    background-color: var(--surface-subtle);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+  }
+
+  .surface-popover {
+    background-color: var(--popover);
+    color: var(--popover-foreground);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+  }
+
+  .nav-indicator-active {
+    position: relative;
+  }
+
+  .nav-indicator-active::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 20%;
+    bottom: 20%;
+    width: 3px;
+    border-radius: 9999px;
+    background-color: var(--accent);
+  }
+}

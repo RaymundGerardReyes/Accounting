@@ -86,6 +86,42 @@ public sealed class OrderCrudLifecycleIntegrationTests : IClassFixture<Accountin
         Assert.All(orders, o => Assert.Equal(filterStatus, o.Status, ignoreCase: true));
     }
 
+    [Fact]
+    public async Task GetOrders_NonAdminUser_CannotSeeOtherUsersOrders()
+    {
+        using var nonAdminClient = _factory.CreateClient();
+        nonAdminClient.DefaultRequestHeaders.Add("X-User-ID", "employee_jane");
+        nonAdminClient.DefaultRequestHeaders.Add("X-User-Roles", "employee");
+
+        // Initially employee_jane has no orders
+        HttpResponseMessage initialResponse = await nonAdminClient.GetAsync("/api/v1/orders");
+        Assert.Equal(HttpStatusCode.OK, initialResponse.StatusCode);
+        var initialOrders = await initialResponse.Content.ReadFromJsonAsync<IReadOnlyList<OrderDto>>(JsonDefaults.Options);
+        Assert.NotNull(initialOrders);
+        Assert.Empty(initialOrders); // Baseline seeds owned by acme_admin are NOT leaked!
+
+        // Create an order for employee_jane
+        var createRequest = new CreateOrderRequest(
+            Title: "Jane's CPA Review",
+            Category: OrderCategory.ProductOrder,
+            ReferenceCode: "CPA-REV-AUDIT-2026",
+            Quantity: 1,
+            AmountMinor: 1450_00);
+        HttpResponseMessage postResponse = await nonAdminClient.PostAsJsonAsync("/api/v1/orders", createRequest, JsonDefaults.Options);
+        Assert.Equal(HttpStatusCode.Created, postResponse.StatusCode);
+        var created = await postResponse.Content.ReadFromJsonAsync<OrderDto>(JsonDefaults.Options);
+        Assert.NotNull(created);
+
+        // GET /api/v1/orders returns only Jane's order
+        HttpResponseMessage listResponse = await nonAdminClient.GetAsync("/api/v1/orders");
+        Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
+        var orders = await listResponse.Content.ReadFromJsonAsync<IReadOnlyList<OrderDto>>(JsonDefaults.Options);
+        Assert.NotNull(orders);
+        Assert.Single(orders);
+        Assert.Equal(created.Id, orders[0].Id);
+        Assert.Equal("employee_jane", orders[0].UserId);
+    }
+
     // =========================================================================
     // 2. Order Creation & Server-Authoritative Pricing (POST /api/v1/orders)
     // =========================================================================

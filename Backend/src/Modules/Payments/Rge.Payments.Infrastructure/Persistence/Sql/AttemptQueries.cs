@@ -69,6 +69,16 @@ public static class AttemptQueries
         ORDER BY created_at DESC;
         """;
 
+    public const string SelectLatestByOrderIdsSql = """
+        SELECT DISTINCT ON (order_id)
+               id, order_id, provider, payment_method, provider_payment_id,
+               amount_minor, currency, status, idempotency_key, checkout_url,
+               failure_code, failure_message, expires_at, paid_at, created_at, updated_at
+        FROM payment_attempts
+        WHERE order_id = ANY(@OrderIds)
+        ORDER BY order_id, created_at DESC;
+        """;
+
     public const string SelectNonTerminalSql = """
         SELECT id, order_id, provider, payment_method, provider_payment_id,
                amount_minor, currency, status, idempotency_key, checkout_url,

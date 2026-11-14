@@ -12,6 +12,7 @@ public interface IPaymentAttemptRepository
     Task<PaymentAttempt?> GetByIdempotencyKeyAsync(string idempotencyKey, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PaymentAttempt>> GetByOrderIdAsync(string orderId, CancellationToken cancellationToken = default);
     Task<PaymentAttempt?> GetLatestByOrderIdAsync(string orderId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyDictionary<string, PaymentAttempt>> GetLatestByOrderIdsAsync(IReadOnlyCollection<string> orderIds, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PaymentAttempt>> ListNonTerminalAsync(CancellationToken cancellationToken = default);
     Task SaveAsync(PaymentAttempt attempt, CancellationToken cancellationToken = default);
 }

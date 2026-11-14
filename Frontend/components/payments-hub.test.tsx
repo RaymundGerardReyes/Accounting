@@ -1,9 +1,26 @@
 import React from "react"
-import { render, screen, fireEvent, waitFor, waitForElementToBeRemoved } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, waitForElementToBeRemoved, act } from "@testing-library/react"
 import { describe, it, test, expect, vi, beforeEach, afterEach } from "vitest"
 import { useRouter } from "next/navigation"
 import { PaymentsHub } from "@/components/payments-hub"
 import type { Order } from "@/lib/payment-api"
+
+vi.mock("@/lib/auth-context", () => ({
+  useAuth: vi.fn(() => ({
+    authenticated: false,
+    loading: false,
+    user: null,
+    authenticatedUser: null,
+    allUsers: [],
+    csrfToken: "",
+    loginWithCredentials: vi.fn(),
+    loginWithOAuth: vi.fn(),
+    switchPersona: vi.fn(),
+    logout: vi.fn(),
+    refreshSession: vi.fn(),
+  })),
+}))
+import { useAuth } from "@/lib/auth-context"
 
 const mockOrders: Order[] = [
   {
@@ -104,6 +121,25 @@ function mockFetchEndpoints(orders: Order[] = mockOrders, failOrders = false) {
 describe("PaymentsHub Component", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(useAuth).mockReturnValue({
+      authenticated: false,
+      loading: false,
+      user: null,
+      authenticatedUser: null,
+      allUsers: [],
+      csrfToken: "",
+      loginWithCredentials: vi.fn(),
+      loginWithOAuth: vi.fn(),
+      switchPersona: vi.fn(),
+      logout: vi.fn(),
+      refreshSession: vi.fn(),
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true })
   })
 
   // --------------------------------------------------------------------------
@@ -314,6 +350,172 @@ describe("PaymentsHub Component", () => {
 
       expect(clearIntervalSpy).toHaveBeenCalled()
       clearIntervalSpy.mockRestore()
+    })
+  })
+
+  // --------------------------------------------------------------------------
+  // Suite 9: Admin Authorization & Polling Stability (R2 & R4)
+  // --------------------------------------------------------------------------
+  describe("Suite 9: Admin Authorization & Polling Stability (R2 & R4)", () => {
+    it("non-admin user does not render webhooks tab and does not call admin endpoints", async () => {
+      vi.mocked(useAuth).mockReturnValue({
+        authenticated: true,
+        loading: false,
+        user: { id: "user_emp", roles: ["employee"], full_name: "Employee", email: "emp@rge.ph" } as any,
+        authenticatedUser: null,
+        allUsers: [],
+        csrfToken: "",
+        loginWithCredentials: vi.fn(),
+        loginWithOAuth: vi.fn(),
+        switchPersona: vi.fn(),
+        logout: vi.fn(),
+        refreshSession: vi.fn(),
+      })
+      const fetchSpy = vi.fn().mockImplementation((url: string) => {
+        if (String(url).includes("/api/v1/orders")) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => mockOrders })
+        }
+        return Promise.resolve({ ok: true, status: 200, json: async () => [] })
+      })
+      global.fetch = fetchSpy as any
+
+      render(<PaymentsHub />)
+      await waitForElementToBeRemoved(() => screen.queryByText("Loading orders..."))
+
+      expect(screen.queryByRole("tab", { name: /Live Orchestrator & Webhooks/i })).toBeNull()
+      expect(screen.queryByRole("tab", { name: /Sandbox & Go-Live Checklist/i })).toBeNull()
+      const adminCalls = fetchSpy.mock.calls.filter(([url]) => String(url).includes("/api/v1/admin/"))
+      expect(adminCalls).toHaveLength(0)
+    })
+
+    it("admin user renders webhooks tab and calls admin endpoints", async () => {
+      vi.mocked(useAuth).mockReturnValue({
+        authenticated: true,
+        loading: false,
+        user: { id: "user_admin", roles: ["admin"], full_name: "Admin", email: "admin@rge.ph" } as any,
+        authenticatedUser: null,
+        allUsers: [],
+        csrfToken: "",
+        loginWithCredentials: vi.fn(),
+        loginWithOAuth: vi.fn(),
+        switchPersona: vi.fn(),
+        logout: vi.fn(),
+        refreshSession: vi.fn(),
+      })
+      const fetchSpy = vi.fn().mockImplementation((url: string) => {
+        if (String(url).includes("/api/v1/orders")) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => mockOrders })
+        }
+        return Promise.resolve({ ok: true, status: 200, json: async () => [] })
+      })
+      global.fetch = fetchSpy as any
+
+      render(<PaymentsHub />)
+      await waitForElementToBeRemoved(() => screen.queryByText("Loading orders..."))
+
+      expect(screen.getByRole("tab", { name: /Live Orchestrator & Webhooks/i })).toBeInTheDocument()
+      expect(screen.getByRole("tab", { name: /Sandbox & Go-Live Checklist/i })).toBeInTheDocument()
+      await waitFor(() => {
+        const adminCalls = fetchSpy.mock.calls.filter(([url]) => String(url).includes("/api/v1/admin/"))
+        expect(adminCalls.length).toBeGreaterThan(0)
+      })
+    })
+
+    it("visibility state guard skips polling when hidden", async () => {
+      vi.useFakeTimers()
+      let orderCalls = 0
+      global.fetch = vi.fn().mockImplementation((url: string) => {
+        if (String(url).includes("/api/v1/orders")) {
+          orderCalls++
+        }
+        return Promise.resolve({ ok: true, status: 200, json: async () => mockOrders })
+      }) as any
+
+      render(<PaymentsHub />)
+      // Initial tick
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10)
+      })
+      expect(orderCalls).toBe(1)
+
+      // Hide document
+      Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true })
+      document.dispatchEvent(new Event("visibilitychange"))
+
+      // Advance through 8 seconds
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(8000)
+      })
+      expect(orderCalls).toBe(1)
+
+      // Restore visible
+      Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true })
+      document.dispatchEvent(new Event("visibilitychange"))
+      vi.useRealTimers()
+    })
+
+    it("in-flight ref prevents concurrent order requests", async () => {
+      vi.useFakeTimers()
+      let orderCalls = 0
+      let slowResolve: (val: any) => void = () => {}
+      const slowPromise = new Promise((resolve) => {
+        slowResolve = resolve
+      })
+
+      global.fetch = vi.fn().mockImplementation((url: string) => {
+        if (String(url).includes("/api/v1/orders")) {
+          orderCalls++
+          return slowPromise
+        }
+        return Promise.resolve({ ok: true, status: 200, json: async () => [] })
+      }) as any
+
+      render(<PaymentsHub />)
+      expect(orderCalls).toBe(1)
+
+      // Advance 4000ms while slow request is pending
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000)
+      })
+      expect(orderCalls).toBe(1)
+
+      // Resolve slow request
+      await act(async () => {
+        slowResolve({ ok: true, status: 200, json: async () => mockOrders })
+        await vi.advanceTimersByTimeAsync(10)
+      })
+
+      // Next tick triggers next request
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000)
+      })
+      expect(orderCalls).toBe(2)
+      vi.useRealTimers()
+    })
+
+    it("background poll does not show loading spinner once initial data is loaded", async () => {
+      vi.useFakeTimers()
+      global.fetch = vi.fn().mockImplementation((url: string) => {
+        return Promise.resolve({ ok: true, status: 200, json: async () => mockOrders })
+      }) as any
+
+      render(<PaymentsHub />)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10)
+      })
+
+      expect(screen.queryByText("Loading orders...")).toBeNull()
+      expect(screen.getAllByText("ORD-2026-001").length).toBeGreaterThan(0)
+
+      // Background poll fires at 4000ms
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000)
+      })
+
+      // Spinner MUST NOT appear and orders remain displayed
+      expect(screen.queryByText("Loading orders...")).toBeNull()
+      expect(screen.getAllByText("ORD-2026-001").length).toBeGreaterThan(0)
+      vi.useRealTimers()
     })
   })
 })

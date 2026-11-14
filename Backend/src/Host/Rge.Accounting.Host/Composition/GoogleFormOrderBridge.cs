@@ -11,6 +11,8 @@ using Rge.BuildingBlocks.SharedKernel.Primitives;
 using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Integrations.Application.Ports;
 using Rge.Integrations.Infrastructure;
+using SmtpClientFactory = Rge.Integrations.Infrastructure.SmtpClientFactory;
+using Rge.Payments.Application.PaymentAttempts.InitiateAttempt;
 using Rge.Payments.Application.Ports;
 using Rge.Payments.Domain.Orders;
 using Rge.Payments.Domain.PaymentAttempts;
@@ -30,9 +32,10 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
     private readonly IPaymentGateway _paymentGateway;
     private readonly IClock _clock;
     private readonly IConfiguration _configuration;
-    private readonly SmtpClientFactory _smtpClientFactory;
+    private readonly Rge.Integrations.Infrastructure.SmtpClientFactory _smtpClientFactory;
     private readonly CacheInvalidator _cacheInvalidator;
-    private readonly ILogger<GoogleFormOrderBridge> _logger;
+    private readonly Microsoft.Extensions.Logging.ILogger<GoogleFormOrderBridge> _logger;
+    private readonly InitiateAttemptHandler _initiateAttemptHandler;
 
     public GoogleFormOrderBridge(
         IOrderRepository orderRepository,
@@ -41,9 +44,10 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
         IPaymentGateway paymentGateway,
         IClock clock,
         IConfiguration configuration,
-        SmtpClientFactory smtpClientFactory,
+        Rge.Integrations.Infrastructure.SmtpClientFactory smtpClientFactory,
         CacheInvalidator cacheInvalidator,
-        ILogger<GoogleFormOrderBridge> logger)
+        Microsoft.Extensions.Logging.ILogger<GoogleFormOrderBridge> logger,
+        InitiateAttemptHandler initiateAttemptHandler)
     {
         ArgumentNullException.ThrowIfNull(orderRepository);
         ArgumentNullException.ThrowIfNull(attemptRepository);
@@ -54,6 +58,7 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
         ArgumentNullException.ThrowIfNull(smtpClientFactory);
         ArgumentNullException.ThrowIfNull(cacheInvalidator);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(initiateAttemptHandler);
 
         _orderRepository = orderRepository;
         _attemptRepository = attemptRepository;
@@ -64,6 +69,7 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
         _smtpClientFactory = smtpClientFactory;
         _cacheInvalidator = cacheInvalidator;
         _logger = logger;
+        _initiateAttemptHandler = initiateAttemptHandler;
     }
 
     public async Task<GoogleFormOrderCreationResult> CreateOrderAndInitiateCheckoutAsync(
@@ -114,7 +120,9 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
             instructor_credit = request.InstructorCredit ?? string.Empty,
             book_title = request.BookTitle ?? cleanReference,
             quantity = safeQty,
-            notes = request.Notes ?? string.Empty
+            notes = request.Notes ?? string.Empty,
+            department = "Tax",
+            cost_center = "CC-101"
         };
 
         string metadataJson = JsonSerializer.Serialize(metadataObj);
@@ -209,7 +217,7 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
             ProviderPaymentId: providerPaymentId);
     }
 
-    public async Task<GoogleFormOrderBridgeResult> BridgeSubmissionToOrderAsync(
+    public async Task<BridgedGoogleFormOrder> BridgeSubmissionToOrderAsync(
         GoogleFormOrderBridgeRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -220,13 +228,18 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
         string yearMonth = request.SubmittedAt.ToUniversalTime().ToString("yyyyMM", CultureInfo.InvariantCulture);
         string candidateOrderNumber = $"ORD-{yearMonth}-{deterministicSuffix[..4].ToUpperInvariant()}";
 
+        string dept = (request.AdditionalMetadata != null && request.AdditionalMetadata.TryGetValue("department", out var d) && !string.IsNullOrWhiteSpace(d)) ? d : "Tax";
+        string cc = (request.AdditionalMetadata != null && request.AdditionalMetadata.TryGetValue("cost_center", out var c) && !string.IsNullOrWhiteSpace(c)) ? c : "CC-101";
+
         var metaDict = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
         {
+            ["source"] = "google_forms",
             ["customer_name"] = request.CustomerName,
             ["customer_email"] = request.CustomerEmail,
             ["customer_phone"] = request.CustomerPhone ?? string.Empty,
-            ["source"] = "google_forms",
             ["google_form_response_id"] = request.ResponseId,
+            ["department"] = dept,
+            ["cost_center"] = cc,
             ["product_code"] = request.ProductCode,
             ["quantity"] = request.Quantity
         };
@@ -235,7 +248,10 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
         {
             foreach (var kvp in request.AdditionalMetadata)
             {
-                metaDict[kvp.Key] = kvp.Value;
+                if (!metaDict.ContainsKey(kvp.Key))
+                {
+                    metaDict[kvp.Key] = kvp.Value;
+                }
             }
         }
 
@@ -294,57 +310,58 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
                 updatedAt: request.SubmittedAt.ToUniversalTime());
 
             await _orderRepository.SaveAsync(newOrder, cancellationToken).ConfigureAwait(false);
-
-            string idempotencyKey = $"gf_attempt_{request.ResponseId}";
-            string appBaseUrl = (_configuration["NEXT_PUBLIC_APP_URL"]
-                ?? _configuration["APP_URL"]
-                ?? "https://accounting.raymundgerardestaca.dev").TrimEnd('/');
-
-            PaymentAttempt attempt = PaymentAttempt.CreatePending(
-                orderId: newOrder.Id,
-                paymentMethod: "hosted_checkout",
-                amount: Money.Php(request.TotalAmountMinor),
-                idempotencyKey: idempotencyKey,
-                nowUtc: request.SubmittedAt.ToUniversalTime());
-
-            attempt.AttachCheckoutSession(
-                providerPaymentId: $"cs_sim_{deterministicSuffix}",
-                checkoutUrl: $"{appBaseUrl}/checkout?order_id={Uri.EscapeDataString(newOrder.Id)}",
-                expiresAtUtc: request.SubmittedAt.ToUniversalTime().AddDays(3),
-                nowUtc: request.SubmittedAt.ToUniversalTime());
-
-            await _attemptRepository.SaveAsync(attempt, cancellationToken).ConfigureAwait(false);
         }
 
         await _cacheInvalidator.InvalidateByTagAsync("orders", cancellationToken).ConfigureAwait(false);
 
-        bool emailSent = false;
-        string? emailStatus = null;
+        string idempotencyKey = $"gf_attempt_{request.ResponseId}";
+        string appBaseUrl = (_configuration["NEXT_PUBLIC_APP_URL"]
+            ?? _configuration["APP_URL"]
+            ?? "https://accounting.raymundgerardestaca.dev").TrimEnd('/');
 
-        if (request.SendInitialEmail)
+        string checkoutUrl = $"{appBaseUrl}/checkout?order_id={Uri.EscapeDataString(orderId)}";
+        string paymentAttemptId = $"att_{orderId}";
+        string? providerPaymentId = null;
+
+        var attemptCmd = new InitiateAttemptCommand(
+            OrderId: orderId,
+            PaymentMethod: "hosted_checkout",
+            IdempotencyKey: idempotencyKey,
+            CustomerName: request.CustomerName,
+            CustomerEmail: request.CustomerEmail,
+            CustomerPhone: request.CustomerPhone);
+
+        var attemptRes = await _initiateAttemptHandler.HandleAsync(attemptCmd, cancellationToken).ConfigureAwait(false);
+        if (attemptRes.IsSuccess)
         {
-            var smtpResult = await _smtpClientFactory.SendOrderConfirmationEmailAsync(
-                orderId: orderId,
-                orderNumber: orderNumber,
-                title: request.ProductTitle,
-                amountMinor: request.TotalAmountMinor,
-                currency: request.Currency,
-                customerName: request.CustomerName,
-                customerEmail: request.CustomerEmail,
-                googleFormResponseId: request.ResponseId,
-                ct: cancellationToken).ConfigureAwait(false);
-
-            emailSent = smtpResult.Success;
-            emailStatus = smtpResult.Message;
+            paymentAttemptId = attemptRes.Value.Id;
+            providerPaymentId = attemptRes.Value.ProviderPaymentId;
+            if (!string.IsNullOrWhiteSpace(attemptRes.Value.CheckoutUrl))
+            {
+                checkoutUrl = attemptRes.Value.CheckoutUrl;
+            }
+        }
+        else
+        {
+            _logger.LogWarning(
+                "InitiateAttemptHandler failed for bridged order {OrderId}: {Error}",
+                orderId,
+                attemptRes.Error.Message);
         }
 
-        return new GoogleFormOrderBridgeResult(
+        return new BridgedGoogleFormOrder(
             OrderId: orderId,
             OrderNumber: orderNumber,
+            OrderTitle: request.ProductTitle,
+            AmountMinor: request.TotalAmountMinor,
+            Currency: request.Currency,
+            CheckoutUrl: checkoutUrl,
+            PaymentAttemptId: paymentAttemptId,
+            ProviderPaymentId: providerPaymentId,
             Status: persistedStatus,
             CreatedNew: createdNew,
-            EmailDispatched: emailSent,
-            EmailStatusMessage: emailStatus);
+            EmailDispatched: false,
+            EmailStatusMessage: null);
     }
 
     public async Task<GoogleFormOrderCreationResult?> FindExistingByResponseIdAsync(

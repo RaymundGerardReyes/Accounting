@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Rge.BuildingBlocks.Api.Endpoints;
+using Rge.BuildingBlocks.Application.Abstractions;
 using Rge.BuildingBlocks.Application.Messaging;
 using Rge.BuildingBlocks.Infrastructure.Outbox;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
@@ -26,10 +27,22 @@ public sealed class OutboxEndpoints : IEndpointModule
     private static async Task<IResult> ListOutboxAsync(
         IOutboxStore outboxStore,
         IClock clock,
+        ICurrentActor actor,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(outboxStore);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(actor);
+
+        if (!actor.IsAuthenticated)
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!actor.IsInRole("admin") && !actor.IsInRole("finance_admin"))
+        {
+            return Results.Forbid();
+        }
 
         var records = await outboxStore.ClaimBatchAsync(
             workerId: "admin-inspector",
@@ -46,11 +59,23 @@ public sealed class OutboxEndpoints : IEndpointModule
         IOutboxStore outboxStore,
         OutboxDispatcher dispatcher,
         IClock clock,
+        ICurrentActor actor,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(outboxStore);
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(actor);
+
+        if (!actor.IsAuthenticated)
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!actor.IsInRole("admin") && !actor.IsInRole("finance_admin"))
+        {
+            return Results.Forbid();
+        }
 
         DateTimeOffset nowUtc = clock.UtcNow;
         var batch = await outboxStore.ClaimBatchAsync(

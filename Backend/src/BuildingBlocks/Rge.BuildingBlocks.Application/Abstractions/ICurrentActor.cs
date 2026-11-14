@@ -7,6 +7,7 @@ namespace Rge.BuildingBlocks.Application.Abstractions;
 public interface ICurrentActor
 {
     string ActorId { get; }
+    string UserId => ActorId;
     string EmployeeCode { get; }
     string DepartmentId { get; }
     string CostCenterId { get; }
@@ -16,5 +17,6 @@ public interface ICurrentActor
     bool IsAuthenticated { get; }
 
     bool HasRole(string role);
+    bool IsInRole(string role) => HasRole(role) || (string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase) && HasRole("system_admin"));
     bool HasScopeForDepartment(string targetDepartmentId);
 }

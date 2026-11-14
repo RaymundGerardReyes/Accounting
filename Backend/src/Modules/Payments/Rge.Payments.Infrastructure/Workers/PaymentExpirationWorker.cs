@@ -120,7 +120,7 @@ public sealed class PaymentExpirationWorker : BackgroundService
             double remainingSeconds = attempt.ExpiresAt.HasValue
                 ? (attempt.ExpiresAt.Value - nowUtc).TotalSeconds
                 : 0;
-            bool isDeadlineReached = attempt.ExpiresAt.HasValue && attempt.ExpiresAt.Value <= nowUtc;
+            bool isDeadlineReached = attempt.ExpiresAt.HasValue && (nowUtc >= attempt.ExpiresAt.Value || remainingSeconds <= 0);
 
             // Clean up superseded attempts on the same order (e.g. cs_33ab872df98fd94f8ee87338 when cs_1753341df564a3c58fb3cc49 is created)
             if (latestAttemptIdByOrder.TryGetValue(attempt.OrderId, out string? newestId) &&

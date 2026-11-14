@@ -190,6 +190,7 @@ public sealed class OrderRepository : IOrderRepository
     public async Task<IReadOnlyList<Order>> ListAsync(
         string? status = null,
         int limit = 50,
+        string? userId = null,
         CancellationToken cancellationToken = default)
     {
         int effectiveLimit = Math.Clamp(limit, 1, 100);
@@ -202,6 +203,7 @@ public sealed class OrderRepository : IOrderRepository
             cmd.CommandText = OrderQueries.SelectListSql;
             cmd.CommandTimeout = SqlTimeouts.FastReadSeconds;
             AddParam(cmd, "@status", string.IsNullOrWhiteSpace(status) ? null : status.Trim());
+            AddParam(cmd, "@UserId", string.IsNullOrWhiteSpace(userId) ? null : userId.Trim());
             AddParam(cmd, "@limit", effectiveLimit);
 
             List<Order> list = [];
@@ -222,6 +224,10 @@ public sealed class OrderRepository : IOrderRepository
                 {
                     fallback = fallback.Where(o => string.Equals(o.Status, status.Trim(), StringComparison.OrdinalIgnoreCase));
                 }
+                if (!string.IsNullOrWhiteSpace(userId))
+                {
+                    fallback = fallback.Where(o => string.Equals(o.UserId, userId.Trim(), StringComparison.OrdinalIgnoreCase));
+                }
                 return fallback.OrderByDescending(o => o.CreatedAt).Take(effectiveLimit).ToList();
             }
 
@@ -234,6 +240,10 @@ public sealed class OrderRepository : IOrderRepository
             if (!string.IsNullOrWhiteSpace(status))
             {
                 memList = memList.Where(o => string.Equals(o.Status, status.Trim(), StringComparison.OrdinalIgnoreCase));
+            }
+            if (!string.IsNullOrWhiteSpace(userId))
+            {
+                memList = memList.Where(o => string.Equals(o.UserId, userId.Trim(), StringComparison.OrdinalIgnoreCase));
             }
             return memList.OrderByDescending(o => o.CreatedAt).Take(effectiveLimit).ToList();
         }

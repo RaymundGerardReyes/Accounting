@@ -87,6 +87,20 @@ public sealed record GoogleFormOrderBridgeRequest(
     bool SendInitialEmail,
     IReadOnlyDictionary<string, string>? AdditionalMetadata = null);
 
+public sealed record BridgedGoogleFormOrder(
+    string OrderId,
+    string OrderNumber,
+    string OrderTitle,
+    long AmountMinor,
+    string Currency,
+    string CheckoutUrl,
+    string PaymentAttemptId,
+    string? ProviderPaymentId,
+    string Status = "pending",
+    bool CreatedNew = true,
+    bool EmailDispatched = false,
+    string? EmailStatusMessage = null);
+
 public sealed record GoogleFormOrderBridgeResult(
     string OrderId,
     string OrderNumber,
@@ -108,7 +122,29 @@ public interface IGoogleFormOrderBridge
     Task<(int Total, int Paid, int Pending)> GetGoogleFormOrderStatsAsync(
         CancellationToken cancellationToken = default);
 
-    Task<GoogleFormOrderBridgeResult> BridgeSubmissionToOrderAsync(
+    Task<BridgedGoogleFormOrder> BridgeSubmissionToOrderAsync(
         GoogleFormOrderBridgeRequest request,
         CancellationToken cancellationToken = default);
+}
+
+public interface ISmtpClientFactory : ISmtpProbe
+{
+    Task<SmtpExecutionResult> SendPaymentInvitationEmailAsync(
+        string orderId,
+        string orderNumber,
+        string title,
+        long amountMinor,
+        string currency,
+        string? customerName,
+        string? customerEmail,
+        string checkoutUrl,
+        string? googleFormResponseId = null,
+        CancellationToken ct = default);
+}
+
+public interface IIntegrationLogger<out TCategoryName>
+{
+    void LogInformation(string message, params object?[] args);
+    void LogWarning(string message, params object?[] args);
+    void LogError(Exception? exception, string message, params object?[] args);
 }

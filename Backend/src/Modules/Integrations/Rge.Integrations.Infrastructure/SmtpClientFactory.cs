@@ -10,10 +10,10 @@ using Rge.Integrations.Contracts;
 
 namespace Rge.Integrations.Infrastructure;
 
-public sealed class SmtpClientFactory : ISmtpProbe
+public sealed class SmtpClientFactory : ISmtpClientFactory
 {
     private readonly IConfiguration? _configuration;
-    private readonly ILogger<SmtpClientFactory>? _logger;
+    private readonly Microsoft.Extensions.Logging.ILogger<SmtpClientFactory>? _logger;
     private readonly ISecretStore? _secretStore;
 
     public SmtpClientFactory(ISecretStore secretStore)
@@ -21,7 +21,7 @@ public sealed class SmtpClientFactory : ISmtpProbe
         _secretStore = secretStore;
     }
 
-    public SmtpClientFactory(IConfiguration configuration, ILogger<SmtpClientFactory> logger)
+    public SmtpClientFactory(IConfiguration configuration, Microsoft.Extensions.Logging.ILogger<SmtpClientFactory> logger)
     {
         _configuration = configuration;
         _logger = logger;
@@ -29,7 +29,7 @@ public sealed class SmtpClientFactory : ISmtpProbe
 
     public SmtpClientFactory(
         IConfiguration? configuration = null,
-        ILogger<SmtpClientFactory>? logger = null,
+        Microsoft.Extensions.Logging.ILogger<SmtpClientFactory>? logger = null,
         ISecretStore? secretStore = null)
     {
         _configuration = configuration;
@@ -61,7 +61,7 @@ public sealed class SmtpClientFactory : ISmtpProbe
             Environment.GetEnvironmentVariable("SMTP_USER"),
             string.Empty).Trim();
 
-        string pass = FirstNonEmpty(
+        string rawPass = FirstNonEmpty(
             _secretStore?.GetSecret("SMTP_APP_PASSWORD"),
             _secretStore?.GetSecret("SMTP_PASS"),
             _configuration?["SMTP_APP_PASSWORD"],
@@ -69,7 +69,8 @@ public sealed class SmtpClientFactory : ISmtpProbe
             _configuration?["Smtp:Password"],
             Environment.GetEnvironmentVariable("SMTP_APP_PASSWORD"),
             Environment.GetEnvironmentVariable("SMTP_PASS"),
-            string.Empty).Replace(" ", "", StringComparison.Ordinal).Trim();
+            string.Empty);
+        string pass = string.Concat(rawPass.Where(c => !char.IsWhiteSpace(c)));
 
         string defaultReceipt = FirstNonEmpty(
             _secretStore?.GetSecret("DEFAULT_RECEIPT_EMAIL"),
@@ -82,12 +83,14 @@ public sealed class SmtpClientFactory : ISmtpProbe
         string fromEmail = !string.IsNullOrWhiteSpace(user) && user.Contains('@', StringComparison.Ordinal) ? user : defaultReceipt;
 
         string senderName = FirstNonEmpty(
+            _secretStore?.GetSecret("SMTP_SENDER_NAME"),
             _configuration?["SMTP_SENDER_NAME"],
             _configuration?["Smtp:SenderName"],
             Environment.GetEnvironmentVariable("SMTP_SENDER_NAME"),
             "R.G.E Accounting Firm Inc.").Trim();
 
         string tlsRaw = FirstNonEmpty(
+            _secretStore?.GetSecret("SMTP_USE_TLS"),
             _configuration?["SMTP_USE_TLS"],
             _configuration?["Smtp:UseTls"],
             Environment.GetEnvironmentVariable("SMTP_USE_TLS"),
@@ -457,6 +460,135 @@ public sealed class SmtpClientFactory : ISmtpProbe
                 false,
                 Math.Max(1, sw.ElapsedMilliseconds),
                 $"Order saved, but confirmation email failed: {ex.Message}",
+                ex.ToString(),
+                RecipientEmail: primaryRecipient,
+                SenderCopyEmail: s.FromEmail);
+        }
+    }
+
+    /// <summary>
+    /// Sends an outbound Payment Invitation email with PayMongo hosted checkout link to the customer.
+    /// </summary>
+    public async Task<SmtpExecutionResult> SendPaymentInvitationEmailAsync(
+        string orderId,
+        string orderNumber,
+        string title,
+        long amountMinor,
+        string currency,
+        string? customerName,
+        string? customerEmail,
+        string checkoutUrl,
+        string? googleFormResponseId = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(orderId);
+        ArgumentNullException.ThrowIfNull(orderNumber);
+        ArgumentNullException.ThrowIfNull(title);
+        ArgumentNullException.ThrowIfNull(currency);
+
+        var s = ResolveSettings();
+        if (string.IsNullOrWhiteSpace(s.Host) || string.IsNullOrWhiteSpace(s.FromEmail))
+        {
+            return new SmtpExecutionResult(
+                false,
+                0,
+                "SMTP configuration is incomplete.",
+                "Missing SMTP_HOST or SMTP_USER / DEFAULT_RECEIPT_EMAIL.");
+        }
+
+        bool hasValidCustomerEmail = !string.IsNullOrWhiteSpace(customerEmail)
+            && customerEmail.Contains('@', StringComparison.Ordinal)
+            && !customerEmail.Contains('*', StringComparison.Ordinal);
+
+        string primaryRecipient = hasValidCustomerEmail
+            ? customerEmail!.Trim()
+            : (!string.IsNullOrWhiteSpace(s.DefaultReceiptEmail) ? s.DefaultReceiptEmail : s.FromEmail);
+
+        string displayCustomer = !string.IsNullOrWhiteSpace(customerName)
+            ? customerName.Trim()
+            : primaryRecipient;
+
+        decimal amountMajor = amountMinor / 100m;
+        string formattedAmount = $"{currency.ToUpperInvariant()} {amountMajor:N2}";
+
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var client = CreateClient(s);
+            using var message = new MailMessage
+            {
+                From = new MailAddress(s.FromEmail, s.SenderName),
+                Subject = $"[Payment Invitation {orderNumber}] {title} — {s.SenderName}",
+                BodyEncoding = Encoding.UTF8,
+                SubjectEncoding = Encoding.UTF8,
+                IsBodyHtml = true,
+                Body = $"""
+                    <div style="font-family:Inter,Segoe UI,Arial,sans-serif;max-width:620px;margin:0 auto;padding:24px;border:1px solid #e2e8f0;border-radius:10px;background:#ffffff;">
+                        <h2 style="color:#0f172a;margin:0 0 8px 0;">Payment Invitation — {WebUtility.HtmlEncode(orderNumber)}</h2>
+                        <p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 16px 0;">
+                            Hello <strong>{WebUtility.HtmlEncode(displayCustomer)}</strong>, your order has been received and is ready for payment in the <strong>{WebUtility.HtmlEncode(s.SenderName)}</strong> system.
+                        </p>
+                        <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:13px;border-top:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;">
+                            <tr><td style="padding:8px 0;color:#64748b;">Order Number:</td><td style="padding:8px 0;color:#0f172a;font-weight:600;">{WebUtility.HtmlEncode(orderNumber)}</td></tr>
+                            <tr><td style="padding:8px 0;color:#64748b;">Order ID:</td><td style="padding:8px 0;color:#0f172a;font-family:monospace;">{WebUtility.HtmlEncode(orderId)}</td></tr>
+                            <tr><td style="padding:8px 0;color:#64748b;">Item / Description:</td><td style="padding:8px 0;color:#0f172a;font-weight:600;">{WebUtility.HtmlEncode(title)}</td></tr>
+                            <tr><td style="padding:8px 0;color:#64748b;">Amount Due:</td><td style="padding:8px 0;color:#0f172a;font-weight:700;font-size:15px;">{WebUtility.HtmlEncode(formattedAmount)}</td></tr>
+                            <tr><td style="padding:8px 0;color:#64748b;">Customer Email:</td><td style="padding:8px 0;color:#0f172a;">{WebUtility.HtmlEncode(primaryRecipient)}</td></tr>
+                            <tr><td style="padding:8px 0;color:#64748b;">Form Response ID:</td><td style="padding:8px 0;color:#0f172a;">{WebUtility.HtmlEncode(googleFormResponseId ?? "N/A")}</td></tr>
+                        </table>
+                        <div style="margin:24px 0;">
+                            <a href="{WebUtility.HtmlEncode(checkoutUrl)}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:6px;font-weight:600;font-size:14px;">
+                                Proceed to Online Checkout
+                            </a>
+                        </div>
+                        <p style="color:#94a3b8;font-size:12px;margin-top:24px;">
+                            Dispatched by {WebUtility.HtmlEncode(s.SenderName)} ({WebUtility.HtmlEncode(s.FromEmail)}).
+                        </p>
+                    </div>
+                    """
+            };
+
+            message.To.Add(new MailAddress(primaryRecipient, displayCustomer));
+
+            if (!string.IsNullOrWhiteSpace(s.FromEmail) &&
+                !string.Equals(primaryRecipient, s.FromEmail, StringComparison.OrdinalIgnoreCase))
+            {
+                message.CC.Add(new MailAddress(s.FromEmail, s.SenderName));
+            }
+
+            if (!string.IsNullOrWhiteSpace(s.DefaultReceiptEmail) &&
+                !string.Equals(primaryRecipient, s.DefaultReceiptEmail, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(s.FromEmail, s.DefaultReceiptEmail, StringComparison.OrdinalIgnoreCase))
+            {
+                message.Bcc.Add(new MailAddress(s.DefaultReceiptEmail, s.SenderName));
+            }
+
+            await client.SendMailAsync(message, ct);
+            sw.Stop();
+            long elapsed = sw.ElapsedMilliseconds;
+
+            if (_logger is not null && _logger.IsEnabled(LogLevel.Information))
+            {
+                _logger.LogInformation(
+                    "Payment invitation email sent for {OrderNumber} ({OrderId}) to {Recipient} and sender {Sender} in {ElapsedMs}ms",
+                    orderNumber, orderId, primaryRecipient, s.FromEmail, elapsed);
+            }
+
+            return new SmtpExecutionResult(
+                true,
+                Math.Max(1, elapsed),
+                $"Payment invitation email sent to {primaryRecipient} and {s.FromEmail}.",
+                RecipientEmail: primaryRecipient,
+                SenderCopyEmail: s.FromEmail);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            _logger?.LogError(ex, "Failed to send payment invitation email for {OrderNumber} to {Recipient}", orderNumber, primaryRecipient);
+            return new SmtpExecutionResult(
+                false,
+                Math.Max(1, sw.ElapsedMilliseconds),
+                $"Order saved, but payment invitation email failed: {ex.Message}",
                 ex.ToString(),
                 RecipientEmail: primaryRecipient,
                 SenderCopyEmail: s.FromEmail);

@@ -18,6 +18,7 @@ using Rge.Integrations.Application.TestPayMongo;
 using Rge.Integrations.Application.TestSmtp;
 using Rge.Integrations.Contracts;
 using Rge.Integrations.Infrastructure;
+using SmtpClientFactory = Rge.Integrations.Infrastructure.SmtpClientFactory;
 using Rge.Payments.Application.Ports;
 using Rge.Payments.Infrastructure.PayMongo;
 using Rge.Receipts.Domain;

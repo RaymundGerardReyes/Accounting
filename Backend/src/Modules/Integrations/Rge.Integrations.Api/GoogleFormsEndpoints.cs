@@ -110,26 +110,38 @@ public sealed class GoogleFormsEndpoints : IEndpointModule
             }
 
             var singleInput = ParseSingleSubmission(root, defaultSendEmail: true);
+            if (string.IsNullOrWhiteSpace(singleInput.CustomerName) || string.IsNullOrWhiteSpace(singleInput.CustomerEmail))
+            {
+                return Results.Problem(
+                    title: "Bad Request",
+                    detail: "customer_name and customer_email are required.",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    type: "https://rge-accounting.dev/errors/validation",
+                    instance: httpContext.Request.Path);
+            }
+
             var response = await handler.HandleAsync(singleInput, ct).ConfigureAwait(false);
 
-            return Results.Json(new
+            var responseObj = new Dictionary<string, object?>
             {
-                ok = response.Ok,
-                status = response.Status,
-                message = "Google Form order created and checkout session initiated.",
-                order_id = response.OrderId,
-                order_number = response.OrderNumber,
-                orderId = response.OrderId,
-                orderNumber = response.OrderNumber,
-                response_id = response.ResponseId,
-                responseId = response.ResponseId,
-                checkout_url = $"/checkout?order_id={Uri.EscapeDataString(response.OrderId)}",
-                checkoutUrl = $"/checkout?order_id={Uri.EscapeDataString(response.OrderId)}",
-                created_new = response.CreatedNew,
-                email_dispatched = response.EmailDispatched,
-                email_message = response.EmailMessage,
-                created_at = response.CreatedAt
-            }, statusCode: response.CreatedNew ? StatusCodes.Status201Created : StatusCodes.Status200OK);
+                ["ok"] = response.Ok,
+                ["status"] = response.Status,
+                ["message"] = "Google Form order created and checkout session initiated.",
+                ["order_id"] = response.OrderId,
+                ["order_number"] = response.OrderNumber,
+                ["orderId"] = response.OrderId,
+                ["orderNumber"] = response.OrderNumber,
+                ["response_id"] = response.ResponseId,
+                ["responseId"] = response.ResponseId,
+                ["checkout_url"] = $"/checkout?order_id={Uri.EscapeDataString(response.OrderId)}",
+                ["checkoutUrl"] = $"/checkout?order_id={Uri.EscapeDataString(response.OrderId)}",
+                ["created_new"] = response.CreatedNew,
+                ["email_dispatched"] = response.EmailDispatched,
+                ["email_message"] = response.EmailMessage,
+                ["created_at"] = response.CreatedAt
+            };
+
+            return Results.Json(responseObj, statusCode: response.CreatedNew ? StatusCodes.Status201Created : StatusCodes.Status200OK);
         }
     }
 

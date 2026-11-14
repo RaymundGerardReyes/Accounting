@@ -138,9 +138,9 @@ public sealed class SmtpReceiptMailer : IReceiptMailer
             ?? Environment.GetEnvironmentVariable("DEFAULT_RECEIPT_EMAIL")
             ?? _options.SenderEmail;
 
-        string targetRecipient = recipientEmail.Contains('*', StringComparison.Ordinal)
-            ? defaultReceiptEmail.Trim()
-            : recipientEmail.Trim();
+        string targetRecipient = IsValidUnmaskedEmail(recipientEmail)
+            ? recipientEmail.Trim()
+            : defaultReceiptEmail.Trim();
 
         if (string.IsNullOrWhiteSpace(targetRecipient))
         {

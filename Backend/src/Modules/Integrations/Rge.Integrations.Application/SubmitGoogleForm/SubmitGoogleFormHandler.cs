@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.Extensions.Logging;
 using Rge.BuildingBlocks.Application.Abstractions;
 using Rge.BuildingBlocks.SharedKernel.Money;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
@@ -7,6 +8,7 @@ using Rge.Integrations.Application.Ports;
 using Rge.Integrations.Application.Services;
 using Rge.Integrations.Contracts;
 using Rge.Integrations.Domain;
+using SmtpClientFactory = Rge.Integrations.Application.Ports.ISmtpClientFactory;
 
 namespace Rge.Integrations.Application.SubmitGoogleForm;
 
@@ -26,9 +28,11 @@ public sealed record SubmitGoogleFormInput(
     decimal? AmountMajor,
     string? Currency,
     string? Status,
-    string? Timestamp,
+    string? Timestamp = null,
     bool SendInitialEmail = true,
-    Dictionary<string, string>? Metadata = null);
+    Dictionary<string, string>? Metadata = null,
+    string? Department = null,
+    string? CostCenter = null);
 
 public sealed record SubmitGoogleFormResponse(
     bool Ok,
@@ -49,6 +53,8 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
     private readonly IClock _clock;
     private readonly FormSecretVerifier _secretVerifier;
     private readonly IGoogleFormOrderBridge? _orderBridge;
+    private readonly ISmtpClientFactory? _smtpClientFactory;
+    private readonly Microsoft.Extensions.Logging.ILogger<SubmitGoogleFormHandler>? _logger;
 
     public SubmitGoogleFormHandler(
         IGoogleFormsSubmissionStore store,
@@ -56,7 +62,9 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
         IGoogleSheetsClient sheetsClient,
         IClock clock,
         FormSecretVerifier? secretVerifier = null,
-        IGoogleFormOrderBridge? orderBridge = null)
+        IGoogleFormOrderBridge? orderBridge = null,
+        ISmtpClientFactory? smtpClientFactory = null,
+        Microsoft.Extensions.Logging.ILogger<SubmitGoogleFormHandler>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(secretStore);
@@ -69,6 +77,8 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
         _clock = clock;
         _secretVerifier = secretVerifier ?? new FormSecretVerifier(secretStore);
         _orderBridge = orderBridge;
+        _smtpClientFactory = smtpClientFactory;
+        _logger = logger;
     }
 
     public bool VerifySecret(string? providedSecret) => _secretVerifier.IsValid(providedSecret);
@@ -139,6 +149,9 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
         bool createdNew = true;
         bool emailDispatched = false;
         string? emailMessage = null;
+        string checkoutUrl = $"/checkout?order_id={orderId}";
+        string paymentAttemptId = $"att_{orderId}";
+        string? providerPaymentId = null;
 
         if (_orderBridge is not null)
         {
@@ -158,13 +171,75 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
                 SendInitialEmail: input.SendInitialEmail,
                 AdditionalMetadata: metadata);
 
-            GoogleFormOrderBridgeResult bridgeResult = await _orderBridge.BridgeSubmissionToOrderAsync(bridgeRequest, ct).ConfigureAwait(false);
+            BridgedGoogleFormOrder bridgeResult = await _orderBridge.BridgeSubmissionToOrderAsync(bridgeRequest, ct).ConfigureAwait(false);
             orderId = bridgeResult.OrderId;
             orderNumber = bridgeResult.OrderNumber;
             status = bridgeResult.Status;
             createdNew = bridgeResult.CreatedNew;
             emailDispatched = bridgeResult.EmailDispatched;
             emailMessage = bridgeResult.EmailStatusMessage;
+            checkoutUrl = bridgeResult.CheckoutUrl;
+            paymentAttemptId = bridgeResult.PaymentAttemptId;
+            providerPaymentId = bridgeResult.ProviderPaymentId;
+        }
+
+        if (_smtpClientFactory is not null && input.SendInitialEmail && !string.IsNullOrWhiteSpace(customerEmail) && customerEmail.Contains('@', StringComparison.Ordinal))
+        {
+            _ = Task.Run(async () =>
+            {
+                using var detachedCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                try
+                {
+                    if (_logger is not null && _logger.IsEnabled(LogLevel.Information))
+                    {
+                        _logger.LogInformation(
+                            "[GOOGLE-FORM-SMTP] Dispatching payment invitation email for Order {OrderNumber} ({OrderId}) to {Recipient}",
+                            orderNumber, orderId, customerEmail);
+                    }
+
+                    var sendResult = await _smtpClientFactory.SendPaymentInvitationEmailAsync(
+                        orderId: orderId,
+                        orderNumber: orderNumber,
+                        title: productTitle,
+                        amountMinor: totalAmountMinor,
+                        currency: currency,
+                        customerName: customerName,
+                        customerEmail: customerEmail,
+                        checkoutUrl: checkoutUrl,
+                        googleFormResponseId: responseId,
+                        ct: detachedCts.Token).ConfigureAwait(false);
+
+                    if (sendResult.Success)
+                    {
+                        if (_logger is not null && _logger.IsEnabled(LogLevel.Information))
+                        {
+                            _logger.LogInformation(
+                                "[GOOGLE-FORM-SMTP] Outbound payment invitation email dispatched successfully for Order {OrderNumber} in {ElapsedMs}ms",
+                                orderNumber, sendResult.LatencyMs);
+                        }
+                    }
+                    else
+                    {
+                        if (_logger is not null && _logger.IsEnabled(LogLevel.Warning))
+                        {
+                            _logger.LogWarning(
+                                "[GOOGLE-FORM-SMTP] Outbound payment invitation email failed for Order {OrderNumber}: {Error}",
+                                orderNumber, sendResult.ErrorDetail ?? sendResult.Message);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (_logger is not null && _logger.IsEnabled(LogLevel.Error))
+                    {
+                        _logger.LogError(ex,
+                            "[GOOGLE-FORM-SMTP] Exception occurred during outbound payment invitation email dispatch for Order {OrderNumber}",
+                            orderNumber);
+                    }
+                }
+            }, CancellationToken.None);
+            emailDispatched = true;
+            emailMessage = "Dispatched via background SMTP worker.";
         }
 
         var submission = new GoogleFormSubmission(
@@ -184,7 +259,7 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
             submittedAtUtc: submittedAt,
             isDuplicate: !createdNew);
 
-        submission.AttachOrder(orderId, orderNumber, $"/checkout?order_id={orderId}", $"att_{orderId}", null);
+        submission.AttachOrder(orderId, orderNumber, checkoutUrl, paymentAttemptId, providerPaymentId);
         await _store.SaveSubmissionAsync(submission, ct).ConfigureAwait(false);
 
         return new SubmitGoogleFormResponse(

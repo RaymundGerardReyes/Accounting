@@ -23,6 +23,7 @@ public static class DependencyInjection
 
         services.AddSingleton<IGoogleSheetsClient, GoogleSheetsClient>();
         services.AddSingleton<SmtpClientFactory>();
+        services.AddSingleton<ISmtpClientFactory>(sp => sp.GetRequiredService<SmtpClientFactory>());
         services.AddSingleton<ISmtpProbe>(sp => sp.GetRequiredService<SmtpClientFactory>());
         services.AddSingleton<FormSecretVerifier>();
         services.AddSingleton<IGoogleFormsSubmissionStore, InMemoryGoogleFormsStore>();

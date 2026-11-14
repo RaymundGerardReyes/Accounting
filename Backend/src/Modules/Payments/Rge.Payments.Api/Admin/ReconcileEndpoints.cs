@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Rge.BuildingBlocks.Api.Endpoints;
 using Rge.BuildingBlocks.Api.Http;
+using Rge.BuildingBlocks.Application.Abstractions;
 using Rge.Payments.Application.Reconciliation.ReconcileAllNonTerminal;
 using Rge.Payments.Application.Reconciliation.ReconcileOne;
 
@@ -27,10 +28,22 @@ public sealed class ReconcileEndpoints : IEndpointModule
         HttpContext httpContext,
         string payment_id,
         ReconcileOneHandler handler,
+        ICurrentActor actor,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(httpContext);
         ArgumentNullException.ThrowIfNull(handler);
+        ArgumentNullException.ThrowIfNull(actor);
+
+        if (!actor.IsAuthenticated)
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!actor.IsInRole("admin") && !actor.IsInRole("finance_admin"))
+        {
+            return Results.Forbid();
+        }
 
         var command = new ReconcileOneCommand(payment_id);
         var result = await handler.HandleAsync(command, cancellationToken).ConfigureAwait(false);
@@ -40,10 +53,22 @@ public sealed class ReconcileEndpoints : IEndpointModule
     private static async Task<IResult> ReconcileAllAsync(
         HttpContext httpContext,
         ReconcileAllNonTerminalHandler handler,
+        ICurrentActor actor,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(httpContext);
         ArgumentNullException.ThrowIfNull(handler);
+        ArgumentNullException.ThrowIfNull(actor);
+
+        if (!actor.IsAuthenticated)
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!actor.IsInRole("admin") && !actor.IsInRole("finance_admin"))
+        {
+            return Results.Forbid();
+        }
 
         var command = new ReconcileAllNonTerminalCommand();
         var result = await handler.HandleAsync(command, cancellationToken).ConfigureAwait(false);

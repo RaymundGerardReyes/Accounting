@@ -178,6 +178,64 @@ public sealed class PaymentAttemptRepository : IPaymentAttemptRepository
         return attempts.FirstOrDefault();
     }
 
+    public async Task<IReadOnlyDictionary<string, PaymentAttempt>> GetLatestByOrderIdsAsync(
+        IReadOnlyCollection<string> orderIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (orderIds is null || orderIds.Count == 0)
+        {
+            return new Dictionary<string, PaymentAttempt>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        string[] distinctIds = orderIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (distinctIds.Length == 0)
+        {
+            return new Dictionary<string, PaymentAttempt>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var results = new Dictionary<string, PaymentAttempt>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            DbConnection connection = await _connectionScope.GetOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            await using DbCommand cmd = connection.CreateCommand();
+            cmd.Transaction = _connectionScope.CurrentTransaction;
+            cmd.CommandText = AttemptQueries.SelectLatestByOrderIdsSql;
+            cmd.CommandTimeout = SqlTimeouts.FastReadSeconds;
+            AddParam(cmd, "@OrderIds", distinctIds);
+
+            await using DbDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                PaymentAttempt attempt = await PaymentAttemptMaterializer.MaterializeAsync(reader, cancellationToken).ConfigureAwait(false);
+                IndexInMemory(attempt);
+                results.TryAdd(attempt.OrderId, attempt);
+            }
+
+            return results;
+        }
+        catch (Exception ex) when (ex is DbException or InvalidOperationException)
+        {
+            var idSet = distinctIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var memoryMatches = MemoryById.Values
+                .Where(a => idSet.Contains(a.OrderId))
+                .GroupBy(a => a.OrderId, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var group in memoryMatches)
+            {
+                var latest = group.OrderByDescending(a => a.CreatedAt).First();
+                results[group.Key] = latest;
+            }
+
+            return results;
+        }
+    }
+
     public async Task<IReadOnlyList<PaymentAttempt>> ListNonTerminalAsync(CancellationToken cancellationToken = default)
     {
         try
