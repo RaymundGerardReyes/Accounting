@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Configuration;
 using Rge.Integrations.Application.Ports;
 using Rge.Integrations.Contracts;
 
@@ -12,16 +13,44 @@ public sealed class SecretStoreWriter : ISecretStore, IPayMongoProbe, IIntegrati
 {
     private readonly ConcurrentDictionary<string, string> _secrets = new(StringComparer.OrdinalIgnoreCase);
 
-    public SecretStoreWriter()
+    public SecretStoreWriter(IConfiguration? configuration = null)
     {
-        // Load defaults or environment overrides
-        _secrets["PAYMONGO_SECRET_KEY"] = Environment.GetEnvironmentVariable("PAYMONGO_SECRET_KEY") ?? "sk_test_simulated_key";
-        _secrets["PAYMONGO_WEBHOOK_SECRET"] = Environment.GetEnvironmentVariable("PAYMONGO_WEBHOOK_SECRET") ?? "whsec_test_secret";
-        _secrets["SMTP_HOST"] = Environment.GetEnvironmentVariable("SMTP_HOST") ?? "smtp.gmail.com";
-        _secrets["SMTP_PORT"] = Environment.GetEnvironmentVariable("SMTP_PORT") ?? "587";
-        _secrets["SMTP_USER"] = Environment.GetEnvironmentVariable("SMTP_USER") ?? "notifications@rge.com.ph";
-        _secrets["SMTP_APP_PASSWORD"] = Environment.GetEnvironmentVariable("SMTP_APP_PASSWORD") ?? "test_app_pwd";
-        _secrets["GOOGLE_FORMS_SECRET"] = Environment.GetEnvironmentVariable("GOOGLE_FORMS_SECRET") ?? "gforms_secret_test_2026";
+        // Load from configuration or environment overrides
+        _secrets["PAYMONGO_SECRET_KEY"] = configuration?["Secrets:PaymongoSecretKey"]
+            ?? configuration?["PAYMONGO_SECRET_KEY"]
+            ?? Environment.GetEnvironmentVariable("PAYMONGO_SECRET_KEY")
+            ?? "sk_test_simulated_key";
+
+        _secrets["PAYMONGO_WEBHOOK_SECRET"] = configuration?["Secrets:PaymongoWebhookSecret"]
+            ?? configuration?["PAYMONGO_WEBHOOK_SECRET"]
+            ?? Environment.GetEnvironmentVariable("PAYMONGO_WEBHOOK_SECRET")
+            ?? "whsec_test_secret";
+
+        _secrets["SMTP_HOST"] = configuration?["Smtp:Host"]
+            ?? configuration?["SMTP_HOST"]
+            ?? Environment.GetEnvironmentVariable("SMTP_HOST")
+            ?? "smtp.gmail.com";
+
+        _secrets["SMTP_PORT"] = configuration?["Smtp:Port"]
+            ?? configuration?["SMTP_PORT"]
+            ?? Environment.GetEnvironmentVariable("SMTP_PORT")
+            ?? "587";
+
+        _secrets["SMTP_USER"] = configuration?["Smtp:SenderEmail"]
+            ?? configuration?["Smtp:User"]
+            ?? configuration?["SMTP_USER"]
+            ?? Environment.GetEnvironmentVariable("SMTP_USER")
+            ?? "notifications@rge.com.ph";
+
+        _secrets["SMTP_APP_PASSWORD"] = configuration?["Smtp:AppPassword"]
+            ?? configuration?["SMTP_APP_PASSWORD"]
+            ?? Environment.GetEnvironmentVariable("SMTP_APP_PASSWORD")
+            ?? "test_app_pwd";
+
+        _secrets["GOOGLE_FORMS_SECRET"] = configuration?["Secrets:GoogleFormsSecret"]
+            ?? configuration?["GOOGLE_FORMS_SECRET"]
+            ?? Environment.GetEnvironmentVariable("GOOGLE_FORMS_SECRET")
+            ?? "gforms_secret_test_2026";
     }
 
     public Task<SaveCredentialsResponse> SaveCredentialsAsync(

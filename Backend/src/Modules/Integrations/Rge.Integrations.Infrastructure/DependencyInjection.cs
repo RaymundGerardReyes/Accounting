@@ -16,10 +16,10 @@ public static class DependencyInjection
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        var secretStore = new SecretStoreWriter();
-        services.AddSingleton<ISecretStore>(secretStore);
-        services.AddSingleton<IPayMongoProbe>(secretStore);
-        services.AddSingleton<IIntegrationDiagnosticProbe>(secretStore);
+        services.AddSingleton<SecretStoreWriter>(sp => new SecretStoreWriter(sp.GetService<Microsoft.Extensions.Configuration.IConfiguration>()));
+        services.AddSingleton<ISecretStore>(sp => sp.GetRequiredService<SecretStoreWriter>());
+        services.AddSingleton<IPayMongoProbe>(sp => sp.GetRequiredService<SecretStoreWriter>());
+        services.AddSingleton<IIntegrationDiagnosticProbe>(sp => sp.GetRequiredService<SecretStoreWriter>());
 
         services.AddSingleton<IGoogleSheetsClient, GoogleSheetsClient>();
         services.AddSingleton<ISmtpProbe, SmtpClientFactory>();

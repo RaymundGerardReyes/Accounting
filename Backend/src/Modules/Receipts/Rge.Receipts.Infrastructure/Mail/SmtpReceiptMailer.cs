@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Mail;
 using System.Net.Mime;
 using System.Text;
+using Microsoft.Extensions.Configuration;
 using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Receipts.Application.Ports;
 using Rge.Receipts.Domain;
@@ -31,9 +32,37 @@ public sealed class SmtpReceiptMailer : IReceiptMailer
     private readonly IPdfRenderer _pdfRenderer;
 
     public SmtpReceiptMailer(SmtpReceiptOptions? options = null, IPdfRenderer? pdfRenderer = null)
+        : this(options, pdfRenderer, null)
+    {
+    }
+
+    public SmtpReceiptMailer(SmtpReceiptOptions? options, IConfiguration? configuration)
+        : this(options, null, configuration)
+    {
+    }
+
+    public SmtpReceiptMailer(SmtpReceiptOptions? options, IPdfRenderer? pdfRenderer, IConfiguration? configuration)
     {
         _options = options ?? new SmtpReceiptOptions();
         _pdfRenderer = pdfRenderer ?? new QuestPdfReceiptRenderer();
+
+        if (configuration is not null)
+        {
+            if (string.IsNullOrWhiteSpace(_options.SenderEmail))
+            {
+                _options.SenderEmail = configuration["Smtp:SenderEmail"]
+                    ?? configuration["SMTP_USER"]
+                    ?? configuration["SMTP_SENDER_EMAIL"]
+                    ?? string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(_options.AppPassword))
+            {
+                _options.AppPassword = configuration["Smtp:AppPassword"]
+                    ?? configuration["SMTP_APP_PASSWORD"]
+                    ?? string.Empty;
+            }
+        }
     }
 
     public async Task<Result> SendReceiptEmailAsync(
@@ -99,11 +128,13 @@ public sealed class SmtpReceiptMailer : IReceiptMailer
             var attachment = new Attachment(pdfStream, attachmentFilename, "application/pdf");
             message.Attachments.Add(attachment);
 
+            string cleanPassword = _options.AppPassword.Replace(" ", string.Empty, StringComparison.Ordinal).Trim();
+
             using var client = new SmtpClient(_options.Host, _options.Port)
             {
                 EnableSsl = _options.EnableSsl,
                 Timeout = _options.TimeoutMilliseconds,
-                Credentials = new NetworkCredential(_options.SenderEmail, _options.AppPassword)
+                Credentials = new NetworkCredential(_options.SenderEmail.Trim(), cleanPassword)
             };
 
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
