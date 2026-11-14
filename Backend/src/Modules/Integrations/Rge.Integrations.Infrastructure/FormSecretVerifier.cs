@@ -1,27 +1,17 @@
-// File: Backend/src/Modules/Integrations/Rge.Integrations.Infrastructure/FormSecretVerifier.cs
-using Rge.BuildingBlocks.Infrastructure.Crypto;
-
 namespace Rge.Integrations.Infrastructure;
 
-public static class FormSecretVerifier
+public sealed class FormSecretVerifier
 {
-    public const string DefaultLiveSecret = "rge_gforms_live_sec_89f3a21";
+    private readonly Rge.Integrations.Application.Services.FormSecretVerifier _inner;
 
-    public static bool VerifySecret(string? providedSecret, string? expectedSecret)
+    public FormSecretVerifier(
+        Microsoft.Extensions.Configuration.IConfiguration? configuration = null,
+        Rge.Integrations.Application.Ports.ISecretStore? secretStore = null)
     {
-        if (string.IsNullOrWhiteSpace(providedSecret))
-        {
-            return false;
-        }
-
-        string effectiveExpected = string.IsNullOrWhiteSpace(expectedSecret)
-            ? (Environment.GetEnvironmentVariable("GOOGLE_FORMS_SECRET") ?? DefaultLiveSecret)
-            : expectedSecret;
-
-        string cleanProvided = providedSecret.Trim().Trim('"', '\'');
-        string cleanExpected = effectiveExpected.Trim().Trim('"', '\'');
-
-        return ConstantTimeComparer.EqualsConstantTime(cleanProvided, cleanExpected) ||
-               ConstantTimeComparer.EqualsConstantTime(cleanProvided, DefaultLiveSecret);
+        _inner = new Rge.Integrations.Application.Services.FormSecretVerifier(secretStore);
     }
+
+    public string GetExpectedSecret() => _inner.GetExpectedSecret();
+
+    public bool IsValid(string? candidateSecret) => _inner.IsValid(candidateSecret);
 }

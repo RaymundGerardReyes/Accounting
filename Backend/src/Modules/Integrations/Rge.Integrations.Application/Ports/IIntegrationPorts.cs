@@ -14,6 +14,9 @@ public interface ISecretStore
 public interface ISmtpProbe
 {
     Task<EmailTestResponse> TestSmtpAsync(EmailTestRequest request, CancellationToken cancellationToken = default);
+    Task<SmtpExecutionResult> VerifyHandshakeAsync(CancellationToken ct = default);
+    Task<SmtpExecutionResult> SendVerificationEmailAsync(string? recipientEmail, CancellationToken ct = default);
+    SmtpRuntimeSettings ResolveSettings();
 }
 
 public interface IPayMongoProbe
@@ -54,7 +57,9 @@ public sealed record GoogleFormOrderCreationRequest(
     string? Notes = null,
     string? StudentId = null,
     string? InstructorCredit = null,
-    string? BookTitle = null);
+    string? BookTitle = null,
+    DateTimeOffset? SubmittedAt = null,
+    bool SendInitialEmail = true);
 
 public sealed record GoogleFormOrderCreationResult(
     string OrderId,
@@ -65,6 +70,30 @@ public sealed record GoogleFormOrderCreationResult(
     string CheckoutUrl,
     string PaymentAttemptId,
     string? ProviderPaymentId);
+
+public sealed record GoogleFormOrderBridgeRequest(
+    string ResponseId,
+    string CustomerName,
+    string CustomerEmail,
+    string? CustomerPhone,
+    string ProductCode,
+    string ProductTitle,
+    int Quantity,
+    long UnitPriceMinor,
+    long TotalAmountMinor,
+    string Currency,
+    string Status,
+    DateTimeOffset SubmittedAt,
+    bool SendInitialEmail,
+    IReadOnlyDictionary<string, string>? AdditionalMetadata = null);
+
+public sealed record GoogleFormOrderBridgeResult(
+    string OrderId,
+    string OrderNumber,
+    string Status,
+    bool CreatedNew,
+    bool EmailDispatched,
+    string? EmailStatusMessage);
 
 public interface IGoogleFormOrderBridge
 {
@@ -77,5 +106,9 @@ public interface IGoogleFormOrderBridge
         CancellationToken cancellationToken = default);
 
     Task<(int Total, int Paid, int Pending)> GetGoogleFormOrderStatsAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<GoogleFormOrderBridgeResult> BridgeSubmissionToOrderAsync(
+        GoogleFormOrderBridgeRequest request,
         CancellationToken cancellationToken = default);
 }

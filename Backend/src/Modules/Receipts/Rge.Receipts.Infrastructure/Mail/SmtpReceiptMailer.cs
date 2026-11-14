@@ -3,6 +3,7 @@ using System.Net.Mail;
 using System.Net.Mime;
 using System.Text;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Receipts.Application.Ports;
 using Rge.Receipts.Domain;
@@ -30,38 +31,91 @@ public sealed class SmtpReceiptMailer : IReceiptMailer
 {
     private readonly SmtpReceiptOptions _options;
     private readonly IPdfRenderer _pdfRenderer;
+    private readonly IConfiguration? _configuration;
+    private readonly ILogger<SmtpReceiptMailer>? _logger;
 
     public SmtpReceiptMailer(SmtpReceiptOptions? options = null, IPdfRenderer? pdfRenderer = null)
-        : this(options, pdfRenderer, null)
+        : this(options, pdfRenderer, null, null)
     {
     }
 
     public SmtpReceiptMailer(SmtpReceiptOptions? options, IConfiguration? configuration)
-        : this(options, null, configuration)
+        : this(options, null, configuration, null)
     {
     }
 
     public SmtpReceiptMailer(SmtpReceiptOptions? options, IPdfRenderer? pdfRenderer, IConfiguration? configuration)
+        : this(options, pdfRenderer, configuration, null)
+    {
+    }
+
+    public SmtpReceiptMailer(
+        IConfiguration configuration,
+        IPdfRenderer pdfRenderer,
+        ILogger<SmtpReceiptMailer>? logger = null)
+        : this(null, pdfRenderer, configuration, logger)
+    {
+    }
+
+    public SmtpReceiptMailer(
+        SmtpReceiptOptions? options,
+        IPdfRenderer? pdfRenderer,
+        IConfiguration? configuration,
+        ILogger<SmtpReceiptMailer>? logger)
     {
         _options = options ?? new SmtpReceiptOptions();
         _pdfRenderer = pdfRenderer ?? new QuestPdfReceiptRenderer();
+        _configuration = configuration;
+        _logger = logger;
 
-        if (configuration is not null)
+        if (_configuration is not null)
         {
             if (string.IsNullOrWhiteSpace(_options.SenderEmail))
             {
-                _options.SenderEmail = configuration["Smtp:SenderEmail"]
-                    ?? configuration["SMTP_USER"]
-                    ?? configuration["SMTP_SENDER_EMAIL"]
+                _options.SenderEmail = _configuration["Smtp:SenderEmail"]
+                    ?? _configuration["Smtp:Username"]
+                    ?? _configuration["SMTP_USER"]
+                    ?? _configuration["SMTP_SENDER_EMAIL"]
                     ?? string.Empty;
             }
 
             if (string.IsNullOrWhiteSpace(_options.AppPassword))
             {
-                _options.AppPassword = configuration["Smtp:AppPassword"]
-                    ?? configuration["SMTP_APP_PASSWORD"]
+                _options.AppPassword = _configuration["Smtp:AppPassword"]
+                    ?? _configuration["Smtp:Password"]
+                    ?? _configuration["SMTP_APP_PASSWORD"]
+                    ?? _configuration["SMTP_PASS"]
                     ?? string.Empty;
             }
+
+            string? cfgHost = _configuration["Smtp:Host"] ?? _configuration["SMTP_HOST"];
+            if (!string.IsNullOrWhiteSpace(cfgHost))
+            {
+                _options.Host = cfgHost.Trim();
+            }
+
+            string? cfgPort = _configuration["Smtp:Port"] ?? _configuration["SMTP_PORT"];
+            if (int.TryParse(cfgPort, out int parsedPort) && parsedPort > 0)
+            {
+                _options.Port = parsedPort;
+            }
+        }
+    }
+
+    public async Task SendAsync(
+        OfficialReceipt receipt,
+        string recipientEmail,
+        byte[]? pdfAttachment = null,
+        CancellationToken cancellationToken = default)
+    {
+        byte[] bytes = pdfAttachment is { Length: > 0 }
+            ? pdfAttachment
+            : _pdfRenderer.RenderOfficialReceiptPdf(receipt);
+
+        Result result = await SendReceiptEmailAsync(receipt, recipientEmail, bytes, cancellationToken).ConfigureAwait(false);
+        if (!result.IsSuccess)
+        {
+            throw new InvalidOperationException($"Receipt email dispatch failed: {result.Error.Message}");
         }
     }
 
@@ -79,12 +133,25 @@ public sealed class SmtpReceiptMailer : IReceiptMailer
             return Result.Failure(Error.Validation("Receipts.EmptyRecipient", "Recipient email cannot be empty."));
         }
 
-        if (!MailAddress.TryCreate(recipientEmail.Trim(), out MailAddress? parsedRecipient))
+        string defaultReceiptEmail = _configuration?["DEFAULT_RECEIPT_EMAIL"]
+            ?? _configuration?["SMTP_FROM"]
+            ?? Environment.GetEnvironmentVariable("DEFAULT_RECEIPT_EMAIL")
+            ?? _options.SenderEmail;
+
+        string targetRecipient = recipientEmail.Contains('*', StringComparison.Ordinal)
+            ? defaultReceiptEmail.Trim()
+            : recipientEmail.Trim();
+
+        if (string.IsNullOrWhiteSpace(targetRecipient))
+        {
+            return Result.Failure(Error.Validation("Receipts.EmptyRecipient", "Recipient email cannot be empty."));
+        }
+
+        if (!MailAddress.TryCreate(targetRecipient, out MailAddress? parsedRecipient))
         {
             return Result.Failure(Error.Validation("Receipts.InvalidRecipient", "Recipient email address is invalid."));
         }
 
-        // Configuration Pre-Validation
         if (string.IsNullOrWhiteSpace(_options.Host))
         {
             return Result.Failure(Error.Validation("Receipts.InvalidSmtpHost", "SMTP host cannot be null or empty."));
@@ -123,6 +190,21 @@ public sealed class SmtpReceiptMailer : IReceiptMailer
 
             message.To.Add(parsedRecipient);
 
+            // Copy the configured sender/treasury so both ends receive a copy
+            if (!string.IsNullOrWhiteSpace(_options.SenderEmail) &&
+                !string.Equals(targetRecipient, _options.SenderEmail, StringComparison.OrdinalIgnoreCase))
+            {
+                message.CC.Add(new MailAddress(_options.SenderEmail, BirRmc77_2024Policy.IssuerRegisteredName));
+            }
+
+            if (!string.IsNullOrWhiteSpace(defaultReceiptEmail) &&
+                !string.Equals(targetRecipient, defaultReceiptEmail, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(_options.SenderEmail, defaultReceiptEmail, StringComparison.OrdinalIgnoreCase) &&
+                MailAddress.TryCreate(defaultReceiptEmail, out MailAddress? bccAddr))
+            {
+                message.Bcc.Add(bccAddr);
+            }
+
             using var pdfStream = new MemoryStream(pdfBytes.Length > 0 ? pdfBytes : _pdfRenderer.RenderOfficialReceiptPdf(receipt), writable: false);
             string attachmentFilename = $"OfficialReceipt-{receipt.ReceiptNumber.Value}.pdf";
             var attachment = new Attachment(pdfStream, attachmentFilename, "application/pdf");
@@ -147,5 +229,16 @@ public sealed class SmtpReceiptMailer : IReceiptMailer
         {
             return Result.Failure(new Error("Receipts.SmtpSendFailed", $"SMTP dispatch failed: {ex.Message}"));
         }
+    }
+
+    private static bool IsValidUnmaskedEmail(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+            return false;
+        string trimmed = email.Trim();
+        int atIndex = trimmed.IndexOf('@', StringComparison.Ordinal);
+        return atIndex > 0 &&
+               !trimmed.Contains('*', StringComparison.Ordinal) &&
+               trimmed.IndexOf('.', atIndex) > atIndex;
     }
 }

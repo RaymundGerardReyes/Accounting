@@ -1072,6 +1072,9 @@ function onOpen() {
   try {
     var ui = SpreadsheetApp.getUi();
     ui.createMenu("📚 Bookstore & Checkout Admin")
+      .addItem("🚀 0A. Fix Secret & Backfill October/November Rows", "fixSecretAndBackfillAllRows")
+      .addItem("🔄 0B. Sync All Spreadsheet Rows to Backend", "syncAllResponsesToBackend")
+      .addSeparator()
       .addItem("🔑 0. Initialize Production Script Properties", "initializeScriptProperties")
       .addItem("⚡ 1. Instant-Build Google Form", "runBookstoreFormBuilder")
       .addSeparator()
@@ -1090,6 +1093,133 @@ function onOpen() {
       .addToUi();
   } catch (menuErr) {
     Logger.log("Notice in onOpen (UI not available in standalone/trigger context): " + menuErr);
+  }
+}
+
+/**
+ * Run this function ONCE from the Google Apps Script toolbar to:
+ * 1. Overwrite the stale 41-character Script Property with 'rge_gforms_live_sec_89f3a21' (length=27)
+ * 2. Sync all historical October & November spreadsheet rows into the backend.
+ */
+function fixSecretAndBackfillAllRows() {
+  var props = PropertiesService.getScriptProperties();
+  var exactSecret = "rge_gforms_live_sec_89f3a21";
+  props.setProperty(PROP_KEYS.GOOGLE_FORMS_SECRET, exactSecret);
+  props.setProperty(PROP_KEYS.SECRET_KEY, exactSecret);
+  props.setProperty("GOOGLE_FORMS_SECRET", exactSecret);
+  props.setProperty("SECRET_KEY", exactSecret);
+  CONFIG = getRuntimeConfig();
+  Logger.log("[FIX] Updated Script Property GOOGLE_FORMS_SECRET -> length=" + exactSecret.length);
+
+  syncAllResponsesToBackend();
+}
+
+/**
+ * Reads all rows from the active spreadsheet (or FALLBACK_SPREADSHEET_ID)
+ * and syncs all October & November responses to the backend in a batch.
+ */
+function syncAllResponsesToBackend() {
+  CONFIG = getRuntimeConfig();
+  assertRequiredConfig(CONFIG);
+
+  var context = resolveSheetSafely(null);
+  var sheet = context.sheet;
+  if (!sheet) {
+    throw new Error("Could not resolve target spreadsheet. Set FALLBACK_SPREADSHEET_ID in Script Properties.");
+  }
+
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) {
+    showAlertSafely("No response rows found in sheet to backfill.");
+    return;
+  }
+
+  var allValues = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  var headers = allValues[0];
+  var rowsToSync = [];
+
+  for (var r = 1; r < allValues.length; r++) {
+    var rowValues = allValues[r];
+    var rowIndex = r + 1;
+    var rowObj = {};
+
+    for (var c = 0; c < headers.length; c++) {
+      var hName = String(headers[c] || "").trim().toLowerCase();
+      var val = rowValues[c];
+      if (hName && val !== undefined && val !== null && String(val).trim() !== "") {
+        rowObj[hName] = val;
+      }
+    }
+
+    var customerEmail = extractField(rowObj, ["customer email", "email address", "your email", "respondent email", "email"]);
+    if (!customerEmail || customerEmail.indexOf("@") === -1) {
+      customerEmail = CONFIG.SUPPORT_EMAIL;
+    }
+
+    var customerName = extractField(rowObj, ["customer name", "full name", "your name", "client name", "student name", "name"]) || "Valued Client";
+    var customerPhone = extractField(rowObj, ["mobile phone number", "mobile number", "contact number", "phone number", "cellphone", "mobile", "phone"]);
+    var itemReference = extractField(rowObj, ["book / course material selection", "book / material", "course material", "item reference", "textbook", "book", "material", "product", "service", "package", "select package", "order category", "department", "item"]) || "CPA Reviewer Volume 1";
+    var quantityStr = extractField(rowObj, ["quantity", "qty", "number of items", "copies"]);
+    var quantity = parseInt(quantityStr, 10);
+    if (isNaN(quantity) || quantity < 1) quantity = 1;
+    var instructorCredit = extractField(rowObj, ["enrolled instructor to credit", "instructor credit", "enrolled instructor", "instructor", "professor", "teacher", "faculty"]);
+    var studentId = extractField(rowObj, ["student / enrollee id number", "student / enrollee id", "student id", "enrollee id", "id number", "student number", "student no"]);
+    var notes = extractField(rowObj, ["delivery address / campus pickup notes", "delivery address", "campus pickup", "notes", "remarks", "instructions", "comments"]) || "";
+
+    var rawTimestamp = rowObj["timestamp"] || new Date();
+    var parsedTime = parseSafeTimestampMillis(rawTimestamp);
+    var isoTimestamp = new Date(parsedTime).toISOString();
+    var responseId = extractField(rowObj, ["response id", "form response id"]) || ("gfr_" + rowIndex + "_" + parsedTime);
+
+    rowsToSync.push({
+      response_id: responseId,
+      sheet_row_index: rowIndex,
+      customer_name: customerName,
+      customer_email: customerEmail,
+      customer_phone: customerPhone || null,
+      product_code: itemReference,
+      product_title: itemReference,
+      item_reference: itemReference,
+      student_id: studentId || null,
+      instructor_credit: instructorCredit || null,
+      quantity: quantity,
+      status: "pending",
+      timestamp: isoTimestamp,
+      send_initial_email: false,
+      secret: CONFIG.SECRET_KEY
+    });
+  }
+
+  Logger.log("Prepared " + rowsToSync.length + " historical rows to sync to " + CONFIG.BACKEND_URL);
+
+  var payload = {
+    secret: CONFIG.SECRET_KEY,
+    rows: rowsToSync
+  };
+
+  var payloadJson = JSON.stringify(payload);
+  var options = {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      "X-Google-Forms-Secret": CONFIG.SECRET_KEY,
+      "x-google-forms-secret": CONFIG.SECRET_KEY,
+      "Accept": "application/json"
+    },
+    payload: payloadJson,
+    muteHttpExceptions: true
+  };
+
+  var response = fetchWithFallback(options);
+  var respCode = response.getResponseCode();
+  var respText = response.getContentText();
+
+  Logger.log("Batch sync response (" + respCode + "): " + respText);
+  if (respCode >= 200 && respCode < 300) {
+    showAlertSafely("✅ Backfill Complete! Synced " + rowsToSync.length + " rows into backend and database.");
+  } else {
+    showAlertSafely("⚠️ Backfill HTTP " + respCode + ": " + respText.substring(0, 150));
   }
 }
 

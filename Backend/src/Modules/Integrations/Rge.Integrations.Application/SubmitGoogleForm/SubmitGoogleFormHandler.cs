@@ -1,11 +1,10 @@
 using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
 using Rge.BuildingBlocks.Application.Abstractions;
 using Rge.BuildingBlocks.SharedKernel.Money;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
 using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Integrations.Application.Ports;
+using Rge.Integrations.Application.Services;
 using Rge.Integrations.Contracts;
 using Rge.Integrations.Domain;
 
@@ -15,21 +14,40 @@ public sealed record SubmitGoogleFormCommand(
     GoogleFormSubmissionRequest Request,
     string? ProvidedSecret) : ICommand<GoogleFormSubmissionResponse>;
 
-/// <summary>
-/// Ingests a Google Form submission and persists it as a REAL Payments order
-/// (via <see cref="IGoogleFormOrderBridge"/>) so it appears in GET /api/v1/orders
-/// and GET /api/v1/orders/{id}, and initiates a real PayMongo checkout session.
-/// </summary>
+public sealed record SubmitGoogleFormInput(
+    string? ResponseId,
+    string? CustomerName,
+    string? CustomerEmail,
+    string? CustomerPhone,
+    string? ProductCode,
+    string? ProductTitle,
+    int Quantity,
+    long? AmountMinor,
+    decimal? AmountMajor,
+    string? Currency,
+    string? Status,
+    string? Timestamp,
+    bool SendInitialEmail = true,
+    Dictionary<string, string>? Metadata = null);
+
+public sealed record SubmitGoogleFormResponse(
+    bool Ok,
+    string OrderId,
+    string OrderNumber,
+    string ResponseId,
+    string Status,
+    bool CreatedNew,
+    bool EmailDispatched,
+    string? EmailMessage,
+    DateTimeOffset CreatedAt);
+
 public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCommand, GoogleFormSubmissionResponse>
 {
-    private const string LegacyGoogleFormsSecret = "rge_gforms_live_sec_89f3a21";
-    private const string RotatedGoogleFormsSecret = "rge_gforms_rotated_vault_secret_2026";
-    private const string DefaultDevGoogleFormsSecret = "gforms_secret_test_2026";
-
     private readonly IGoogleFormsSubmissionStore _store;
     private readonly ISecretStore _secretStore;
     private readonly IGoogleSheetsClient _sheetsClient;
     private readonly IClock _clock;
+    private readonly FormSecretVerifier _secretVerifier;
     private readonly IGoogleFormOrderBridge? _orderBridge;
 
     public SubmitGoogleFormHandler(
@@ -37,6 +55,7 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
         ISecretStore secretStore,
         IGoogleSheetsClient sheetsClient,
         IClock clock,
+        FormSecretVerifier? secretVerifier = null,
         IGoogleFormOrderBridge? orderBridge = null)
     {
         ArgumentNullException.ThrowIfNull(store);
@@ -48,7 +67,136 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
         _secretStore = secretStore;
         _sheetsClient = sheetsClient;
         _clock = clock;
+        _secretVerifier = secretVerifier ?? new FormSecretVerifier(secretStore);
         _orderBridge = orderBridge;
+    }
+
+    public bool VerifySecret(string? providedSecret) => _secretVerifier.IsValid(providedSecret);
+
+    public async Task<SubmitGoogleFormResponse> HandleAsync(
+        SubmitGoogleFormInput input,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        DateTimeOffset submittedAt = ParseHistoricalTimestamp(input.Timestamp);
+
+        string responseId = !string.IsNullOrWhiteSpace(input.ResponseId)
+            ? input.ResponseId.Trim()
+            : $"GFR-{submittedAt:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
+
+        string customerName = !string.IsNullOrWhiteSpace(input.CustomerName)
+            ? input.CustomerName.Trim()
+            : "Google Forms Customer";
+
+        string customerEmail = (input.CustomerEmail ?? string.Empty).Trim();
+        string? customerPhone = string.IsNullOrWhiteSpace(input.CustomerPhone) ? null : input.CustomerPhone.Trim();
+
+        string productCode = !string.IsNullOrWhiteSpace(input.ProductCode)
+            ? input.ProductCode.Trim()
+            : "COST-ACC-TEXT-2026";
+
+        string productTitle = !string.IsNullOrWhiteSpace(input.ProductTitle)
+            ? input.ProductTitle.Trim()
+            : "Cost Accounting Textbook 2026";
+
+        int quantity = input.Quantity > 0 ? input.Quantity : 1;
+
+        long totalAmountMinor = ResolveAmountMinor(input.AmountMinor, input.AmountMajor, productCode, quantity);
+        long unitPriceMinor = quantity > 0 ? totalAmountMinor / quantity : totalAmountMinor;
+
+        string currency = !string.IsNullOrWhiteSpace(input.Currency)
+            ? input.Currency.Trim().ToUpperInvariant()
+            : "PHP";
+
+        string status = NormalizeOrderStatus(input.Status);
+
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["customer_name"] = customerName,
+            ["customer_email"] = customerEmail,
+            ["source"] = "google_forms",
+            ["google_form_response_id"] = responseId
+        };
+
+        if (!string.IsNullOrWhiteSpace(customerPhone))
+        {
+            metadata["customer_phone"] = customerPhone;
+        }
+
+        if (input.Metadata is not null)
+        {
+            foreach (var kvp in input.Metadata)
+            {
+                if (!string.IsNullOrWhiteSpace(kvp.Key) && kvp.Value is not null)
+                {
+                    metadata[kvp.Key] = kvp.Value;
+                }
+            }
+        }
+
+        string orderId = $"ord_{responseId}";
+        string orderNumber = $"ORD-{submittedAt:yyyyMM}-{responseId[..Math.Min(6, responseId.Length)].ToUpperInvariant()}";
+        bool createdNew = true;
+        bool emailDispatched = false;
+        string? emailMessage = null;
+
+        if (_orderBridge is not null)
+        {
+            var bridgeRequest = new GoogleFormOrderBridgeRequest(
+                ResponseId: responseId,
+                CustomerName: customerName,
+                CustomerEmail: customerEmail,
+                CustomerPhone: customerPhone,
+                ProductCode: productCode,
+                ProductTitle: productTitle,
+                Quantity: quantity,
+                UnitPriceMinor: unitPriceMinor,
+                TotalAmountMinor: totalAmountMinor,
+                Currency: currency,
+                Status: status,
+                SubmittedAt: submittedAt,
+                SendInitialEmail: input.SendInitialEmail,
+                AdditionalMetadata: metadata);
+
+            GoogleFormOrderBridgeResult bridgeResult = await _orderBridge.BridgeSubmissionToOrderAsync(bridgeRequest, ct).ConfigureAwait(false);
+            orderId = bridgeResult.OrderId;
+            orderNumber = bridgeResult.OrderNumber;
+            status = bridgeResult.Status;
+            createdNew = bridgeResult.CreatedNew;
+            emailDispatched = bridgeResult.EmailDispatched;
+            emailMessage = bridgeResult.EmailStatusMessage;
+        }
+
+        var submission = new GoogleFormSubmission(
+            id: Guid.NewGuid().ToString("D"),
+            responseId: responseId,
+            customerName: customerName,
+            customerEmail: customerEmail,
+            customerPhone: customerPhone,
+            itemReference: productTitle,
+            quantity: quantity,
+            amount: Money.Php(totalAmountMinor),
+            paymentMethod: "hosted_checkout",
+            notes: null,
+            studentId: null,
+            instructorCredit: null,
+            bookTitle: productTitle,
+            submittedAtUtc: submittedAt,
+            isDuplicate: !createdNew);
+
+        submission.AttachOrder(orderId, orderNumber, $"/checkout?order_id={orderId}", $"att_{orderId}", null);
+        await _store.SaveSubmissionAsync(submission, ct).ConfigureAwait(false);
+
+        return new SubmitGoogleFormResponse(
+            Ok: true,
+            OrderId: orderId,
+            OrderNumber: orderNumber,
+            ResponseId: responseId,
+            Status: status,
+            CreatedNew: createdNew,
+            EmailDispatched: emailDispatched,
+            EmailMessage: emailMessage,
+            CreatedAt: submittedAt);
     }
 
     public async Task<Result<GoogleFormSubmissionResponse>> HandleAsync(
@@ -58,16 +206,11 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
         ArgumentNullException.ThrowIfNull(command);
         GoogleFormSubmissionRequest req = command.Request;
 
-        // 1. Verify Secret
-        string? expectedSecret = _secretStore.GetSecret("GOOGLE_FORMS_SECRET");
-        if (!string.IsNullOrWhiteSpace(expectedSecret))
+        string cleanProvided = (command.ProvidedSecret ?? req.Secret ?? req.SecretKey ?? string.Empty).Trim().Trim('"', '\'');
+        if (!_secretVerifier.IsValid(cleanProvided))
         {
-            string cleanProvided = (command.ProvidedSecret ?? req.Secret ?? req.SecretKey ?? string.Empty).Trim().Trim('"', '\'');
-            if (!IsSecretAccepted(cleanProvided, expectedSecret.Trim()))
-            {
-                return Result.Failure<GoogleFormSubmissionResponse>(
-                    Error.Unauthorized("GoogleForms.Unauthorized", "Missing or invalid X-Google-Forms-Secret header."));
-            }
+            return Result.Failure<GoogleFormSubmissionResponse>(
+                Error.Unauthorized("GoogleForms.Unauthorized", "Missing or invalid X-Google-Forms-Secret header."));
         }
 
         if (string.IsNullOrWhiteSpace(req.ResponseId) ||
@@ -81,7 +224,6 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
         string itemReference = FirstNonEmpty(req.ItemReference, req.ReferenceCode, req.BookTitle) ?? "CPA Reviewer Volume 1";
         int quantity = Math.Max(1, req.Quantity.GetValueOrDefault(1));
 
-        // 2. Idempotency: in-memory cache first, then durable OrderRepository (survives dyno restarts)
         GoogleFormSubmission? existing = await _store
             .GetByResponseIdAsync(req.ResponseId, cancellationToken)
             .ConfigureAwait(false);
@@ -131,7 +273,6 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
 
         if (_orderBridge is not null)
         {
-            // 3. Persist REAL order + initiate PayMongo checkout session via Payments module
             GoogleFormOrderCreationResult created = await _orderBridge.CreateOrderAndInitiateCheckoutAsync(
                 new GoogleFormOrderCreationRequest(
                     ResponseId: req.ResponseId,
@@ -161,7 +302,6 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
         }
         else
         {
-            // Isolated fallback (unit tests without Payments module)
             long amountMinor = req.AmountMinor ?? (quantity * 850_00L);
             grossMoney = Money.Php(amountMinor);
             orderId = $"ord_{id[..8]}";
@@ -190,11 +330,8 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
             isDuplicate: false);
 
         submission.AttachOrder(orderId, orderNumber, checkoutUrl, paymentAttemptId, providerPaymentId);
-
-        // 4. Save submission (fast idempotency cache)
         await _store.SaveSubmissionAsync(submission, cancellationToken).ConfigureAwait(false);
 
-        // 5. Append to Google Sheets (best effort)
         var row = new object?[]
         {
             now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
@@ -236,24 +373,82 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
             IsDuplicate: false));
     }
 
-  private static bool IsSecretAccepted(string provided, string expected)
+    private static DateTimeOffset ParseHistoricalTimestamp(string? rawTimestamp)
     {
-        if (string.IsNullOrEmpty(provided))
+        if (string.IsNullOrWhiteSpace(rawTimestamp))
         {
-            return false;
+            return DateTimeOffset.UtcNow;
         }
 
-        return FixedTimeEquals(provided, expected) ||
-               FixedTimeEquals(provided, LegacyGoogleFormsSecret) ||
-               FixedTimeEquals(provided, RotatedGoogleFormsSecret) ||
-               FixedTimeEquals(provided, DefaultDevGoogleFormsSecret);
+        string trimmed = rawTimestamp.Trim();
+
+        if (DateTimeOffset.TryParse(
+                trimmed,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out DateTimeOffset dto))
+        {
+            return dto;
+        }
+
+        string[] formats =
+        [
+            "M/d/yyyy H:mm:ss",
+            "M/d/yyyy HH:mm:ss",
+            "MM/dd/yyyy HH:mm:ss",
+            "dd/MM/yyyy HH:mm:ss",
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-ddTHH:mm:ss.fffZ",
+            "yyyy-MM-ddTHH:mm:ssZ"
+        ];
+
+        if (DateTime.TryParseExact(
+                trimmed,
+                formats,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out DateTime dt))
+        {
+            return new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc));
+        }
+
+        return DateTimeOffset.UtcNow;
     }
 
-    private static bool FixedTimeEquals(string a, string b)
+    private static long ResolveAmountMinor(long? amountMinor, decimal? amountMajor, string productCode, int quantity)
     {
-        byte[] aBytes = Encoding.UTF8.GetBytes(a);
-        byte[] bBytes = Encoding.UTF8.GetBytes(b);
-        return aBytes.Length == bBytes.Length && CryptographicOperations.FixedTimeEquals(aBytes, bBytes);
+        if (amountMinor is > 0)
+        {
+            return amountMinor.Value;
+        }
+
+        if (amountMajor is > 0m)
+        {
+            return (long)Math.Round(amountMajor.Value * 100m, MidpointRounding.AwayFromZero);
+        }
+
+        long unitDefault = productCode.ToUpperInvariant() switch
+        {
+            var c when c.Contains("CPA", StringComparison.OrdinalIgnoreCase) => 1450_00L,
+            var c when c.Contains("COST", StringComparison.OrdinalIgnoreCase) => 1850_00L,
+            _ => 1850_00L
+        };
+
+        return unitDefault * Math.Max(1, quantity);
+    }
+
+    private static string NormalizeOrderStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+            return "pending";
+
+        return status.Trim().ToLowerInvariant() switch
+        {
+            "paid" or "succeeded" or "completed" => "paid",
+            "cancelled" or "canceled" or "void" => "cancelled",
+            "failed" or "expired" => "failed",
+            _ => "pending"
+        };
     }
 
     private static string? FirstNonEmpty(params string?[] values) =>

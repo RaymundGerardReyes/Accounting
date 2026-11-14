@@ -387,7 +387,30 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IClock>(Rge.BuildingBlocks.Infrastructure.Persistence.SystemClock.Instance);
         services.AddSingleton<IBusinessDayService>(_ => new PhilippineBusinessCalendar());
         services.AddSingleton<CacheInvalidator>();
-        services.AddSingleton<DbDataSource, OfflineFallbackDbDataSource>();
+        services.AddSingleton<DbDataSource>(sp =>
+        {
+            var cfg = sp.GetRequiredService<IConfiguration>();
+            string? rawConn = cfg["ConnectionStrings:AccountingDb"]
+                ?? cfg["ConnectionStrings:Postgres"]
+                ?? cfg["ConnectionStrings:DefaultConnection"]
+                ?? cfg["DATABASE_URL"]
+                ?? Environment.GetEnvironmentVariable("DATABASE_URL");
+
+            if (!string.IsNullOrWhiteSpace(rawConn) &&
+                !rawConn.Contains("offline", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    return NpgsqlDataSourceFactory.Create(rawConn);
+                }
+                catch
+                {
+                    return new OfflineFallbackDbDataSource();
+                }
+            }
+
+            return new OfflineFallbackDbDataSource();
+        });
         services.AddSingleton<NpgsqlDataSourceFactory>();
         services.AddScoped<ConnectionScope>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();

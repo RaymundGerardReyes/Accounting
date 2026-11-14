@@ -28,6 +28,24 @@ public sealed record SmtpProbeResult(
     string Host,
     string? Message = null);
 
+public sealed record SmtpExecutionResult(
+    bool Success,
+    long LatencyMs,
+    string Message,
+    string? ErrorDetail = null,
+    string? RecipientEmail = null,
+    string? SenderCopyEmail = null);
+
+public sealed record SmtpRuntimeSettings(
+    string Host,
+    int Port,
+    string Username,
+    string Password,
+    string FromEmail,
+    string SenderName,
+    bool UseTls,
+    string DefaultReceiptEmail);
+
 public sealed record EmailDispatchResult(
     bool Dispatched,
     string Recipient,

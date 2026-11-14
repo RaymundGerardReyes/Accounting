@@ -35,7 +35,15 @@ public static class OrderQueries
                amount_minor, currency, status, metadata_json, created_at, updated_at
         FROM orders
         WHERE (@status IS NULL OR status = @status)
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, id DESC
+        LIMIT @limit;
+        """;
+
+    public const string ListAllOrders = """
+        SELECT id, user_id, order_number, title, category, reference_code,
+               amount_minor, currency, status, metadata_json, created_at, updated_at
+        FROM orders
+        ORDER BY created_at DESC, id DESC
         LIMIT @limit;
         """;
 

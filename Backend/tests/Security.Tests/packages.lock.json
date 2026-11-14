@@ -115,6 +115,7 @@
       "rge.buildingblocks.infrastructure": {
         "type": "Project",
         "dependencies": {
+          "Npgsql": "[9.0.2, )",
           "Rge.BuildingBlocks.Application": "[1.0.0, )",
           "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
         }
@@ -247,6 +248,12 @@
           "Rge.Identity.Application": "[1.0.0, )",
           "Rge.Identity.Domain": "[1.0.0, )"
         }
+      },
+      "Npgsql": {
+        "type": "CentralTransitive",
+        "requested": "[9.0.2, )",
+        "resolved": "9.0.2",
+        "contentHash": "hCbO8box7i/XXiTFqCJ3GoowyLqx3JXxyrbOJ6om7dr+eAknvBNhhUHeJVGAQo44sySZTfdVffp4BrtPeLZOAA=="
       }
     }
   }

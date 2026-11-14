@@ -18,6 +18,7 @@ import base64
 import hashlib
 import urllib.request
 import urllib.error
+from urllib.parse import urlparse, unquote
 import subprocess
 from pathlib import Path
 
@@ -29,13 +30,50 @@ backend_proc = None
 frontend_proc = None
 is_shutting_down = False
 
-COMPROMISED_GOOGLE_FORMS_SECRET = "rge_gforms_live_sec_89f3a21"
-ROTATED_GOOGLE_FORMS_SECRET = "rge_gforms_rotated_vault_secret_2026"
+DEFAULT_GOOGLE_FORMS_SECRET = "rge_gforms_live_sec_89f3a21"
 DEFAULT_FIELD_ENCRYPTION_SEED = "rge_accounting_default_field_encryption_seed_2026"
 
 
 def log(msg: str):
     print(f"[Orchestrator {time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
+
+
+def normalize_database_url(raw_url: str) -> str:
+    """
+    Converts Heroku/SQLAlchemy URIs (postgresql+psycopg2://, postgres://, postgresql://)
+    into Npgsql key-value connection strings with SSL Mode=Require and Trust Server Certificate=true.
+    """
+    if not raw_url:
+        return ""
+    cleaned = raw_url.strip().strip('"').strip("'")
+    if "Host=" in cleaned and "Database=" in cleaned:
+        return cleaned
+
+    for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgres://"):
+        if cleaned.startswith(prefix):
+            cleaned = "postgresql://" + cleaned[len(prefix):]
+
+    if not cleaned.startswith("postgresql://"):
+        return cleaned
+
+    parsed = urlparse(cleaned)
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 5432
+    database = (parsed.path or "").lstrip("/")
+    username = unquote(parsed.username or "")
+    password = unquote(parsed.password or "")
+
+    return (
+        f"Host={host};Port={port};Database={database};"
+        f"Username={username};Password={password};"
+        f"SSL Mode=Require;Trust Server Certificate=true;"
+        f"Pooling=true;Minimum Pool Size=1;Maximum Pool Size=20;"
+        f"No Reset On Close=true;Max Auto Prepare=0"
+    )
+
+
+def bootstrap_environment() -> None:
+    remediate_production_secrets(os.environ)
 
 
 def is_valid_32byte_base64_key(val: str | None) -> bool:
@@ -64,19 +102,27 @@ def derive_deterministic_field_encryption_key(seed: str | None = None) -> str:
 def remediate_production_secrets(env: dict) -> None:
     """
     Auto-remediates missing or compromised secrets before launching the backend dyno:
-    1. Normalizes DATABASE_URL and populates ConnectionStrings__AccountingDb.
+    1. Normalizes DATABASE_URL (including postgresql+psycopg2://) and populates ConnectionStrings__AccountingDb & ConnectionStrings__Postgres.
     2. Maps PayMongo secrets.
-    3. Auto-rotates compromised ('rge_gforms_live_sec_89f3a21') or missing Google Forms secrets.
+    3. Preserves configured GOOGLE_FORMS_SECRET (never auto-rotates 'rge_gforms_live_sec_89f3a21').
     4. Auto-derives deterministic 32-byte Base64 field encryption key if missing or invalid.
+    5. Unifies SMTP_* and Smtp__* environment variables for live email delivery.
     """
     # 1. Database URL normalization & mapping
-    db_url = env.get("DATABASE_URL")
-    if db_url:
-        if db_url.startswith("postgres://"):
-            db_url = "postgresql://" + db_url[len("postgres://"):]
-            env["DATABASE_URL"] = db_url
-        if "ConnectionStrings__AccountingDb" not in env:
-            env["ConnectionStrings__AccountingDb"] = db_url
+    raw_db_url = (
+        env.get("ConnectionStrings__Postgres")
+        or env.get("ConnectionStrings__AccountingDb")
+        or env.get("ConnectionStrings__DefaultConnection")
+        or env.get("DATABASE_URL")
+        or ""
+    ).strip()
+
+    if raw_db_url:
+        npgsql_conn = normalize_database_url(raw_db_url)
+        env["ConnectionStrings__Postgres"] = npgsql_conn
+        env["ConnectionStrings__AccountingDb"] = npgsql_conn
+        env["ConnectionStrings__DefaultConnection"] = npgsql_conn
+        env["ConnectionStrings__Default"] = npgsql_conn
 
     # 2. PayMongo secrets mapping
     if "PAYMONGO_SECRET_KEY" in env and "Secrets__PayMongoSecretKey" not in env:
@@ -100,30 +146,67 @@ def remediate_production_secrets(env: dict) -> None:
         if "PayMongo__CancelUrl" not in env and "PAYMONGO_CANCEL_URL" not in env:
             env["PayMongo__CancelUrl"] = f"{app_url}/checkout"
 
-    # 3. Google Forms secret auto-rotation & remediation
+    # 3. Google Forms secret preservation (NEVER rotate rge_gforms_live_sec_89f3a21)
     current_gforms_secret = (
-        env.get("Secrets__GoogleFormsSecret")
+        env.get("GOOGLE_FORMS_SECRET")
+        or env.get("Secrets__GoogleFormsSecret")
         or env.get("GOOGLE_FORMS_WEBHOOK_SECRET")
-        or env.get("GOOGLE_FORMS_SECRET")
         or ""
-    ).strip()
+    ).strip().strip('"').strip("'")
 
     if not current_gforms_secret or "REPLACE_ME" in current_gforms_secret.upper() or "TODO" in current_gforms_secret.upper():
-        log("[Security] Missing or placeholder Google Forms secret detected. Auto-remediated with secure rotated secret.")
-        env["Secrets__GoogleFormsSecret"] = ROTATED_GOOGLE_FORMS_SECRET
-        env["GOOGLE_FORMS_SECRET"] = ROTATED_GOOGLE_FORMS_SECRET
-    elif current_gforms_secret == COMPROMISED_GOOGLE_FORMS_SECRET:
-        log(f"[Security WARNING] Detected compromised legacy Google Forms secret ('{COMPROMISED_GOOGLE_FORMS_SECRET}'). Auto-rotated to secure production secret.")
-        env["Secrets__GoogleFormsSecret"] = ROTATED_GOOGLE_FORMS_SECRET
-        env["GOOGLE_FORMS_SECRET"] = ROTATED_GOOGLE_FORMS_SECRET
-        if "GOOGLE_FORMS_WEBHOOK_SECRET" in env:
-            env["GOOGLE_FORMS_WEBHOOK_SECRET"] = ROTATED_GOOGLE_FORMS_SECRET
-        if env.get("NEXT_PUBLIC_GOOGLE_FORMS_SECRET") == COMPROMISED_GOOGLE_FORMS_SECRET:
-            env["NEXT_PUBLIC_GOOGLE_FORMS_SECRET"] = ROTATED_GOOGLE_FORMS_SECRET
-    else:
-        # User provided an explicit valid secret
-        env["Secrets__GoogleFormsSecret"] = current_gforms_secret
-        env["GOOGLE_FORMS_SECRET"] = current_gforms_secret
+        current_gforms_secret = DEFAULT_GOOGLE_FORMS_SECRET
+        log("[Config] GOOGLE_FORMS_SECRET not set; defaulting to 'rge_gforms_live_sec_89f3a21'.")
+
+    env["GOOGLE_FORMS_SECRET"] = current_gforms_secret
+    env["Secrets__GoogleFormsSecret"] = current_gforms_secret
+    env["GOOGLE_FORMS_WEBHOOK_SECRET"] = current_gforms_secret
+    log(f"[Supervisor] GOOGLE_FORMS_SECRET active (length={len(current_gforms_secret)} chars, rotation disabled)")
+
+    # 3b. SMTP & Email Delivery Unification (Recipient + Sender Copy)
+    smtp_host = (env.get("SMTP_HOST") or env.get("Smtp__Host") or "smtp.gmail.com").strip()
+    smtp_port = (env.get("SMTP_PORT") or env.get("Smtp__Port") or "587").strip()
+    smtp_user = (env.get("SMTP_USER") or env.get("Smtp__Username") or "").strip()
+    smtp_pass = (
+        env.get("SMTP_APP_PASSWORD")
+        or env.get("SMTP_PASS")
+        or env.get("Smtp__Password")
+        or ""
+    ).replace(" ", "").strip()
+    default_receipt_email = (
+        env.get("DEFAULT_RECEIPT_EMAIL")
+        or env.get("SMTP_FROM")
+        or smtp_user
+    ).strip()
+    sender_name = (
+        env.get("SMTP_SENDER_NAME")
+        or env.get("Smtp__SenderName")
+        or "R.G.E Accounting Firm Inc."
+    ).strip()
+    use_tls = (env.get("SMTP_USE_TLS") or env.get("Smtp__UseTls") or "true").strip().lower()
+
+    env["SMTP_HOST"] = smtp_host
+    env["SMTP_PORT"] = smtp_port
+    if smtp_user:
+        env["SMTP_USER"] = smtp_user
+        env["Smtp__Username"] = smtp_user
+        env["Smtp__SenderEmail"] = smtp_user
+    if smtp_pass:
+        env["SMTP_APP_PASSWORD"] = smtp_pass
+        env["SMTP_PASS"] = smtp_pass
+        env["Smtp__Password"] = smtp_pass
+        env["Smtp__AppPassword"] = smtp_pass
+    if smtp_user or default_receipt_email:
+        env["SMTP_FROM"] = smtp_user or default_receipt_email
+        env["DEFAULT_RECEIPT_EMAIL"] = default_receipt_email or smtp_user
+        env["Smtp__FromEmail"] = smtp_user or default_receipt_email
+        env["Smtp__DefaultReceiptEmail"] = default_receipt_email or smtp_user
+    env["SMTP_SENDER_NAME"] = sender_name
+    env["SMTP_USE_TLS"] = use_tls
+    env["Smtp__Host"] = smtp_host
+    env["Smtp__Port"] = smtp_port
+    env["Smtp__SenderName"] = sender_name
+    env["Smtp__UseTls"] = use_tls
 
     # 4. Field encryption key auto-remediation (deterministic 32-byte Base64 key)
     current_enc_key = (

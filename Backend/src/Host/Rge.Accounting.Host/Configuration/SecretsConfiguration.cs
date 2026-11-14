@@ -14,7 +14,6 @@ namespace Rge.Accounting.Host.Configuration;
 public static class SecretsConfiguration
 {
     private const string CompromisedLegacyGoogleFormsSecret = "rge_gforms_live_sec_89f3a21";
-    private const string DefaultRotatedGoogleFormsSecret = "rge_gforms_rotated_vault_secret_2026";
     private const string DefaultEncryptionKeyFallbackSeed = "rge_accounting_default_field_encryption_seed_2026";
 
     public static void ValidateRequiredSecretsOrThrow(
@@ -25,24 +24,29 @@ public static class SecretsConfiguration
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(environment);
 
-        // 1. Auto-remediate compromised Google Forms secret (Defense-in-Depth)
+        // 1. Preserve or default Google Forms secret (DO NOT rotate rge_gforms_live_sec_89f3a21)
         string? googleFormsSecret = ResolveSecretValue(
             configuration,
             "Secrets:GoogleFormsSecret",
             ["Secrets__GoogleFormsSecret", "GOOGLE_FORMS_WEBHOOK_SECRET", "GOOGLE_FORMS_SECRET"]);
 
-        if (string.Equals(googleFormsSecret, CompromisedLegacyGoogleFormsSecret, StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(googleFormsSecret) ||
+            googleFormsSecret.Contains("REPLACE_ME", StringComparison.OrdinalIgnoreCase) ||
+            googleFormsSecret.Contains("TODO", StringComparison.OrdinalIgnoreCase))
         {
-            const string warningMsg =
-                "Secrets:GoogleFormsSecret is using compromised legacy key 'rge_gforms_live_sec_89f3a21'. Auto-rotated to safe production secret.";
-            logger?.LogWarning("{WarningMessage}", warningMsg);
-            Console.WriteLine($"[WARN] {warningMsg}");
-
-            configuration["Secrets:GoogleFormsSecret"] = DefaultRotatedGoogleFormsSecret;
-            configuration["Secrets__GoogleFormsSecret"] = DefaultRotatedGoogleFormsSecret;
-            configuration["GOOGLE_FORMS_SECRET"] = DefaultRotatedGoogleFormsSecret;
-            configuration["GOOGLE_FORMS_WEBHOOK_SECRET"] = DefaultRotatedGoogleFormsSecret;
-            Environment.SetEnvironmentVariable("GOOGLE_FORMS_SECRET", DefaultRotatedGoogleFormsSecret);
+            googleFormsSecret = CompromisedLegacyGoogleFormsSecret;
+            configuration["Secrets:GoogleFormsSecret"] = googleFormsSecret;
+            configuration["Secrets__GoogleFormsSecret"] = googleFormsSecret;
+            configuration["GOOGLE_FORMS_SECRET"] = googleFormsSecret;
+            configuration["GOOGLE_FORMS_WEBHOOK_SECRET"] = googleFormsSecret;
+            Environment.SetEnvironmentVariable("GOOGLE_FORMS_SECRET", googleFormsSecret);
+        }
+        else
+        {
+            string cleanSecret = googleFormsSecret.Trim().Trim('"', '\'');
+            configuration["Secrets:GoogleFormsSecret"] = cleanSecret;
+            configuration["Secrets__GoogleFormsSecret"] = cleanSecret;
+            configuration["GOOGLE_FORMS_SECRET"] = cleanSecret;
         }
 
         // 2. Auto-derive missing or invalid FieldEncryptionKeyBase64 (Defense-in-Depth)

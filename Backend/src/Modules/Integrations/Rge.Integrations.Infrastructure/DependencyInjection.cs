@@ -22,7 +22,9 @@ public static class DependencyInjection
         services.AddSingleton<IIntegrationDiagnosticProbe>(sp => sp.GetRequiredService<SecretStoreWriter>());
 
         services.AddSingleton<IGoogleSheetsClient, GoogleSheetsClient>();
-        services.AddSingleton<ISmtpProbe, SmtpClientFactory>();
+        services.AddSingleton<SmtpClientFactory>();
+        services.AddSingleton<ISmtpProbe>(sp => sp.GetRequiredService<SmtpClientFactory>());
+        services.AddSingleton<FormSecretVerifier>();
         services.AddSingleton<IGoogleFormsSubmissionStore, InMemoryGoogleFormsStore>();
 
         services.AddScoped<SaveCredentialsHandler>();

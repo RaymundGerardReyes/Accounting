@@ -96,26 +96,20 @@ public sealed class CacheInvalidator : IApplicationCache
 
     public void InvalidateKey(string key) => _store.TryRemove(key, out _);
 
-
-
     public void InvalidateByPrefix(string prefix)
-
     {
-
         foreach (string key in _store.Keys)
-
         {
-
             if (key.StartsWith(prefix, StringComparison.Ordinal))
-
             {
-
                 _store.TryRemove(key, out _);
-
             }
-
         }
-
     }
 
+    public ValueTask InvalidateByTagAsync(string tag, CancellationToken ct = default)
+    {
+        InvalidateByPrefix(tag);
+        return ValueTask.CompletedTask;
+    }
 }

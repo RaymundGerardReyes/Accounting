@@ -184,6 +184,7 @@
       "rge.buildingblocks.infrastructure": {
         "type": "Project",
         "dependencies": {
+          "Npgsql": "[9.0.2, )",
           "Rge.BuildingBlocks.Application": "[1.0.0, )",
           "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
         }
@@ -479,6 +480,7 @@
       "rge.receipts.infrastructure": {
         "type": "Project",
         "dependencies": {
+          "QuestPDF": "[2025.7.0, )",
           "Rge.BuildingBlocks.Infrastructure": "[1.0.0, )",
           "Rge.Receipts.Application": "[1.0.0, )",
           "Rge.Receipts.Domain": "[1.0.0, )"
@@ -531,6 +533,18 @@
           "Microsoft.CodeCoverage": "17.12.0",
           "Microsoft.TestPlatform.TestHost": "17.12.0"
         }
+      },
+      "Npgsql": {
+        "type": "CentralTransitive",
+        "requested": "[9.0.2, )",
+        "resolved": "9.0.2",
+        "contentHash": "hCbO8box7i/XXiTFqCJ3GoowyLqx3JXxyrbOJ6om7dr+eAknvBNhhUHeJVGAQo44sySZTfdVffp4BrtPeLZOAA=="
+      },
+      "QuestPDF": {
+        "type": "CentralTransitive",
+        "requested": "[2025.7.0, )",
+        "resolved": "2025.7.0",
+        "contentHash": "yRjdm7p300eEuy4Mi9YdMuecl2cvTU/CV+IHHDzw22Uf43/0C2zeG4c+MthZqkpQNJPg0Agha1iBSmLBxX1vHA=="
       },
       "xunit": {
         "type": "CentralTransitive",

@@ -14,6 +14,8 @@ namespace Rge.Receipts.Infrastructure.Mail.EmailTemplates;
 /// </summary>
 public static class ReceiptEmailHtmlBuilder
 {
+    public static string Build(OfficialReceipt receipt) => BuildReceiptHtml(receipt);
+
     public static string BuildReceiptHtml(OfficialReceipt receipt)
     {
         ArgumentNullException.ThrowIfNull(receipt);
