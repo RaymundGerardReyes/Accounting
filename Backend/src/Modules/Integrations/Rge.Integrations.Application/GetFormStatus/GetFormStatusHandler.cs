@@ -53,34 +53,17 @@ public sealed class GetFormStatusHandler :
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        var submissions = await _store.GetAllAsync(cancellationToken).ConfigureAwait(false);
-        var resolvedSecret = ResolveSecret();
+        var snapshot = await _store.GetStatusSnapshotAsync(
+            maxRecentLimit: 200,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
 
+        var resolvedSecret = ResolveSecret();
         var secretConfigured = !string.IsNullOrWhiteSpace(resolvedSecret);
         var maskedSecret = MaskSecret(resolvedSecret);
 
-        var recentDtos = submissions
-            .OrderByDescending(s => s.SubmittedAtUtc)
-            .Take(50)
-            .Select(s => new GoogleFormSubmissionDto(
-                s.OrderId ?? $"ord_{s.ResponseId}",
-                s.OrderNumber ?? $"ORD-{s.SubmittedAtUtc:yyyyMM}-{s.ResponseId[..Math.Min(4, s.ResponseId.Length)]}",
-                s.ResponseId,
-                s.CustomerName,
-                s.CustomerEmail,
-                s.ItemReference,
-                s.Amount.AmountMinor,
-                "pending",
-                s.SubmittedAtUtc))
-            .ToList();
-
-        var lastSyncedAt = submissions.Count > 0
-            ? submissions.Max(s => s.SubmittedAtUtc)
-            : (DateTimeOffset?)null;
-
-        int total = submissions.Count;
-        int paid = 0;
-        int pending = total;
+        int total = snapshot.TotalSubmissions;
+        int paid = snapshot.PaidOrdersCount;
+        int pending = snapshot.PendingOrdersCount;
 
         if (_orderBridge is not null)
         {
@@ -89,16 +72,16 @@ public sealed class GetFormStatusHandler :
                 .ConfigureAwait(false);
 
             total = Math.Max(bridgeTotal, total);
-            paid = bridgePaid;
-            pending = bridgePending;
+            paid = Math.Max(bridgePaid, paid);
+            pending = Math.Max(0, total - paid);
         }
 
         return Result.Success(new GoogleFormsStatusResponse(
             Enabled: true,
             TotalSubmissions: total,
             SyncedCount: total,
-            LastSyncedAt: lastSyncedAt,
-            RecentSubmissions: recentDtos,
+            LastSyncedAt: snapshot.LastSyncedAt,
+            RecentSubmissions: snapshot.RecentSubmissions,
             SecretConfigured: secretConfigured,
             MaskedSecret: maskedSecret,
             Status: "active",

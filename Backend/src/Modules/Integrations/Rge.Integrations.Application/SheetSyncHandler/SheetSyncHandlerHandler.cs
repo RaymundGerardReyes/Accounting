@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Rge.BuildingBlocks.Application.Behaviors;
 using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Integrations.Application.Ports;
 using Rge.Integrations.Domain;
@@ -24,6 +25,7 @@ public sealed class SheetSyncHandlerHandler
     private readonly IGoogleFormsStore _formsStore;
     private readonly IGoogleFormsSubmissionStore _submissionStore;
     private readonly IGoogleFormOrderBridge _orderBridge;
+    private readonly IApplicationCache? _cache;
     private readonly ILogger<SheetSyncHandlerHandler> _logger;
 
     public SheetSyncHandlerHandler(
@@ -32,11 +34,23 @@ public sealed class SheetSyncHandlerHandler
         IGoogleFormsSubmissionStore submissionStore,
         IGoogleFormOrderBridge orderBridge,
         ILogger<SheetSyncHandlerHandler> logger)
+        : this(sheetsClient, formsStore, submissionStore, orderBridge, cache: null, logger)
+    {
+    }
+
+    public SheetSyncHandlerHandler(
+        IGoogleSheetsClient sheetsClient,
+        IGoogleFormsStore formsStore,
+        IGoogleFormsSubmissionStore submissionStore,
+        IGoogleFormOrderBridge orderBridge,
+        IApplicationCache? cache,
+        ILogger<SheetSyncHandlerHandler> logger)
     {
         _sheetsClient = sheetsClient ?? throw new ArgumentNullException(nameof(sheetsClient));
         _formsStore = formsStore ?? throw new ArgumentNullException(nameof(formsStore));
         _submissionStore = submissionStore ?? throw new ArgumentNullException(nameof(submissionStore));
         _orderBridge = orderBridge ?? throw new ArgumentNullException(nameof(orderBridge));
+        _cache = cache;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -50,11 +64,11 @@ public sealed class SheetSyncHandlerHandler
         var storedCount = 0;
         var bridgedCount = 0;
 
-        // 1. Active pull from Google Sheets if configured
+        // 1. Active pull from Google Sheets (or CSV export fallback)
         try
         {
             var sheetRows = await _sheetsClient
-                .ReadSubmissionsAsync(command.SpreadsheetId, command.Range, cancellationToken)
+                .FetchSheetSubmissionsAsync(command.SpreadsheetId, cancellationToken)
                 .ConfigureAwait(false);
 
             if (sheetRows is { Count: > 0 })
@@ -62,8 +76,25 @@ public sealed class SheetSyncHandlerHandler
                 pulledCount = sheetRows.Count;
                 foreach (var submission in sheetRows)
                 {
+                    await _formsStore.UpsertSubmissionAsync(submission, cancellationToken).ConfigureAwait(false);
                     await _submissionStore.UpsertAsync(submission, cancellationToken).ConfigureAwait(false);
                     storedCount++;
+
+                    try
+                    {
+                        var bridgeResult = await _orderBridge
+                            .EnsureOrderForSubmissionAsync(submission, cancellationToken)
+                            .ConfigureAwait(false);
+
+                        if (bridgeResult.IsSuccess)
+                        {
+                            bridgedCount++;
+                        }
+                    }
+                    catch (Exception bridgeEx)
+                    {
+                        _logger.LogWarning(bridgeEx, "Failed bridging sheet submission {ResponseId} into orders ledger.", submission.ResponseId);
+                    }
                 }
             }
         }
@@ -72,7 +103,7 @@ public sealed class SheetSyncHandlerHandler
             _logger.LogWarning(ex, "Live Google Sheets pull skipped or unconfigured; proceeding with PostgreSQL store reconciliation.");
         }
 
-        // 2. Ensure every submission in public.google_form_submissions is bridged into public.orders
+        // 2. Ensure every existing submission in public.google_form_submissions is bridged into public.orders
         var existingSubmissions = await _formsStore
             .GetRecentSubmissionsAsync(250, cancellationToken)
             .ConfigureAwait(false);
@@ -94,6 +125,22 @@ public sealed class SheetSyncHandlerHandler
             {
                 _logger.LogWarning(ex, "Failed bridging submission {ResponseId} into orders ledger.", item.ResponseId);
             }
+        }
+
+        // 3. Invalidate caches so next queries reflect the freshly synced submissions and orders
+        if (_cache is not null)
+        {
+            await _cache.InvalidateByTagAsync("orders:", cancellationToken).ConfigureAwait(false);
+            await _cache.InvalidateByTagAsync("google-forms:", cancellationToken).ConfigureAwait(false);
+        }
+
+        if (_logger.IsEnabled(LogLevel.Information))
+        {
+            _logger.LogInformation(
+                "[GOOGLE-SHEETS-SYNC] Sync finished. PulledFromSheet={Pulled}, StoredSubmissions={Stored}, BridgedOrders={Bridged}",
+                pulledCount,
+                storedCount,
+                bridgedCount);
         }
 
         return Result.Success(new SheetSyncResultDto(

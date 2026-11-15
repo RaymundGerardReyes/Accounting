@@ -36,6 +36,10 @@ public interface IGoogleFormsStore
         GoogleFormSubmission submission,
         CancellationToken cancellationToken = default);
 
+    Task<GoogleFormsStatusSnapshot> GetStatusSnapshotAsync(
+        int maxRecentLimit = 200,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<GoogleFormSubmission>> GetAllAsync(
         CancellationToken cancellationToken = default);
 
@@ -47,6 +51,9 @@ public interface IGoogleFormsStore
 public interface IGoogleFormsSubmissionStore
 {
     Task<GoogleFormsStatusResponse> GetStatusAsync(CancellationToken cancellationToken = default);
+    Task<GoogleFormsStatusSnapshot> GetStatusSnapshotAsync(
+        int maxRecentLimit = 200,
+        CancellationToken cancellationToken = default);
     Task SaveSubmissionAsync(GoogleFormSubmission submission, CancellationToken cancellationToken = default);
     Task UpsertAsync(GoogleFormSubmission submission, CancellationToken cancellationToken = default);
     Task<GoogleFormSubmission?> GetByResponseIdAsync(string responseId, CancellationToken cancellationToken = default);
@@ -63,6 +70,9 @@ public interface IGoogleSheetsClient
     Task<IReadOnlyList<GoogleFormSubmission>> ReadSubmissionsAsync(
         string? spreadsheetId = null,
         string? range = null,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<GoogleFormSubmission>> FetchSheetSubmissionsAsync(
+        string? spreadsheetIdOverride = null,
         CancellationToken cancellationToken = default);
 }
 

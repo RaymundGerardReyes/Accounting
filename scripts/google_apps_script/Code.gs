@@ -1481,3 +1481,49 @@ function showAlertSafely(message) {
     Logger.log(message);
   }
 }
+
+function resyncAllHistoricalRowsToCSharpBackend() {
+  var cfg = typeof getRuntimeConfig === "function" ? getRuntimeConfig() : {};
+  var spreadsheetId = cfg.SPREADSHEET_ID || cfg.FALLBACK_SPREADSHEET_ID || "";
+  var ss = spreadsheetId ? SpreadsheetApp.openById(spreadsheetId) : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) {
+    Logger.log("No active or configured spreadsheet found.");
+    return;
+  }
+  var sheet = ss.getSheets()[0];
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) {
+    Logger.log("No data rows found.");
+    return;
+  }
+
+  // Clear cached row sync markers in ScriptProperties so Code.gs doesn't skip older rows
+  var props = PropertiesService.getScriptProperties();
+  var allProps = props.getProperties();
+  Object.keys(allProps).forEach(function (k) {
+    if (k !== "BACKEND_URL" && k !== "GOOGLE_FORMS_SECRET" && k !== "X_GOOGLE_FORMS_SECRET" && k !== "FALLBACK_SPREADSHEET_ID" && k !== "SPREADSHEET_ID") {
+      props.deleteProperty(k);
+    }
+  });
+
+  // Temporarily disable initial email sending so historical rows don't re-email customers
+  var prevEmailSetting = props.getProperty("SEND_INITIAL_EMAIL");
+  props.setProperty("SEND_INITIAL_EMAIL", "false");
+
+  try {
+    // Call the main sync entrypoint in Code.gs
+    if (typeof syncAllResponses === "function") {
+      syncAllResponses();
+    } else if (typeof processFormSubmissions === "function") {
+      processFormSubmissions();
+    } else if (typeof main === "function") {
+      main();
+    }
+  } finally {
+    if (prevEmailSetting !== null) {
+      props.setProperty("SEND_INITIAL_EMAIL", prevEmailSetting);
+    } else {
+      props.deleteProperty("SEND_INITIAL_EMAIL");
+    }
+  }
+}

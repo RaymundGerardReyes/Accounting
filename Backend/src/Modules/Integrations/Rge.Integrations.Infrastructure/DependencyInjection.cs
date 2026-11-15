@@ -21,7 +21,7 @@ public static class DependencyInjection
         services.AddSingleton<IPayMongoProbe>(sp => sp.GetRequiredService<SecretStoreWriter>());
         services.AddSingleton<IIntegrationDiagnosticProbe>(sp => sp.GetRequiredService<SecretStoreWriter>());
 
-        services.AddSingleton<IGoogleSheetsClient, GoogleSheetsClient>();
+        services.AddHttpClient<IGoogleSheetsClient, GoogleSheetsClient>();
         services.AddSingleton<SmtpClientFactory>();
         services.AddSingleton<ISmtpClientFactory>(sp => sp.GetRequiredService<SmtpClientFactory>());
         services.AddSingleton<ISmtpProbe>(sp => sp.GetRequiredService<SmtpClientFactory>());

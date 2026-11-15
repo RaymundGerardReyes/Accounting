@@ -99,6 +99,16 @@ public sealed record GoogleFormsStatusResponse(
     [property: JsonPropertyName("heartbeat_interval")] string HeartbeatInterval = "Active (4s interval)",
     [property: JsonPropertyName("script_template_path")] string ScriptTemplatePath = "scripts/google_apps_script/Code.gs");
 
+public sealed record GoogleFormsStatusSnapshot(
+    [property: JsonPropertyName("total_submissions")] int TotalSubmissions,
+    [property: JsonPropertyName("synced_count")] int SyncedCount,
+    [property: JsonPropertyName("ingested_orders_count")] int IngestedOrdersCount,
+    [property: JsonPropertyName("paid_orders_count")] int PaidOrdersCount,
+    [property: JsonPropertyName("pending_orders_count")] int PendingOrdersCount,
+    [property: JsonPropertyName("cancelled_orders_count")] int CancelledOrdersCount,
+    [property: JsonPropertyName("last_synced_at")] DateTimeOffset? LastSyncedAt,
+    [property: JsonPropertyName("recent_submissions")] IReadOnlyList<GoogleFormSubmissionDto> RecentSubmissions);
+
 public sealed record GoogleFormSubmissionDto(
     [property: JsonPropertyName("order_id")] string OrderId,
     [property: JsonPropertyName("order_number")] string OrderNumber,
