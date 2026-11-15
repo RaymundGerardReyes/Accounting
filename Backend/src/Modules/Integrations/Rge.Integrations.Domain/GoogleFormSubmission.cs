@@ -27,6 +27,11 @@ public sealed class GoogleFormSubmission : AggregateRoot<string>
     public DateTimeOffset SubmittedAtUtc { get; private set; }
     public bool IsDuplicate { get; private set; }
 
+    public string Description => ItemReference;
+    public long AmountCentavos => Amount.AmountMinor;
+    public string Status { get; set; } = "pending";
+    public DateTimeOffset CreatedAt => SubmittedAtUtc;
+
     public GoogleFormSubmission(
         string id,
         string responseId,
@@ -60,6 +65,37 @@ public sealed class GoogleFormSubmission : AggregateRoot<string>
         IsDuplicate = isDuplicate;
     }
 
+    public GoogleFormSubmission(
+        string OrderId,
+        string OrderNumber,
+        string ResponseId,
+        string CustomerName,
+        string CustomerEmail,
+        string Description,
+        long AmountCentavos,
+        string Status,
+        DateTimeOffset CreatedAt) : this(
+            id: Guid.NewGuid().ToString("D"),
+            responseId: ResponseId,
+            customerName: CustomerName,
+            customerEmail: CustomerEmail,
+            customerPhone: null,
+            itemReference: string.IsNullOrWhiteSpace(Description) ? "Google Form Order" : Description,
+            quantity: 1,
+            amount: Money.Php(AmountCentavos),
+            paymentMethod: "hosted_checkout",
+            notes: null,
+            studentId: null,
+            instructorCredit: null,
+            bookTitle: Description,
+            submittedAtUtc: CreatedAt,
+            isDuplicate: false)
+    {
+        this.OrderId = OrderId;
+        this.OrderNumber = OrderNumber;
+        this.Status = Status;
+    }
+
     public string? PaymentAttemptId { get; private set; }
     public string? ProviderPaymentId { get; private set; }
 
@@ -77,4 +113,3 @@ public sealed class GoogleFormSubmission : AggregateRoot<string>
         ProviderPaymentId = providerPaymentId;
     }
 }
-

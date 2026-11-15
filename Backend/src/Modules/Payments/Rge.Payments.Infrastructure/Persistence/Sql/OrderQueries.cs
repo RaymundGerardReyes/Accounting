@@ -40,6 +40,36 @@ public static class OrderQueries
         LIMIT @limit;
         """;
 
+    public const string ListOrders = """
+        SELECT
+            o.id,
+            o.user_id,
+            o.order_number,
+            o.title,
+            o.category,
+            o.reference_code,
+            o.amount_minor,
+            o.currency,
+            o.status,
+            o.metadata_json,
+            o.created_at,
+            o.updated_at
+        FROM public.orders o
+        WHERE (@user_id IS NULL OR o.user_id = @user_id)
+          AND (@status IS NULL OR LOWER(o.status) = LOWER(@status))
+          AND (@category IS NULL OR LOWER(o.category) = LOWER(@category))
+          AND (
+              @search IS NULL
+              OR o.order_number ILIKE '%' || @search || '%'
+              OR o.title ILIKE '%' || @search || '%'
+              OR o.reference_code ILIKE '%' || @search || '%'
+              OR COALESCE(o.metadata_json, '') ILIKE '%' || @search || '%'
+          )
+          AND (@cursor IS NULL OR o.created_at < @cursor)
+        ORDER BY o.created_at DESC, o.id DESC
+        LIMIT @limit;
+        """;
+
     public const string ListAllOrders = """
         SELECT id, user_id, order_number, title, category, reference_code,
                amount_minor, currency, status, metadata_json, created_at, updated_at

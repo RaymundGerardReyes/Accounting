@@ -305,6 +305,26 @@ public sealed class SubmitGoogleFormHandler : ICommandHandler<SubmitGoogleFormCo
 
         if (existing is not null)
         {
+            if (_orderBridge is not null)
+            {
+                var bridgeReq = new GoogleFormOrderBridgeRequest(
+                    ResponseId: req.ResponseId,
+                    CustomerName: existing.CustomerName,
+                    CustomerEmail: existing.CustomerEmail,
+                    CustomerPhone: existing.CustomerPhone,
+                    ProductCode: req.ReferenceCode ?? "COST-ACC-TEXT-2026",
+                    ProductTitle: existing.ItemReference,
+                    Quantity: existing.Quantity,
+                    UnitPriceMinor: existing.Amount.AmountMinor / Math.Max(1, existing.Quantity),
+                    TotalAmountMinor: existing.Amount.AmountMinor,
+                    Currency: existing.Amount.CurrencyCode,
+                    Status: "pending",
+                    SubmittedAt: existing.SubmittedAtUtc,
+                    SendInitialEmail: false,
+                    AdditionalMetadata: null);
+                await _orderBridge.BridgeSubmissionToOrderAsync(bridgeReq, cancellationToken).ConfigureAwait(false);
+            }
+
             return Result.Success(new GoogleFormSubmissionResponse(
                 Status: "success",
                 Message: "Duplicate submission returned from cache.",

@@ -453,10 +453,7 @@ public sealed class Tier2BoundaryAndCornerTests : IClassFixture<AccountingWebApp
     public async Task R5_2_T2_01_SmtpTimeoutOver15s_DetachedCtsCancelsSafelyWithout500()
     {
         using var scope = _factory.Services.CreateScope();
-        var capturingSmtp = new CapturingSmtpClientFactory();
-        var handler = ActivatorUtilities.CreateInstance<SubmitGoogleFormHandler>(
-            scope.ServiceProvider,
-            (ISmtpClientFactory)capturingSmtp);
+        var handler = scope.ServiceProvider.GetRequiredService<SubmitGoogleFormHandler>();
 
         var input = new SubmitGoogleFormInput(
             Timestamp: DateTimeOffset.UtcNow.ToString("O"),

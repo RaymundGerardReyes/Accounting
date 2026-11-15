@@ -226,7 +226,9 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
         string deterministicSuffix = ComputeShortHash(request.ResponseId);
         string candidateOrderId = $"ord_gf_{deterministicSuffix}";
         string yearMonth = request.SubmittedAt.ToUniversalTime().ToString("yyyyMM", CultureInfo.InvariantCulture);
-        string candidateOrderNumber = $"ORD-{yearMonth}-{deterministicSuffix[..4].ToUpperInvariant()}";
+        string candidateOrderNumber = (request.AdditionalMetadata != null && request.AdditionalMetadata.TryGetValue("order_number", out var explicitNum) && !string.IsNullOrWhiteSpace(explicitNum?.ToString()))
+            ? explicitNum.ToString()!.Trim()
+            : $"ORD-{yearMonth}-{deterministicSuffix[..4].ToUpperInvariant()}";
 
         string dept = (request.AdditionalMetadata != null && request.AdditionalMetadata.TryGetValue("department", out var d) && !string.IsNullOrWhiteSpace(d)) ? d : "Tax";
         string cc = (request.AdditionalMetadata != null && request.AdditionalMetadata.TryGetValue("cost_center", out var c) && !string.IsNullOrWhiteSpace(c)) ? c : "CC-101";

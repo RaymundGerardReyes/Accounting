@@ -89,9 +89,11 @@ public sealed class GoogleFormsEndpoints : IEndpointModule
                     instance: httpContext.Request.Path);
             }
 
-            // Support batch array of rows (e.g., October + November backfill)
+            // Support batch array of rows (e.g., October + November backfill, rows, submissions, or orders)
             if (root.ValueKind == JsonValueKind.Object &&
-                (root.TryGetProperty("rows", out var rowsEl) || root.TryGetProperty("submissions", out rowsEl)) &&
+                (root.TryGetProperty("rows", out var rowsEl) ||
+                 root.TryGetProperty("submissions", out rowsEl) ||
+                 root.TryGetProperty("orders", out rowsEl)) &&
                 rowsEl.ValueKind == JsonValueKind.Array)
             {
                 var results = new List<SubmitGoogleFormResponse>();
@@ -172,14 +174,18 @@ public sealed class GoogleFormsEndpoints : IEndpointModule
                            ?? TryGetString(el, "item_reference");
 
         string? productTitle = TryGetString(el, "product_title")
+                            ?? TryGetString(el, "description")
                             ?? TryGetString(el, "title")
                             ?? TryGetString(el, "productTitle")
                             ?? TryGetString(el, "item")
                             ?? TryGetString(el, "book_title");
 
+        string? orderNumber = TryGetString(el, "order_number")
+                           ?? TryGetString(el, "orderNumber");
+
         int quantity = TryGetInt(el, "quantity") ?? 1;
         long? amountMinor = TryGetLong(el, "amount_minor") ?? TryGetLong(el, "amountMinor");
-        decimal? amountMajor = TryGetDecimal(el, "amount") ?? TryGetDecimal(el, "total_amount");
+        decimal? amountMajor = TryGetDecimal(el, "amount_php") ?? TryGetDecimal(el, "amount") ?? TryGetDecimal(el, "total_amount");
         string? currency = TryGetString(el, "currency") ?? "PHP";
         string? status = TryGetString(el, "status") ?? "pending";
         string? timestamp = TryGetString(el, "timestamp")
@@ -201,6 +207,12 @@ public sealed class GoogleFormsEndpoints : IEndpointModule
             }
         }
 
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(orderNumber))
+        {
+            metadata["order_number"] = orderNumber.Trim();
+        }
+
         return new SubmitGoogleFormInput(
             ResponseId: responseId,
             CustomerName: customerName,
@@ -214,7 +226,8 @@ public sealed class GoogleFormsEndpoints : IEndpointModule
             Currency: currency,
             Status: status,
             Timestamp: timestamp,
-            SendInitialEmail: sendInitialEmail);
+            SendInitialEmail: sendInitialEmail,
+            Metadata: metadata);
     }
 
     private static string? TryGetString(JsonElement el, string key)

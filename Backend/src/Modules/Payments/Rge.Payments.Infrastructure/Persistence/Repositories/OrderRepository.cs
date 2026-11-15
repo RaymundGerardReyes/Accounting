@@ -195,6 +195,17 @@ public sealed class OrderRepository : IOrderRepository
     {
         int effectiveLimit = Math.Clamp(limit, 1, 100);
 
+        var normalizedUserId = string.IsNullOrWhiteSpace(userId) ||
+                               string.Equals(userId, Guid.Empty.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(userId, "00000000-0000-0000-0000-000000000000", StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(userId, "anonymous", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : userId.Trim();
+
+        var normalizedStatus = string.IsNullOrWhiteSpace(status) || string.Equals(status, "all", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : status.Trim();
+
         try
         {
             DbConnection connection = await _connectionScope.GetOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
@@ -202,8 +213,8 @@ public sealed class OrderRepository : IOrderRepository
             cmd.Transaction = _connectionScope.CurrentTransaction;
             cmd.CommandText = OrderQueries.SelectListSql;
             cmd.CommandTimeout = SqlTimeouts.FastReadSeconds;
-            AddParam(cmd, "@status", string.IsNullOrWhiteSpace(status) ? null : status.Trim());
-            AddParam(cmd, "@UserId", string.IsNullOrWhiteSpace(userId) ? null : userId.Trim());
+            AddParam(cmd, "@status", normalizedStatus);
+            AddParam(cmd, "@UserId", normalizedUserId);
             AddParam(cmd, "@limit", effectiveLimit);
 
             List<Order> list = [];
@@ -220,13 +231,13 @@ public sealed class OrderRepository : IOrderRepository
             {
                 EnsureSeeded();
                 var fallback = MemoryById.Values.AsEnumerable();
-                if (!string.IsNullOrWhiteSpace(status))
+                if (!string.IsNullOrWhiteSpace(normalizedStatus))
                 {
-                    fallback = fallback.Where(o => string.Equals(o.Status, status.Trim(), StringComparison.OrdinalIgnoreCase));
+                    fallback = fallback.Where(o => string.Equals(o.Status, normalizedStatus, StringComparison.OrdinalIgnoreCase));
                 }
-                if (!string.IsNullOrWhiteSpace(userId))
+                if (!string.IsNullOrWhiteSpace(normalizedUserId))
                 {
-                    fallback = fallback.Where(o => string.Equals(o.UserId, userId.Trim(), StringComparison.OrdinalIgnoreCase));
+                    fallback = fallback.Where(o => string.Equals(o.UserId, normalizedUserId, StringComparison.OrdinalIgnoreCase));
                 }
                 return fallback.OrderByDescending(o => o.CreatedAt).Take(effectiveLimit).ToList();
             }
@@ -237,13 +248,13 @@ public sealed class OrderRepository : IOrderRepository
         {
             EnsureSeeded();
             var memList = MemoryById.Values.AsEnumerable();
-            if (!string.IsNullOrWhiteSpace(status))
+            if (!string.IsNullOrWhiteSpace(normalizedStatus))
             {
-                memList = memList.Where(o => string.Equals(o.Status, status.Trim(), StringComparison.OrdinalIgnoreCase));
+                memList = memList.Where(o => string.Equals(o.Status, normalizedStatus, StringComparison.OrdinalIgnoreCase));
             }
-            if (!string.IsNullOrWhiteSpace(userId))
+            if (!string.IsNullOrWhiteSpace(normalizedUserId))
             {
-                memList = memList.Where(o => string.Equals(o.UserId, userId.Trim(), StringComparison.OrdinalIgnoreCase));
+                memList = memList.Where(o => string.Equals(o.UserId, normalizedUserId, StringComparison.OrdinalIgnoreCase));
             }
             return memList.OrderByDescending(o => o.CreatedAt).Take(effectiveLimit).ToList();
         }

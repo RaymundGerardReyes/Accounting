@@ -7,6 +7,7 @@
     <Project Path="Backend/src/BuildingBlocks/Rge.BuildingBlocks.Infrastructure/Rge.BuildingBlocks.Infrastructure.csproj" />
     <Project Path="Backend/src/BuildingBlocks/Rge.BuildingBlocks.SharedKernel/Rge.BuildingBlocks.SharedKernel.csproj" />
   </Folder>
+  <Folder Name="/Backend/src/Host/" />
   <Folder Name="/Backend/src/Modules/" />
   <Folder Name="/Backend/src/Modules/Audit/">
     <Project Path="Backend/src/Modules/Audit/Rge.Audit.Api/Rge.Audit.Api.csproj" />
@@ -63,6 +64,14 @@
     <Project Path="Backend/src/Modules/Receipts/Rge.Receipts.Contracts/Rge.Receipts.Contracts.csproj" />
     <Project Path="Backend/src/Modules/Receipts/Rge.Receipts.Domain/Rge.Receipts.Domain.csproj" />
     <Project Path="Backend/src/Modules/Receipts/Rge.Receipts.Infrastructure/Rge.Receipts.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/Backend/tests/" />
+  <Folder Name="/Backend/tests/Modules/" />
+  <Folder Name="/Backend/tests/Modules/Payments.Integration.Tests/">
+    <Project Path="Backend/tests/Modules/Payments.Integration.Tests/Rge.Payments.Integration.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Backend/tests/Tests.Common/">
+    <Project Path="Backend/tests/Tests.Common/Rge.Tests.Common.csproj" />
   </Folder>
   <Project Path="Backend/src/Host/Rge.Accounting.Host/Rge.Accounting.Host.csproj" />
 </Solution>

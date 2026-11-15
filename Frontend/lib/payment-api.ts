@@ -656,4 +656,97 @@ function jsonStringifyWithFallback(data: any): string {
   return JSON.stringify(data)
 }
 
+export interface GoogleFormSubmissionSummary {
+  orderId: string
+  orderNumber: string
+  responseId: string
+  customerName: string
+  customerEmail: string
+  description: string
+  amountCentavos: number
+  status: string
+  createdAt: string
+}
+
+export interface GoogleFormsStatus {
+  enabled: boolean
+  totalSubmissions: number
+  syncedCount: number
+  lastSyncedAt: string | null
+  secretConfigured: boolean
+  maskedSecret: string | null
+  recentSubmissions: GoogleFormSubmissionSummary[]
+}
+
+export async function listOrders(status?: string): Promise<Order[]> {
+  return fetchOrders(status)
+}
+
+export async function getGoogleFormsStatus(): Promise<GoogleFormsStatus> {
+  let raw: Record<string, any> = {}
+  try {
+    raw = await apiFetch<Record<string, any>>("/api/v1/integrations/google-forms/status")
+  } catch {
+    try {
+      const res = await fetch("/api/v1/integrations/google-forms/status", {
+        method: "GET",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+      })
+      if (res.ok) {
+        raw = await res.json()
+      }
+    } catch {
+      raw = {}
+    }
+  }
+
+  const rawList = Array.isArray(raw?.recent_submissions)
+    ? raw.recent_submissions
+    : Array.isArray(raw?.recentSubmissions)
+    ? raw.recentSubmissions
+    : Array.isArray(raw?.orders)
+    ? raw.orders
+    : []
+
+  const recentSubmissions: GoogleFormSubmissionSummary[] = rawList.map(
+    (item: Record<string, any>) => ({
+      orderId: String(item.order_id ?? item.orderId ?? ""),
+      orderNumber: String(item.order_number ?? item.orderNumber ?? ""),
+      responseId: String(item.response_id ?? item.responseId ?? ""),
+      customerName: String(item.customer_name ?? item.customerName ?? "Google Forms Customer"),
+      customerEmail: String(item.customer_email ?? item.customerEmail ?? ""),
+      description: String(item.description ?? item.title ?? "Google Forms Order"),
+      amountCentavos: Number(item.amount_centavos ?? item.amountCentavos ?? item.amount_minor ?? item.total_centavos ?? 0),
+      status: String(item.status ?? "pending"),
+      createdAt: String(item.created_at ?? item.createdAt ?? new Date().toISOString()),
+    })
+  )
+
+  const totalSubmissions = Number(
+    raw?.total_submissions ?? raw?.totalSubmissions ?? raw?.ingested_orders_count ?? raw?.synced_count ?? raw?.syncedCount ?? recentSubmissions.length
+  )
+
+  const maskedSecret =
+    typeof raw?.masked_secret === "string" && raw.masked_secret.trim().length > 0
+      ? raw.masked_secret.trim()
+      : typeof raw?.maskedSecret === "string" && raw.maskedSecret.trim().length > 0
+      ? raw.maskedSecret.trim()
+      : null
+
+  const secretConfigured = Boolean(
+    raw?.secret_configured ?? raw?.secretConfigured ?? (maskedSecret !== null && maskedSecret.length > 0)
+  )
+
+  return {
+    enabled: Boolean(raw?.enabled ?? true),
+    totalSubmissions,
+    syncedCount: Number(raw?.synced_count ?? raw?.syncedCount ?? totalSubmissions),
+    lastSyncedAt: (raw?.last_synced_at ?? raw?.lastSyncedAt ?? null) as string | null,
+    secretConfigured,
+    maskedSecret,
+    recentSubmissions,
+  }
+}
+
 

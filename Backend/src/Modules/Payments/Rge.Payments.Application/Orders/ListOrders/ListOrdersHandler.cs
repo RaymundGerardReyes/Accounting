@@ -14,21 +14,6 @@ namespace Rge.Payments.Application.Orders.ListOrders;
 
 public sealed class ListOrdersHandler : IQueryHandler<ListOrdersQuery, IReadOnlyList<OrderDto>>
 {
-    private static readonly HashSet<string> PrivilegedLedgerRoles = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Admin",
-        "SuperAdmin",
-        "SystemAdmin",
-        "system_admin",
-        "Finance",
-        "FinanceAdmin",
-        "finance_admin",
-        "FinanceManager",
-        "Accountant",
-        "Treasury",
-        "Auditor"
-    };
-
     private readonly IOrderRepository _orderRepository;
     private readonly IPaymentAttemptRepository _attemptRepository;
     private readonly ICurrentActor _currentActor;
@@ -55,21 +40,34 @@ public sealed class ListOrdersHandler : IQueryHandler<ListOrdersQuery, IReadOnly
 
         int effectiveLimit = Math.Clamp(query.Limit, 1, 100);
 
-        bool isPrivilegedViewer = _currentActor.IsInRole("admin")
-            || _currentActor.IsInRole("finance_admin")
-            || _currentActor.IsInRole("system_admin")
-            || (_currentActor.Roles is not null && _currentActor.Roles.Any(r => PrivilegedLedgerRoles.Contains(r)));
-
-        bool isSystemBridge = string.IsNullOrWhiteSpace(_currentActor.UserId)
+        // System/anonymous actors or unauthenticated callers should never be scoped down to an empty ledger
+        bool isAnonymousOrSystemBridge = !_currentActor.IsAuthenticated
+            || string.IsNullOrWhiteSpace(_currentActor.UserId)
+            || string.Equals(_currentActor.UserId, "anonymous", StringComparison.OrdinalIgnoreCase)
             || _currentActor.UserId == Guid.Empty.ToString()
             || _currentActor.UserId == "00000000-0000-0000-0000-000000000000";
 
-        string? tenantUserIdFilter = isPrivilegedViewer || isSystemBridge
-            ? null
-            : _currentActor.UserId;
+        // Only restrict to a single UserId if explicitly requested in the query
+        // OR if the authenticated caller is strictly an isolated Customer / end-user actor.
+        var isRestrictedCustomerActor =
+            !isAnonymousOrSystemBridge &&
+            _currentActor.IsAuthenticated &&
+            _currentActor.Roles is { Count: > 0 } &&
+            _currentActor.Roles.All(r =>
+                string.Equals(r, "Customer", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(r, "user", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(r, "student", StringComparison.OrdinalIgnoreCase));
+
+        string? effectiveUserId = !string.IsNullOrWhiteSpace(query.UserId) &&
+                                  !string.Equals(query.UserId, Guid.Empty.ToString(), StringComparison.OrdinalIgnoreCase) &&
+                                  !string.Equals(query.UserId, "00000000-0000-0000-0000-000000000000", StringComparison.OrdinalIgnoreCase)
+            ? query.UserId
+            : isRestrictedCustomerActor
+                ? _currentActor.UserId
+                : null;
 
         IReadOnlyList<Order> orders = await _orderRepository
-            .ListAsync(query.Status, effectiveLimit, tenantUserIdFilter, cancellationToken)
+            .ListAsync(query.Status, effectiveLimit, effectiveUserId, cancellationToken)
             .ConfigureAwait(false);
 
         if (orders.Count == 0)

@@ -47,6 +47,8 @@ import {
   WebhookEventRecord,
   FulfillmentOutboxRecord,
   formatPhpFromMinor,
+  getGoogleFormsStatus,
+  GoogleFormsStatus,
 } from "@/lib/payment-api"
 import { CurrencyDisplay, FinancialStatusBadge } from "@/components/ui/financial-primitives"
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card"
@@ -872,24 +874,14 @@ export function PaymentsHub() {
   const [mounted, setMounted] = useState(false)
   const [gformsIngestUrl, setGformsIngestUrl] = useState<string>("/api/v1/integrations/google-forms/submit")
   const [gformsSecret, setGformsSecret] = useState<string>("")
-  const [googleFormsStatus, setGoogleFormsStatus] = useState<{
-    secretConfigured: boolean
-    maskedSecret?: string
-    ingestedOrdersCount?: number
-  } | null>(null)
+  const [googleFormsStatus, setGoogleFormsStatus] = useState<GoogleFormsStatus | null>(null)
 
   const loadGoogleFormsStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/v1/integrations/google-forms/status", {
-        method: "GET",
-        credentials: "include",
-        headers: { Accept: "application/json" },
-      })
-      if (!res.ok) return
-      const data = await res.json()
-      setGoogleFormsStatus(data)
-      if (data.maskedSecret) {
-        setGformsSecret(data.maskedSecret)
+      const status = await getGoogleFormsStatus()
+      setGoogleFormsStatus(status)
+      if (status.maskedSecret) {
+        setGformsSecret(status.maskedSecret)
       }
     } catch {
       // Keep last known status during transient network blips
@@ -959,12 +951,13 @@ export function PaymentsHub() {
     try {
       await Promise.all([
         loadOrders(false),
+        loadGoogleFormsStatus(),
         isAdminRef.current ? loadAdminDiagnostics() : Promise.resolve(),
       ])
     } finally {
       setActionLoading(false)
     }
-  }, [loadOrders, loadAdminDiagnostics])
+  }, [loadOrders, loadGoogleFormsStatus, loadAdminDiagnostics])
 
   // Initial order load on mount
   useEffect(() => {
@@ -985,13 +978,14 @@ export function PaymentsHub() {
         return
       }
       loadOrders(false)
+      loadGoogleFormsStatus()
       if (isAdminRef.current) {
         loadAdminDiagnostics()
       }
     }, 4000)
 
     return () => clearInterval(interval)
-  }, [loadOrders, loadAdminDiagnostics])
+  }, [loadOrders, loadGoogleFormsStatus, loadAdminDiagnostics])
 
   useEffect(() => {
     setMounted(true)
@@ -1261,6 +1255,8 @@ export function PaymentsHub() {
       setActionLoading(false)
     }
   }
+
+  
 
   const totalVolumeMinor = orders
     .filter((o) => o.status === "paid")

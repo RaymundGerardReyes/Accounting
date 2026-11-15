@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
@@ -16,6 +17,17 @@ public sealed class GetFormStatusHandler :
     IQueryHandler<GetGoogleFormsStatusQuery, GoogleFormsStatusResponse>,
     IQueryHandler<GetFormStatusQuery, GoogleFormStatusResponse>
 {
+    private static readonly string[] SecretCandidateKeys =
+    [
+        "GOOGLE_FORMS_SECRET",
+        "GOOGLE_FORMS_SHARED_SECRET",
+        "Secrets:GoogleFormsSecret",
+        "Secrets__GoogleFormsSecret",
+        "GoogleForms:WebhookSecret",
+        "GoogleForms:SharedSecret",
+        "google_forms_secret"
+    ];
+
     private readonly IGoogleFormsSubmissionStore _store;
     private readonly IConfiguration _configuration;
     private readonly ISecretStore? _secretStore;
@@ -41,26 +53,34 @@ public sealed class GetFormStatusHandler :
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        var configuredSecret = _secretStore?.GetSecret("GOOGLE_FORMS_SECRET")
-            ?? _configuration["GoogleForms:WebhookSecret"]
-            ?? _configuration["GOOGLE_FORMS_SECRET"]
-            ?? Environment.GetEnvironmentVariable("GOOGLE_FORMS_SECRET");
+        var submissions = await _store.GetAllAsync(cancellationToken).ConfigureAwait(false);
+        var resolvedSecret = ResolveSecret();
 
-        var hasSecret = !string.IsNullOrWhiteSpace(configuredSecret);
-        string? maskedSecret = null;
+        var secretConfigured = !string.IsNullOrWhiteSpace(resolvedSecret);
+        var maskedSecret = MaskSecret(resolvedSecret);
 
-        if (hasSecret && configuredSecret is not null)
-        {
-            var trimmed = configuredSecret.Trim();
-            maskedSecret = trimmed.Length > 4
-                ? $"••••••••{trimmed[^4..]}"
-                : "••••••••";
-        }
+        var recentDtos = submissions
+            .OrderByDescending(s => s.SubmittedAtUtc)
+            .Take(50)
+            .Select(s => new GoogleFormSubmissionDto(
+                s.OrderId ?? $"ord_{s.ResponseId}",
+                s.OrderNumber ?? $"ORD-{s.SubmittedAtUtc:yyyyMM}-{s.ResponseId[..Math.Min(4, s.ResponseId.Length)]}",
+                s.ResponseId,
+                s.CustomerName,
+                s.CustomerEmail,
+                s.ItemReference,
+                s.Amount.AmountMinor,
+                "pending",
+                s.SubmittedAtUtc))
+            .ToList();
 
-        var storeStatus = await _store.GetStatusAsync(cancellationToken).ConfigureAwait(false);
-        int total = storeStatus.IngestedOrdersCount;
-        int paid = storeStatus.PaidOrdersCount;
-        int pending = storeStatus.PendingOrdersCount;
+        var lastSyncedAt = submissions.Count > 0
+            ? submissions.Max(s => s.SubmittedAtUtc)
+            : (DateTimeOffset?)null;
+
+        int total = submissions.Count;
+        int paid = 0;
+        int pending = total;
 
         if (_orderBridge is not null)
         {
@@ -73,20 +93,22 @@ public sealed class GetFormStatusHandler :
             pending = bridgePending;
         }
 
-        var response = new GoogleFormsStatusResponse(
+        return Result.Success(new GoogleFormsStatusResponse(
+            Enabled: true,
+            TotalSubmissions: total,
+            SyncedCount: total,
+            LastSyncedAt: lastSyncedAt,
+            RecentSubmissions: recentDtos,
+            SecretConfigured: secretConfigured,
+            MaskedSecret: maskedSecret,
             Status: "active",
             IngestedOrdersCount: total,
             PaidOrdersCount: paid,
             PendingOrdersCount: pending,
-            SecretConfigured: hasSecret,
-            MaskedSecret: maskedSecret,
-            Enabled: true,
             WebhookEndpoint: "/api/v1/integrations/google-forms/submit",
             AuthHeaderName: "X-Google-Forms-Secret",
             HeartbeatInterval: "Active (4s interval)",
-            ScriptTemplatePath: "scripts/google_apps_script/Code.gs");
-
-        return Result.Success(response);
+            ScriptTemplatePath: "scripts/google_apps_script/Code.gs"));
     }
 
     public async Task<Result<GoogleFormStatusResponse>> HandleAsync(
@@ -109,5 +131,49 @@ public sealed class GetFormStatusHandler :
             MaskedSecret: r.MaskedSecret);
 
         return Result.Success(response);
+    }
+
+    private string? ResolveSecret()
+    {
+        foreach (var key in SecretCandidateKeys)
+        {
+            if (_secretStore is not null)
+            {
+                var fromStore = _secretStore.GetSecret(key);
+                if (!string.IsNullOrWhiteSpace(fromStore))
+                {
+                    return fromStore.Trim();
+                }
+            }
+
+            var fromConfig = _configuration[key];
+            if (!string.IsNullOrWhiteSpace(fromConfig))
+            {
+                return fromConfig.Trim();
+            }
+
+            var fromEnv = Environment.GetEnvironmentVariable(key);
+            if (!string.IsNullOrWhiteSpace(fromEnv))
+            {
+                return fromEnv.Trim();
+            }
+        }
+
+        return null;
+    }
+
+    private static string? MaskSecret(string? secret)
+    {
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            return null;
+        }
+
+        var trimmed = secret.Trim();
+        var visibleSuffix = trimmed.Length <= 4
+            ? trimmed
+            : trimmed[^4..];
+
+        return $"••••••••{visibleSuffix}";
     }
 }

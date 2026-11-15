@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Rge.Integrations.Contracts;
 
 public sealed record SaveCredentialsRequest(
@@ -81,17 +83,32 @@ public sealed record IntegrationStatusResponse(
     Dictionary<string, object> Integrations);
 
 public sealed record GoogleFormsStatusResponse(
-    string Status,
-    int IngestedOrdersCount,
-    int PaidOrdersCount,
-    int PendingOrdersCount,
-    bool SecretConfigured,
-    string? MaskedSecret = null,
-    bool Enabled = true,
-    string WebhookEndpoint = "/api/v1/integrations/google-forms/submit",
-    string AuthHeaderName = "X-Google-Forms-Secret",
-    string HeartbeatInterval = "Active (4s interval)",
-    string ScriptTemplatePath = "scripts/google_apps_script/Code.gs");
+    [property: JsonPropertyName("enabled")] bool Enabled = true,
+    [property: JsonPropertyName("total_submissions")] int TotalSubmissions = 0,
+    [property: JsonPropertyName("synced_count")] int SyncedCount = 0,
+    [property: JsonPropertyName("last_synced_at")] DateTimeOffset? LastSyncedAt = null,
+    [property: JsonPropertyName("recent_submissions")] IReadOnlyList<GoogleFormSubmissionDto>? RecentSubmissions = null,
+    [property: JsonPropertyName("secret_configured")] bool SecretConfigured = false,
+    [property: JsonPropertyName("masked_secret")] string? MaskedSecret = null,
+    [property: JsonPropertyName("status")] string Status = "active",
+    [property: JsonPropertyName("ingested_orders_count")] int IngestedOrdersCount = 0,
+    [property: JsonPropertyName("paid_orders_count")] int PaidOrdersCount = 0,
+    [property: JsonPropertyName("pending_orders_count")] int PendingOrdersCount = 0,
+    [property: JsonPropertyName("webhook_endpoint")] string WebhookEndpoint = "/api/v1/integrations/google-forms/submit",
+    [property: JsonPropertyName("auth_header_name")] string AuthHeaderName = "X-Google-Forms-Secret",
+    [property: JsonPropertyName("heartbeat_interval")] string HeartbeatInterval = "Active (4s interval)",
+    [property: JsonPropertyName("script_template_path")] string ScriptTemplatePath = "scripts/google_apps_script/Code.gs");
+
+public sealed record GoogleFormSubmissionDto(
+    [property: JsonPropertyName("order_id")] string OrderId,
+    [property: JsonPropertyName("order_number")] string OrderNumber,
+    [property: JsonPropertyName("response_id")] string ResponseId,
+    [property: JsonPropertyName("customer_name")] string CustomerName,
+    [property: JsonPropertyName("customer_email")] string CustomerEmail,
+    [property: JsonPropertyName("description")] string Description,
+    [property: JsonPropertyName("amount_centavos")] long AmountCentavos,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt);
 
 public sealed record GoogleFormStatusResponse(
     bool Enabled,
@@ -124,6 +141,7 @@ public sealed record GoogleFormSubmissionRequest(
     string? BookTitle,
     string? Secret,
     string? SecretKey);
+
 
 public sealed record GoogleFormSubmissionResponse(
     string Status,

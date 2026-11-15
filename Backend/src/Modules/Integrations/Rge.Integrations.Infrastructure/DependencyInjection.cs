@@ -26,7 +26,9 @@ public static class DependencyInjection
         services.AddSingleton<ISmtpClientFactory>(sp => sp.GetRequiredService<SmtpClientFactory>());
         services.AddSingleton<ISmtpProbe>(sp => sp.GetRequiredService<SmtpClientFactory>());
         services.AddSingleton<FormSecretVerifier>();
-        services.AddSingleton<IGoogleFormsSubmissionStore, InMemoryGoogleFormsStore>();
+        services.AddSingleton<PgGoogleFormsStore>();
+        services.AddSingleton<IGoogleFormsStore>(sp => sp.GetRequiredService<PgGoogleFormsStore>());
+        services.AddSingleton<IGoogleFormsSubmissionStore>(sp => sp.GetRequiredService<PgGoogleFormsStore>());
 
         services.AddScoped<SaveCredentialsHandler>();
         services.AddScoped<TestSmtpHandler>();
@@ -36,6 +38,10 @@ public static class DependencyInjection
         services.AddScoped<SubmitGoogleFormHandler>();
         services.AddScoped<SheetSyncHandlerHandler>();
 
+        services.AddScoped<ISecretStore, SecretStoreWriter>();
+        services.AddScoped<IGoogleSheetsClient, GoogleSheetsClient>();
+        services.AddScoped<ISmtpClientFactory, SmtpClientFactory>();
+        
         return services;
     }
 }

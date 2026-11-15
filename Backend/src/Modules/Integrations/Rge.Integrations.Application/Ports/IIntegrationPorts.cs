@@ -29,12 +29,23 @@ public interface IIntegrationDiagnosticProbe
     Task<IntegrationStatusResponse> ProbeAllAsync(CancellationToken cancellationToken = default);
 }
 
+public interface IGoogleFormsStore
+{
+    Task<(GoogleFormSubmission Submission, bool CreatedNew)> UpsertSubmissionAsync(
+        GoogleFormSubmission submission,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<GoogleFormSubmission>> GetAllAsync(
+        CancellationToken cancellationToken = default);
+}
+
 public interface IGoogleFormsSubmissionStore
 {
     Task<GoogleFormsStatusResponse> GetStatusAsync(CancellationToken cancellationToken = default);
     Task SaveSubmissionAsync(GoogleFormSubmission submission, CancellationToken cancellationToken = default);
     Task<GoogleFormSubmission?> GetByResponseIdAsync(string responseId, CancellationToken cancellationToken = default);
     Task<int> CountAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<GoogleFormSubmission>> GetAllAsync(CancellationToken cancellationToken = default);
 }
 
 public interface IGoogleSheetsClient

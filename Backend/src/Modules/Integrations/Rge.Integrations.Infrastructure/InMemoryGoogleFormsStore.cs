@@ -42,5 +42,8 @@ public sealed class InMemoryGoogleFormsStore : IGoogleFormsSubmissionStore
 
     public Task<int> CountAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(_byResponseId.Count);
+
+    public Task<IReadOnlyList<GoogleFormSubmission>> GetAllAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<GoogleFormSubmission>>(_byResponseId.Values.ToList());
 }
 

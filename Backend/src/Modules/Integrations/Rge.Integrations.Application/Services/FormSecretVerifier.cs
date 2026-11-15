@@ -10,6 +10,17 @@ public sealed class FormSecretVerifier
     private const string RotatedVaultSecret = "rge_gforms_rotated_vault_secret_2026";
     private const string DefaultDevSecret = "gforms_secret_test_2026";
 
+    private static readonly string[] SecretCandidateKeys =
+    [
+        "GOOGLE_FORMS_SECRET",
+        "GOOGLE_FORMS_SHARED_SECRET",
+        "Secrets:GoogleFormsSecret",
+        "Secrets__GoogleFormsSecret",
+        "GoogleForms:WebhookSecret",
+        "GoogleForms:SharedSecret",
+        "google_forms_secret"
+    ];
+
     private readonly ISecretStore? _secretStore;
 
     public FormSecretVerifier(ISecretStore? secretStore = null)
@@ -19,11 +30,28 @@ public sealed class FormSecretVerifier
 
     public string GetExpectedSecret()
     {
-        string raw = _secretStore?.GetSecret("GOOGLE_FORMS_SECRET")
-            ?? Environment.GetEnvironmentVariable("GOOGLE_FORMS_SECRET")
-            ?? DefaultLiveSecret;
+        if (_secretStore is not null)
+        {
+            foreach (var key in SecretCandidateKeys)
+            {
+                var val = _secretStore.GetSecret(key);
+                if (!string.IsNullOrWhiteSpace(val))
+                {
+                    return Normalize(val);
+                }
+            }
+        }
 
-        return Normalize(raw);
+        foreach (var key in SecretCandidateKeys)
+        {
+            var envVal = Environment.GetEnvironmentVariable(key);
+            if (!string.IsNullOrWhiteSpace(envVal))
+            {
+                return Normalize(envVal);
+            }
+        }
+
+        return DefaultLiveSecret;
     }
 
     public bool IsValid(string? candidateSecret)

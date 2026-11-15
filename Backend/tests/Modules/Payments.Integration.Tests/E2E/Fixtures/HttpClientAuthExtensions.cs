@@ -95,7 +95,7 @@ public sealed class CapturingSmtpClientFactory : ISmtpClientFactory
     }
 
     public Task<EmailTestResponse> TestSmtpAsync(EmailTestRequest request, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new EmailTestResponse(true, new SmtpProbeResult("OK", 5, "smtp.mock.test", "ok"), null));
+        Task.FromResult(new EmailTestResponse(true, new SmtpProbeResult("OPERATIONAL", 15, "smtp.mock.test", "ok")));
 
     public Task<SmtpExecutionResult> VerifyHandshakeAsync(CancellationToken ct = default) =>
         Task.FromResult(new SmtpExecutionResult(true, 5, "handshake ok"));
@@ -104,5 +104,5 @@ public sealed class CapturingSmtpClientFactory : ISmtpClientFactory
         Task.FromResult(new SmtpExecutionResult(true, 5, "verification email sent"));
 
     public SmtpRuntimeSettings ResolveSettings() =>
-        new SmtpRuntimeSettings("smtp.mock.test", 587, "mock_user", "mock_pass", "orders@test.com", "RGE Accounting", true, "treasury@test.com");
+        new("smtp.mock.test", 587, "mock_user", "mock_pass", "orders@test.com", "Accounting Mailer", true, "treasury@test.com");
 }
