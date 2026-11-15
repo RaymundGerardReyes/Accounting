@@ -9,13 +9,10 @@ namespace Rge.BuildingBlocks.Application.Behaviors;
 
 
 public interface IApplicationCache
-
 {
-
     ValueTask<T?> GetAsync<T>(string key, CancellationToken cancellationToken = default);
-
     ValueTask SetAsync<T>(string key, T value, TimeSpan expiration, CancellationToken cancellationToken = default);
-
+    ValueTask InvalidateByTagAsync(string tag, CancellationToken ct = default) => ValueTask.CompletedTask;
 }
 
 

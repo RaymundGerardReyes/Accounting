@@ -37,6 +37,8 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
     private readonly CacheInvalidator _cacheInvalidator;
     private readonly Microsoft.Extensions.Logging.ILogger<GoogleFormOrderBridge> _logger;
     private readonly InitiateAttemptHandler _initiateAttemptHandler;
+    private readonly IGoogleFormsStore? _googleFormsStore;
+    private readonly IPaymentStatusNotifier? _paymentStatusNotifier;
 
     public GoogleFormOrderBridge(
         IOrderRepository orderRepository,
@@ -48,7 +50,9 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
         Rge.Integrations.Infrastructure.SmtpClientFactory smtpClientFactory,
         CacheInvalidator cacheInvalidator,
         Microsoft.Extensions.Logging.ILogger<GoogleFormOrderBridge> logger,
-        InitiateAttemptHandler initiateAttemptHandler)
+        InitiateAttemptHandler initiateAttemptHandler,
+        IGoogleFormsStore? googleFormsStore = null,
+        IPaymentStatusNotifier? paymentStatusNotifier = null)
     {
         ArgumentNullException.ThrowIfNull(orderRepository);
         ArgumentNullException.ThrowIfNull(attemptRepository);
@@ -71,6 +75,8 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
         _cacheInvalidator = cacheInvalidator;
         _logger = logger;
         _initiateAttemptHandler = initiateAttemptHandler;
+        _googleFormsStore = googleFormsStore;
+        _paymentStatusNotifier = paymentStatusNotifier;
     }
 
     public async Task<GoogleFormOrderCreationResult> CreateOrderAndInitiateCheckoutAsync(
@@ -278,9 +284,12 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
             createdNew = false;
             orderId = existingOrder.Id;
             orderNumber = existingOrder.OrderNumber;
-            persistedStatus = string.Equals(existingOrder.Status, "paid", StringComparison.OrdinalIgnoreCase)
-                ? "paid"
-                : persistedStatus;
+
+            PaymentAttempt? latestAttempt = await _attemptRepository
+                .GetLatestByOrderIdAsync(existingOrder.Id, cancellationToken)
+                .ConfigureAwait(false);
+
+            persistedStatus = ResolveEffectiveStatus(existingOrder.Status, latestAttempt?.Status.ToString());
 
             Order updated = Order.Rehydrate(
                 id: existingOrder.Id,
@@ -296,6 +305,22 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
                 updatedAt: _clock.UtcNow);
 
             await _orderRepository.SaveAsync(updated, cancellationToken).ConfigureAwait(false);
+
+            if (_googleFormsStore is not null)
+            {
+                await _googleFormsStore.UpsertSubmissionAsync(
+                    new GoogleFormSubmission(
+                        ResponseId: request.ResponseId,
+                        OrderId: existingOrder.Id,
+                        OrderNumber: existingOrder.OrderNumber,
+                        CustomerName: request.CustomerName,
+                        CustomerEmail: request.CustomerEmail,
+                        Description: request.ProductTitle,
+                        AmountCentavos: request.TotalAmountMinor,
+                        Status: persistedStatus,
+                        CreatedAt: existingOrder.CreatedAt),
+                    cancellationToken).ConfigureAwait(false);
+            }
         }
         else
         {
@@ -313,9 +338,47 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
                 updatedAt: request.SubmittedAt.ToUniversalTime());
 
             await _orderRepository.SaveAsync(newOrder, cancellationToken).ConfigureAwait(false);
+
+            if (_googleFormsStore is not null)
+            {
+                await _googleFormsStore.UpsertSubmissionAsync(
+                    new GoogleFormSubmission(
+                        ResponseId: request.ResponseId,
+                        OrderId: newOrder.Id,
+                        OrderNumber: newOrder.OrderNumber,
+                        CustomerName: request.CustomerName,
+                        CustomerEmail: request.CustomerEmail,
+                        Description: request.ProductTitle,
+                        AmountCentavos: request.TotalAmountMinor,
+                        Status: persistedStatus,
+                        CreatedAt: newOrder.CreatedAt),
+                    cancellationToken).ConfigureAwait(false);
+            }
         }
 
         await _cacheInvalidator.InvalidateByTagAsync("orders", cancellationToken).ConfigureAwait(false);
+        _cacheInvalidator.InvalidateByPrefix("orders:");
+        _cacheInvalidator.InvalidateByPrefix("google-forms:");
+        Rge.Payments.Infrastructure.Persistence.Repositories.OrderRepository.InvalidateListCache();
+
+        if (_paymentStatusNotifier is not null)
+        {
+            try
+            {
+                await _paymentStatusNotifier.NotifyPaymentStatusChangedAsync(
+                    transactionId: orderId,
+                    newStatus: persistedStatus,
+                    occurredAtUtc: _clock.UtcNow,
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                if (_logger.IsEnabled(LogLevel.Debug))
+                {
+                    _logger.LogDebug(ex, "Non-fatal SignalR broadcast error during Google Form order bridge for {OrderId}", orderId);
+                }
+            }
+        }
 
         string idempotencyKey = $"gf_attempt_{request.ResponseId}";
         string appBaseUrl = (_configuration["NEXT_PUBLIC_APP_URL"]
@@ -503,6 +566,32 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
             _logger.LogWarning(ex, "Failed bridging submission {ResponseId} into orders ledger.", submission.ResponseId);
             return Result.Failure<BridgedGoogleFormOrder>(new Error("Bridge.Failure", ex.Message, ErrorType.Failure));
         }
+    }
+
+    private static string ResolveEffectiveStatus(string? orderStatus, string? attemptStatus)
+    {
+        var normOrder = (orderStatus ?? string.Empty).Trim().ToLowerInvariant();
+        var normAttempt = (attemptStatus ?? string.Empty).Trim().ToLowerInvariant();
+
+        if (normOrder is "paid" or "succeeded" or "completed" or "settled" ||
+            normAttempt is "paid" or "succeeded" or "completed" or "settled")
+        {
+            return "paid";
+        }
+
+        if (normOrder is "cancelled" or "canceled" ||
+            normAttempt is "cancelled" or "canceled")
+        {
+            return "cancelled";
+        }
+
+        if (normOrder is "expired" or "failed" or "abandoned" ||
+            normAttempt is "expired" or "failed" or "abandoned")
+        {
+            return "expired";
+        }
+
+        return "pending";
     }
 
     private static string ComputeShortHash(string input)
