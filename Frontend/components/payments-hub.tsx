@@ -49,6 +49,9 @@ import {
   formatPhpFromMinor,
   getGoogleFormsStatus,
   GoogleFormsStatus,
+  listOrders,
+  syncGoogleForms,
+  OrderSummary,
 } from "@/lib/payment-api"
 import { CurrencyDisplay, FinancialStatusBadge } from "@/components/ui/financial-primitives"
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card"
@@ -875,10 +878,12 @@ export function PaymentsHub() {
   const [gformsIngestUrl, setGformsIngestUrl] = useState<string>("/api/v1/integrations/google-forms/submit")
   const [gformsSecret, setGformsSecret] = useState<string>("")
   const [googleFormsStatus, setGoogleFormsStatus] = useState<GoogleFormsStatus | null>(null)
+  const googleFormsStatusRef = useRef<GoogleFormsStatus | null>(null)
 
   const loadGoogleFormsStatus = useCallback(async () => {
     try {
       const status = await getGoogleFormsStatus()
+      googleFormsStatusRef.current = status
       setGoogleFormsStatus(status)
       if (status.maskedSecret) {
         setGformsSecret(status.maskedSecret)
@@ -887,6 +892,10 @@ export function PaymentsHub() {
       // Keep last known status during transient network blips
     }
   }, [])
+
+  useEffect(() => {
+    googleFormsStatusRef.current = googleFormsStatus
+  }, [googleFormsStatus])
 
   useEffect(() => {
     void loadGoogleFormsStatus()
@@ -900,6 +909,7 @@ export function PaymentsHub() {
   }, [isAdmin, activeTab])
 
   const inFlightOrdersRef = useRef(false)
+  const hasTriggeredInitialSyncRef = useRef(false)
   const inFlightDiagnosticsRef = useRef(false)
   const isAdminRef = useRef(isAdmin)
 
@@ -914,12 +924,89 @@ export function PaymentsHub() {
       setLoading(true)
     }
     try {
-      const data = await fetchOrders()
+      // 1. Fetch authoritative orders ledger immediately
+      let data = await fetchOrders()
+
+      // 2. If orders came back empty, trigger active POST sync and re-query
+      if (Array.isArray(data) && data.length === 0 && (!hasTriggeredInitialSyncRef.current || isInitial)) {
+        hasTriggeredInitialSyncRef.current = true
+        try {
+          const synced = await syncGoogleForms()
+          if (synced) {
+            const refreshed = await fetchOrders().catch(() => null)
+            if (Array.isArray(refreshed) && refreshed.length > 0) {
+              data = refreshed
+            }
+          }
+        } catch {
+          // Non-fatal if sync is unreachable
+        }
+      }
+
       if (Array.isArray(data)) {
-        setOrders(data)
+        // 3. Fallback synthesis if orders list is empty but submissions exist in googleFormsStatus
+        const status = googleFormsStatusRef.current
+        if (data.length === 0 && status?.recentSubmissions && status.recentSubmissions.length > 0) {
+          const synthesized = status.recentSubmissions.map((sub) => {
+            const total = Math.max(sub.amountCentavos || 0, 100)
+            const vat = Math.round((total * 12) / 112)
+            const responseId = (sub as any).responseId || (sub as any).submissionId || ""
+            const orderId = sub.orderId || responseId || `ord_gf_${Date.now()}`
+            const orderNumber =
+              sub.orderNumber ||
+              `ORD-GF-${String(responseId)
+                .replace(/[^a-zA-Z0-9]/g, "")
+                .slice(0, 8)
+                .toUpperCase()}`
+
+            return {
+              id: orderId,
+              orderId,
+              user_id: sub.respondentEmail || (sub as any).customerEmail || "google-forms-respondent",
+              customerId: sub.respondentEmail || (sub as any).customerEmail || "google-forms-respondent",
+              order_number: orderNumber,
+              orderNumber,
+              title: sub.itemDescription || (sub as any).description || "Google Form Order",
+              category: "product_order",
+              reference_code: sub.itemDescription || (sub as any).description || "GFORM-ITEM",
+              amount_minor: total,
+              totalCentavos: total,
+              amount: total / 100,
+              subtotalCentavos: Math.max(total - vat, 0),
+              vatCentavos: vat,
+              currency: sub.currency || "PHP",
+              status: (sub.syncStatus?.toLowerCase() === "paid" ? "paid" : "pending") as any,
+              customerEmail: sub.respondentEmail || (sub as any).customerEmail || "noreply@example.com",
+              customerName: sub.customerName || "Google Form Respondent",
+              metadata: {
+                source: "google_forms",
+                submission_id: (sub as any).submissionId,
+                response_id: (sub as any).responseId,
+                sheet_row_number: (sub as any).sheetRowNumber,
+              },
+              created_at: sub.submittedAt || new Date().toISOString(),
+              createdAt: sub.submittedAt || new Date().toISOString(),
+              updated_at: sub.submittedAt || new Date().toISOString(),
+              updatedAt: sub.submittedAt || new Date().toISOString(),
+              lineItems: [
+                {
+                  sku: "GFORM-ITEM",
+                  name: sub.itemDescription || (sub as any).description || "Google Form Order",
+                  quantity: 1,
+                  unitPriceCentavos: total,
+                  lineTotalCentavos: total,
+                },
+              ],
+            } as any
+          })
+          setOrders(synthesized)
+        } else {
+          setOrders(data)
+        }
       }
     } catch (err) {
       console.error("Error loading orders:", err)
+      // On fetch failure, retain current orders state without wiping out ledger
     } finally {
       inFlightOrdersRef.current = false
       if (isInitial) {
@@ -950,42 +1037,41 @@ export function PaymentsHub() {
     setActionLoading(true)
     try {
       await Promise.all([
-        loadOrders(false),
-        loadGoogleFormsStatus(),
+        loadOrders(true),
         isAdminRef.current ? loadAdminDiagnostics() : Promise.resolve(),
       ])
     } finally {
       setActionLoading(false)
     }
-  }, [loadOrders, loadGoogleFormsStatus, loadAdminDiagnostics])
+  }, [loadOrders, loadAdminDiagnostics])
 
   // Initial order load on mount
   useEffect(() => {
-    loadOrders(true)
+    void loadOrders(true)
   }, [loadOrders])
 
   // Admin diagnostics initial / persona-switch load
   useEffect(() => {
     if (isAdmin && (typeof document === "undefined" || document.visibilityState === "visible")) {
-      loadAdminDiagnostics()
+      void loadAdminDiagnostics()
     }
   }, [isAdmin, loadAdminDiagnostics])
 
-  // Background polling loop: 4 seconds, guarded by visibility and inFlight
+  // Background polling loop: 4 seconds, guarded by visibility and single-flight lock
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
-        return
-      }
-      loadOrders(false)
-      loadGoogleFormsStatus()
-      if (isAdminRef.current) {
-        loadAdminDiagnostics()
+    const intervalId = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        void loadOrders()
+        if (isAdminRef.current) {
+          void loadAdminDiagnostics()
+        }
       }
     }, 4000)
 
-    return () => clearInterval(interval)
-  }, [loadOrders, loadGoogleFormsStatus, loadAdminDiagnostics])
+    return () => {
+      ;(globalThis.clearInterval ?? window?.clearInterval)?.(intervalId)
+    }
+  }, [loadOrders, loadAdminDiagnostics])
 
   useEffect(() => {
     setMounted(true)

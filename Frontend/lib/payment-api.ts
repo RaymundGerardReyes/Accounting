@@ -203,11 +203,8 @@ export function formatPhpFromMinor(amountMinor: number): string {
   }).format(php)
 }
 
-export async function fetchOrders(status?: string): Promise<Order[]> {
-  const url = status ? `${API_BASE}/api/v1/orders?status=${status}` : `${API_BASE}/api/v1/orders`
-  const res = await fetch(url, { cache: "no-store" })
-  if (!res.ok) throw new Error(`Failed to fetch orders: ${res.statusText}`)
-  return res.json()
+export async function fetchOrders(status?: string): Promise<OrderSummary[]> {
+  return listOrders(status)
 }
 
 export async function fetchOrder(orderId: string): Promise<Order & { attempts: PaymentAttempt[] }> {
@@ -656,33 +653,180 @@ function jsonStringifyWithFallback(data: any): string {
   return JSON.stringify(data)
 }
 
-export interface GoogleFormSubmissionSummary {
-  orderId: string
-  orderNumber: string
+export interface GoogleFormsSubmissionSummary {
+  submissionId: string
   responseId: string
+  respondentEmail: string
   customerName: string
-  customerEmail: string
-  description: string
+  itemDescription: string
   amountCentavos: number
-  status: string
-  createdAt: string
+  currency: string
+  orderId?: string | null
+  orderNumber?: string | null
+  syncStatus: string
+  submittedAt: string
 }
 
-export interface GoogleFormsStatus {
-  enabled: boolean
-  totalSubmissions: number
-  syncedCount: number
-  lastSyncedAt: string | null
+export type GoogleFormSubmissionSummary = GoogleFormsSubmissionSummary
+
+export interface GoogleFormsIntegrationStatus {
+  configured: boolean
   secretConfigured: boolean
   maskedSecret: string | null
-  recentSubmissions: GoogleFormSubmissionSummary[]
+  webhookEndpoint: string
+  totalSubmissions: number
+  bridgedOrdersCount: number
+  lastSubmissionAt: string | null
+  recentSubmissions: GoogleFormsSubmissionSummary[]
 }
 
-export async function listOrders(status?: string): Promise<Order[]> {
-  return fetchOrders(status)
+export type GoogleFormsStatus = GoogleFormsIntegrationStatus & {
+  enabled?: boolean
+  syncedCount?: number
+  lastSyncedAt?: string | null
 }
 
-export async function getGoogleFormsStatus(): Promise<GoogleFormsStatus> {
+export interface OrderSummary extends Order {
+  orderId: string
+  orderNumber: string
+  customerId: string
+  customerEmail: string
+  customerName: string
+  subtotalCentavos: number
+  vatCentavos: number
+  totalCentavos: number
+  lineItems: Array<{
+    sku: string
+    name: string
+    quantity: number
+    unitPriceCentavos: number
+    lineTotalCentavos: number
+  }>
+}
+
+export function normalizeOrderDto(raw: Record<string, unknown>): OrderSummary {
+  const rawItems = (raw.lineItems ?? raw.line_items ?? []) as Array<Record<string, unknown>>
+  const totalCentavos = Number(
+    raw.totalCentavos ??
+      raw.total_centavos ??
+      raw.amount_minor ??
+      raw.amountMinor ??
+      raw.amountCentavos ??
+      raw.amount_centavos ??
+      0
+  )
+  const vatCentavos = Number(
+    raw.vatCentavos ?? raw.vat_centavos ?? Math.round((totalCentavos * 12) / 112)
+  )
+  const subtotalCentavos = Number(
+    raw.subtotalCentavos ?? raw.subtotal_centavos ?? Math.max(totalCentavos - vatCentavos, 0)
+  )
+
+  const orderId = String(raw.orderId ?? raw.order_id ?? raw.id ?? "")
+  const orderNumber = String(raw.orderNumber ?? raw.order_number ?? "ORD-UNKNOWN")
+  const customerId = String(
+    raw.customerId ?? raw.customer_id ?? raw.customerEmail ?? raw.customer_email ?? raw.user_id ?? ""
+  )
+  const customerEmail = String(raw.customerEmail ?? raw.customer_email ?? "")
+  const customerName = String(raw.customerName ?? raw.customer_name ?? "Customer")
+  const category = String(raw.category ?? "product_order")
+  const currency = String(raw.currency ?? "PHP")
+  const status = String(raw.status ?? "pending") as Order["status"]
+  const title = String(raw.title ?? raw.orderTitle ?? "Order")
+  const referenceCode = String(raw.reference_code ?? raw.referenceCode ?? raw.product_code ?? orderNumber)
+  const createdAt = String(raw.createdAt ?? raw.created_at ?? new Date().toISOString())
+  const updatedAt = String(raw.updatedAt ?? raw.updated_at ?? createdAt)
+
+  let metadataObj: Record<string, any> = {}
+  if (raw.metadata && typeof raw.metadata === "object") {
+    metadataObj = raw.metadata as Record<string, any>
+  } else if (typeof raw.metadata_json === "string" && raw.metadata_json.trim().startsWith("{")) {
+    try {
+      metadataObj = JSON.parse(raw.metadata_json)
+    } catch {
+      metadataObj = {}
+    }
+  }
+
+  const lineItems =
+    Array.isArray(rawItems) && rawItems.length > 0
+      ? rawItems.map((li) => ({
+          sku: String(li.sku ?? "ITEM"),
+          name: String(li.name ?? li.description ?? "Order Item"),
+          quantity: Number(li.quantity ?? 1),
+          unitPriceCentavos: Number(li.unitPriceCentavos ?? li.unit_price_centavos ?? totalCentavos),
+          lineTotalCentavos: Number(li.lineTotalCentavos ?? li.line_total_centavos ?? totalCentavos),
+        }))
+      : [
+          {
+            sku: "GFORM-ITEM",
+            name: title,
+            quantity: 1,
+            unitPriceCentavos: totalCentavos,
+            lineTotalCentavos: totalCentavos,
+          },
+        ]
+
+  return {
+    id: orderId,
+    user_id: customerId,
+    order_number: orderNumber,
+    title,
+    category: category as any,
+    reference_code: referenceCode,
+    amount_minor: totalCentavos,
+    amount: totalCentavos / 100,
+    currency,
+    status,
+    metadata: metadataObj,
+    created_at: createdAt,
+    updated_at: updatedAt,
+    latest_attempt: (raw.latest_attempt ?? raw.latestAttempt ?? null) as any,
+    orderId,
+    orderNumber,
+    customerId,
+    customerEmail,
+    customerName,
+    subtotalCentavos,
+    vatCentavos,
+    totalCentavos,
+    lineItems,
+  }
+}
+
+export async function listOrders(
+  statusOrParams?: string | { customerId?: string; status?: string; limit?: number; signal?: AbortSignal }
+): Promise<OrderSummary[]> {
+  const params = typeof statusOrParams === "string" ? { status: statusOrParams } : (statusOrParams ?? {})
+  const search = new URLSearchParams()
+  if (params.customerId) search.set("customerId", params.customerId)
+  if (params.status && params.status !== "ALL" && params.status !== "all") search.set("status", params.status)
+  if (params.limit) search.set("limit", String(params.limit))
+  const qs = search.toString()
+  const url = `/api/v1/orders${qs ? `?${qs}` : ""}`
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+    signal: params.signal,
+  })
+  if (!res.ok) {
+    throw new Error(`Failed to list orders (${res.status})`)
+  }
+  const payload = await res.json()
+  const rawList = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.orders)
+    ? payload.orders
+    : Array.isArray(payload?.items)
+    ? payload.items
+    : Array.isArray(payload?.data)
+    ? payload.data
+    : []
+  return rawList.map((item: Record<string, unknown>) => normalizeOrderDto(item))
+}
+
+export async function getGoogleFormsStatus(signal?: AbortSignal): Promise<GoogleFormsIntegrationStatus & GoogleFormsStatus> {
   let raw: Record<string, any> = {}
   try {
     raw = await apiFetch<Record<string, any>>("/api/v1/integrations/google-forms/status")
@@ -690,8 +834,9 @@ export async function getGoogleFormsStatus(): Promise<GoogleFormsStatus> {
     try {
       const res = await fetch("/api/v1/integrations/google-forms/status", {
         method: "GET",
-        credentials: "include",
         headers: { Accept: "application/json" },
+        cache: "no-store",
+        signal,
       })
       if (res.ok) {
         raw = await res.json()
@@ -701,31 +846,22 @@ export async function getGoogleFormsStatus(): Promise<GoogleFormsStatus> {
     }
   }
 
-  const rawList = Array.isArray(raw?.recent_submissions)
-    ? raw.recent_submissions
-    : Array.isArray(raw?.recentSubmissions)
-    ? raw.recentSubmissions
-    : Array.isArray(raw?.orders)
-    ? raw.orders
+  const rawRecent = (raw.recent_submissions ?? raw.recentSubmissions ?? raw.orders ?? []) as Array<Record<string, any>>
+  const recentSubmissions: GoogleFormsSubmissionSummary[] = Array.isArray(rawRecent)
+    ? rawRecent.map((s) => ({
+        submissionId: String(s.submissionId ?? s.submission_id ?? s.responseId ?? s.response_id ?? ""),
+        responseId: String(s.responseId ?? s.response_id ?? s.submissionId ?? s.submission_id ?? ""),
+        respondentEmail: String(s.respondentEmail ?? s.respondent_email ?? s.customer_email ?? s.customerEmail ?? ""),
+        customerName: String(s.customerName ?? s.customer_name ?? "Google Form Respondent"),
+        itemDescription: String(s.itemDescription ?? s.item_description ?? s.description ?? s.title ?? "Google Form Order"),
+        amountCentavos: Number(s.amountCentavos ?? s.amount_centavos ?? s.amount_minor ?? s.total_centavos ?? 0),
+        currency: String(s.currency ?? "PHP"),
+        orderId: (s.orderId ?? s.order_id ?? null) as string | null,
+        orderNumber: (s.orderNumber ?? s.order_number ?? null) as string | null,
+        syncStatus: String(s.syncStatus ?? s.sync_status ?? s.status ?? "Bridged"),
+        submittedAt: String(s.submittedAt ?? s.submitted_at ?? s.createdAt ?? s.created_at ?? new Date().toISOString()),
+      }))
     : []
-
-  const recentSubmissions: GoogleFormSubmissionSummary[] = rawList.map(
-    (item: Record<string, any>) => ({
-      orderId: String(item.order_id ?? item.orderId ?? ""),
-      orderNumber: String(item.order_number ?? item.orderNumber ?? ""),
-      responseId: String(item.response_id ?? item.responseId ?? ""),
-      customerName: String(item.customer_name ?? item.customerName ?? "Google Forms Customer"),
-      customerEmail: String(item.customer_email ?? item.customerEmail ?? ""),
-      description: String(item.description ?? item.title ?? "Google Forms Order"),
-      amountCentavos: Number(item.amount_centavos ?? item.amountCentavos ?? item.amount_minor ?? item.total_centavos ?? 0),
-      status: String(item.status ?? "pending"),
-      createdAt: String(item.created_at ?? item.createdAt ?? new Date().toISOString()),
-    })
-  )
-
-  const totalSubmissions = Number(
-    raw?.total_submissions ?? raw?.totalSubmissions ?? raw?.ingested_orders_count ?? raw?.synced_count ?? raw?.syncedCount ?? recentSubmissions.length
-  )
 
   const maskedSecret =
     typeof raw?.masked_secret === "string" && raw.masked_secret.trim().length > 0
@@ -735,17 +871,43 @@ export async function getGoogleFormsStatus(): Promise<GoogleFormsStatus> {
       : null
 
   const secretConfigured = Boolean(
-    raw?.secret_configured ?? raw?.secretConfigured ?? (maskedSecret !== null && maskedSecret.length > 0)
+    raw?.secret_configured ?? raw?.secretConfigured ?? raw?.hasSecret ?? (maskedSecret !== null && maskedSecret.length > 0)
+  )
+
+  const totalSubmissions = Number(
+    raw?.totalSubmissions ?? raw?.total_submissions ?? raw?.ingested_orders_count ?? raw?.synced_count ?? raw?.syncedCount ?? recentSubmissions.length
   )
 
   return {
-    enabled: Boolean(raw?.enabled ?? true),
-    totalSubmissions,
-    syncedCount: Number(raw?.synced_count ?? raw?.syncedCount ?? totalSubmissions),
-    lastSyncedAt: (raw?.last_synced_at ?? raw?.lastSyncedAt ?? null) as string | null,
+    enabled: Boolean(raw?.enabled ?? raw?.configured ?? raw?.isConfigured ?? true),
+    configured: Boolean(raw?.configured ?? raw?.isConfigured ?? true),
     secretConfigured,
     maskedSecret,
+    webhookEndpoint: String(
+      raw.webhookEndpoint ?? raw.webhook_endpoint ?? "/api/v1/integrations/google-forms/submit"
+    ),
+    totalSubmissions,
+    bridgedOrdersCount: Number(raw.bridgedOrdersCount ?? raw.bridged_orders_count ?? recentSubmissions.length),
+    syncedCount: Number(raw?.synced_count ?? raw?.syncedCount ?? totalSubmissions),
+    lastSyncedAt: (raw?.last_synced_at ?? raw?.lastSyncedAt ?? null) as string | null,
+    lastSubmissionAt: (raw.lastSubmissionAt ?? raw.last_submission_at ?? recentSubmissions[0]?.submittedAt ?? null) as string | null,
     recentSubmissions,
+  }
+}
+
+export async function syncGoogleForms(): Promise<boolean> {
+  try {
+    const res = await fetch("/api/v1/integrations/google-forms/sync", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({}),
+    })
+    return res.ok
+  } catch {
+    return false
   }
 }
 
