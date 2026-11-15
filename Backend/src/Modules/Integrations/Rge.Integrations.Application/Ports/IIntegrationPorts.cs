@@ -163,6 +163,9 @@ public interface IGoogleFormOrderBridge
     Task<Result<BridgedGoogleFormOrder>> EnsureOrderForSubmissionAsync(
         GoogleFormSubmission submission,
         CancellationToken cancellationToken = default);
+
+    Task<int> BridgePendingSubmissionsAsync(
+        CancellationToken cancellationToken = default);
 }
 
 public interface ISmtpClientFactory : ISmtpProbe

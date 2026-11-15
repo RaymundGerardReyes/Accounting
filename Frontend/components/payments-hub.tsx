@@ -54,6 +54,7 @@ import {
   syncGoogleForms,
   OrderSummary,
 } from "@/lib/payment-api"
+import { usePaymentSignalR } from "@/hooks/usePaymentSignalR"
 import { CurrencyDisplay, FinancialStatusBadge } from "@/components/ui/financial-primitives"
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card"
 
@@ -1201,7 +1202,30 @@ export function PaymentsHub() {
     }
   }, [isAdmin, loadAdminDiagnostics])
 
-  // Background polling loop: 4 seconds, guarded by visibility and single-flight lock
+  // Real-time SignalR push listener for instant Google Forms & payment status synchronization
+  usePaymentSignalR({
+    enabled: true,
+    onOrderIngested: () => {
+      void loadOrders()
+      void loadGoogleFormsStatus()
+    },
+    onStatusChanged: () => {
+      void loadOrders()
+      void loadGoogleFormsStatus()
+    },
+    onGoogleFormsStatusUpdated: (snapshot: any) => {
+      if (snapshot) {
+        googleFormsStatusRef.current = snapshot
+        setGoogleFormsStatus(snapshot)
+      }
+    },
+    onPollFallback: () => {
+      void loadOrders()
+      void loadGoogleFormsStatus()
+    },
+  })
+
+  // Background fallback loop: 4s interval, guarded by visibility and single-flight lock
   useEffect(() => {
     const intervalId = setInterval(() => {
       if (typeof document !== "undefined" && document.visibilityState === "visible") {

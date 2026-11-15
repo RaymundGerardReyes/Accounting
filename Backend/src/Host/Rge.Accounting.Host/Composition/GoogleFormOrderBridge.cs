@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Rge.BuildingBlocks.Infrastructure.Caching;
@@ -13,6 +14,7 @@ using Rge.Integrations.Application.Ports;
 using Rge.Integrations.Domain;
 using Rge.Integrations.Infrastructure;
 using SmtpClientFactory = Rge.Integrations.Infrastructure.SmtpClientFactory;
+using Rge.Payments.Api.Hubs;
 using Rge.Payments.Application.PaymentAttempts.InitiateAttempt;
 using Rge.Payments.Application.Ports;
 using Rge.Payments.Domain.Orders;
@@ -39,6 +41,7 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
     private readonly InitiateAttemptHandler _initiateAttemptHandler;
     private readonly IGoogleFormsStore? _googleFormsStore;
     private readonly IPaymentStatusNotifier? _paymentStatusNotifier;
+    private readonly IHubContext<PaymentHub>? _paymentHub;
 
     public GoogleFormOrderBridge(
         IOrderRepository orderRepository,
@@ -52,7 +55,8 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
         Microsoft.Extensions.Logging.ILogger<GoogleFormOrderBridge> logger,
         InitiateAttemptHandler initiateAttemptHandler,
         IGoogleFormsStore? googleFormsStore = null,
-        IPaymentStatusNotifier? paymentStatusNotifier = null)
+        IPaymentStatusNotifier? paymentStatusNotifier = null,
+        IHubContext<PaymentHub>? paymentHub = null)
     {
         ArgumentNullException.ThrowIfNull(orderRepository);
         ArgumentNullException.ThrowIfNull(attemptRepository);
@@ -77,6 +81,7 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
         _initiateAttemptHandler = initiateAttemptHandler;
         _googleFormsStore = googleFormsStore;
         _paymentStatusNotifier = paymentStatusNotifier;
+        _paymentHub = paymentHub;
     }
 
     public async Task<GoogleFormOrderCreationResult> CreateOrderAndInitiateCheckoutAsync(
@@ -389,37 +394,91 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
         string paymentAttemptId = $"att_{orderId}";
         string? providerPaymentId = null;
 
-        if (string.Equals(persistedStatus, "paid", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(persistedStatus, "paid", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(persistedStatus, "cancelled", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(persistedStatus, "refunded", StringComparison.OrdinalIgnoreCase))
         {
-            // Already paid: do not initiate redundant payment attempts on historical/reconciled orders
+            // Already terminal: do not initiate redundant payment attempts on historical/reconciled orders
             checkoutUrl = $"{appBaseUrl}/checkout/success?order_id={Uri.EscapeDataString(orderId)}";
         }
         else
         {
-            var attemptCmd = new InitiateAttemptCommand(
-                OrderId: orderId,
-                PaymentMethod: "hosted_checkout",
-                IdempotencyKey: idempotencyKey,
-                CustomerName: request.CustomerName,
-                CustomerEmail: request.CustomerEmail,
-                CustomerPhone: request.CustomerPhone);
+            // Active attempt guard: reuse existing non-expired RequiresAction / Pending attempt instead of hitting gateway again
+            var existingAttempts = await _attemptRepository.GetByOrderIdAsync(orderId, cancellationToken).ConfigureAwait(false);
+            var reusableAttempt = existingAttempts
+                .OrderByDescending(a => a.CreatedAt)
+                .FirstOrDefault(a =>
+                    (a.Status == PaymentAttemptStatus.RequiresAction || a.Status == PaymentAttemptStatus.Pending || a.Status == PaymentAttemptStatus.Processing) &&
+                    (a.ExpiresAt is null || a.ExpiresAt > _clock.UtcNow.AddMinutes(1)));
 
-            var attemptRes = await _initiateAttemptHandler.HandleAsync(attemptCmd, cancellationToken).ConfigureAwait(false);
-            if (attemptRes.IsSuccess)
+            if (reusableAttempt is not null)
             {
-                paymentAttemptId = attemptRes.Value.Id;
-                providerPaymentId = attemptRes.Value.ProviderPaymentId;
-                if (!string.IsNullOrWhiteSpace(attemptRes.Value.CheckoutUrl))
+                paymentAttemptId = reusableAttempt.Id;
+                providerPaymentId = reusableAttempt.ProviderPaymentId;
+                if (!string.IsNullOrWhiteSpace(reusableAttempt.CheckoutUrl))
                 {
-                    checkoutUrl = attemptRes.Value.CheckoutUrl;
+                    checkoutUrl = reusableAttempt.CheckoutUrl;
                 }
             }
             else
             {
-                _logger.LogWarning(
-                    "InitiateAttemptHandler failed for bridged order {OrderId}: {Error}",
-                    orderId,
-                    attemptRes.Error.Message);
+                var attemptCmd = new InitiateAttemptCommand(
+                    OrderId: orderId,
+                    PaymentMethod: "hosted_checkout",
+                    IdempotencyKey: idempotencyKey,
+                    CustomerName: request.CustomerName,
+                    CustomerEmail: request.CustomerEmail,
+                    CustomerPhone: request.CustomerPhone);
+
+                var attemptRes = await _initiateAttemptHandler.HandleAsync(attemptCmd, cancellationToken).ConfigureAwait(false);
+                if (attemptRes.IsSuccess)
+                {
+                    paymentAttemptId = attemptRes.Value.Id;
+                    providerPaymentId = attemptRes.Value.ProviderPaymentId;
+                    if (!string.IsNullOrWhiteSpace(attemptRes.Value.CheckoutUrl))
+                    {
+                        checkoutUrl = attemptRes.Value.CheckoutUrl;
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "InitiateAttemptHandler failed for bridged order {OrderId}: {Error}",
+                        orderId,
+                        attemptRes.Error.Message);
+                }
+            }
+        }
+
+        if (_paymentHub is not null)
+        {
+            try
+            {
+                var eventPayload = new
+                {
+                    eventType = "google_forms.order.ingested",
+                    orderId = orderId,
+                    orderNumber = orderNumber,
+                    responseId = request.ResponseId,
+                    customerName = request.CustomerName,
+                    customerEmail = request.CustomerEmail,
+                    description = request.ProductTitle,
+                    amountCentavos = request.TotalAmountMinor,
+                    status = persistedStatus,
+                    paymentAttemptId = paymentAttemptId,
+                    checkoutUrl = checkoutUrl,
+                    timestamp = _clock.UtcNow
+                };
+
+                await _paymentHub.Clients.All.SendAsync("GoogleFormsOrderIngested", eventPayload, cancellationToken).ConfigureAwait(false);
+                await _paymentHub.Clients.All.SendAsync("PaymentStatusUpdated", eventPayload, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                if (_logger.IsEnabled(LogLevel.Debug))
+                {
+                    _logger.LogDebug(ex, "Non-fatal SignalR hub broadcast error for bridged order {OrderId}", orderId);
+                }
             }
         }
 
@@ -436,6 +495,37 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
             CreatedNew: createdNew,
             EmailDispatched: false,
             EmailStatusMessage: null);
+    }
+
+    public async Task<int> BridgePendingSubmissionsAsync(CancellationToken cancellationToken = default)
+    {
+        if (_googleFormsStore is null)
+        {
+            return 0;
+        }
+
+        var submissions = await _googleFormsStore.GetRecentSubmissionsAsync(150, cancellationToken).ConfigureAwait(false);
+        int bridgedCount = 0;
+
+        foreach (var submission in submissions)
+        {
+            // Skip submissions already associated with an order and in terminal state
+            if (!string.IsNullOrWhiteSpace(submission.OrderId) &&
+                (string.Equals(submission.Status, "paid", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(submission.Status, "expired", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(submission.Status, "cancelled", StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            var result = await EnsureOrderForSubmissionAsync(submission, cancellationToken).ConfigureAwait(false);
+            if (result.IsSuccess && result.Value.CreatedNew)
+            {
+                bridgedCount++;
+            }
+        }
+
+        return bridgedCount;
     }
 
     public async Task<GoogleFormOrderCreationResult?> FindExistingByResponseIdAsync(

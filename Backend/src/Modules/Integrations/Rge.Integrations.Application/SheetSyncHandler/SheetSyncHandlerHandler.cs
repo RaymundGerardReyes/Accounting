@@ -103,29 +103,10 @@ public sealed class SheetSyncHandlerHandler
             _logger.LogWarning(ex, "Live Google Sheets pull skipped or unconfigured; proceeding with PostgreSQL store reconciliation.");
         }
 
-        // 2. Ensure every existing submission in public.google_form_submissions is bridged into public.orders
-        var existingSubmissions = await _formsStore
-            .GetRecentSubmissionsAsync(250, cancellationToken)
+        // 2. Bridge only pending/unbridged submissions instead of looping through all historical paid orders
+        bridgedCount += await _orderBridge
+            .BridgePendingSubmissionsAsync(cancellationToken)
             .ConfigureAwait(false);
-
-        foreach (var item in existingSubmissions)
-        {
-            try
-            {
-                var bridgeResult = await _orderBridge
-                    .EnsureOrderForSubmissionAsync(item, cancellationToken)
-                    .ConfigureAwait(false);
-
-                if (bridgeResult.IsSuccess)
-                {
-                    bridgedCount++;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed bridging submission {ResponseId} into orders ledger.", item.ResponseId);
-            }
-        }
 
         // 3. Invalidate caches so next queries reflect the freshly synced submissions and orders
         if (_cache is not null)

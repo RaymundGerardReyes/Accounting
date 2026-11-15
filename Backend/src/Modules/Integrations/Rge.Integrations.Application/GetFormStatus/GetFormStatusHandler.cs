@@ -90,7 +90,7 @@ public sealed class GetFormStatusHandler :
             PendingOrdersCount: pending,
             WebhookEndpoint: "/api/v1/integrations/google-forms/submit",
             AuthHeaderName: "X-Google-Forms-Secret",
-            HeartbeatInterval: "Active (4s interval)",
+            HeartbeatInterval: "SignalR Real-Time Push (/hubs/payments)",
             ScriptTemplatePath: "scripts/google_apps_script/Code.gs"));
     }
 
