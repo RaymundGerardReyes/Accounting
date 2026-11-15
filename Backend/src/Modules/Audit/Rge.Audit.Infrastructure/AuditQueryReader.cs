@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Data;
 using System.Data.Common;
 using Rge.Audit.Application.Ports;
@@ -7,16 +8,26 @@ using Rge.BuildingBlocks.Infrastructure.Persistence;
 namespace Rge.Audit.Infrastructure;
 
 /// <summary>
-/// High-throughput query reader for audit events with entity and actor filtering.
+/// High-throughput query reader for audit events with entity and actor filtering,
+/// featuring synchronous column reads and a 5-second L1 query cache.
 /// </summary>
 public sealed class AuditQueryReader : IAuditReader
 {
+    private sealed record CacheKey(string? EntityType, string? EntityId, string? RestrictedActorId, int Limit);
+    private sealed record CacheEntry(DateTimeOffset ExpiresAtUtc, int EventCount, IReadOnlyList<AuditEventItemDto> Items);
+    private static readonly ConcurrentDictionary<CacheKey, CacheEntry> QueryCache = new();
+
     private readonly ConnectionScope _connectionScope;
 
     public AuditQueryReader(ConnectionScope connectionScope)
     {
         ArgumentNullException.ThrowIfNull(connectionScope);
         _connectionScope = connectionScope;
+    }
+
+    public static void InvalidateCache()
+    {
+        QueryCache.Clear();
     }
 
     public async Task<IReadOnlyList<AuditEventItemDto>> QueryEventsAsync(
@@ -26,6 +37,21 @@ public sealed class AuditQueryReader : IAuditReader
         string? restrictedActorId,
         CancellationToken cancellationToken = default)
     {
+        string? normType = string.IsNullOrWhiteSpace(entityType) || string.Equals(entityType, "all", StringComparison.OrdinalIgnoreCase) ? null : entityType.Trim();
+        string? normEntityId = string.IsNullOrWhiteSpace(entityId) ? null : entityId.Trim();
+        string? normActorId = string.IsNullOrWhiteSpace(restrictedActorId) ? null : restrictedActorId.Trim();
+        int effectiveLimit = Math.Clamp(limit, 1, 500);
+
+        var key = new CacheKey(normType, normEntityId, normActorId, effectiveLimit);
+        int currentCount = PgAuditAppender.InMemoryEvents.Count;
+
+        if (QueryCache.TryGetValue(key, out var cached) &&
+            cached.ExpiresAtUtc > DateTimeOffset.UtcNow &&
+            cached.EventCount == currentCount)
+        {
+            return cached.Items;
+        }
+
         List<AuditEventItemDto> items = [];
 
         try
@@ -35,22 +61,22 @@ public sealed class AuditQueryReader : IAuditReader
             cmd.Transaction = _connectionScope.CurrentTransaction;
 
             string whereClause = "WHERE 1=1";
-            if (!string.IsNullOrWhiteSpace(entityType) && !string.Equals(entityType, "all", StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrWhiteSpace(normType))
             {
                 whereClause += " AND entity_type = @entity_type";
-                AddParam(cmd, "@entity_type", DbType.String, entityType);
+                AddParam(cmd, "@entity_type", DbType.String, normType);
             }
 
-            if (!string.IsNullOrWhiteSpace(entityId))
+            if (!string.IsNullOrWhiteSpace(normEntityId))
             {
                 whereClause += " AND entity_id = @entity_id";
-                AddParam(cmd, "@entity_id", DbType.String, entityId);
+                AddParam(cmd, "@entity_id", DbType.String, normEntityId);
             }
 
-            if (!string.IsNullOrWhiteSpace(restrictedActorId))
+            if (!string.IsNullOrWhiteSpace(normActorId))
             {
                 whereClause += " AND actor_id = @restricted_actor_id";
-                AddParam(cmd, "@restricted_actor_id", DbType.String, restrictedActorId);
+                AddParam(cmd, "@restricted_actor_id", DbType.String, normActorId);
             }
 
             cmd.CommandText = $@"
@@ -63,7 +89,7 @@ public sealed class AuditQueryReader : IAuditReader
                  ORDER BY sequence_no DESC
                  LIMIT @limit;";
             cmd.CommandTimeout = SqlTimeouts.FastReadSeconds;
-            AddParam(cmd, "@limit", DbType.Int32, limit);
+            AddParam(cmd, "@limit", DbType.Int32, effectiveLimit);
 
             await using DbDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -90,6 +116,8 @@ public sealed class AuditQueryReader : IAuditReader
                     reason, corrId, evRef, occurredAt,
                     prevHash, recordHash));
             }
+
+            QueryCache[key] = new CacheEntry(DateTimeOffset.UtcNow.AddSeconds(5), currentCount, items);
             return items;
         }
         catch (Exception ex) when (ex is DbException or InvalidOperationException)
@@ -97,24 +125,24 @@ public sealed class AuditQueryReader : IAuditReader
             // Offline/test fallback
             IEnumerable<AuditEvent> query = PgAuditAppender.InMemoryEvents.Values;
 
-            if (!string.IsNullOrWhiteSpace(entityType) && !string.Equals(entityType, "all", StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrWhiteSpace(normType))
             {
-                query = query.Where(e => string.Equals(e.EntityType, entityType, StringComparison.OrdinalIgnoreCase));
+                query = query.Where(e => string.Equals(e.EntityType, normType, StringComparison.OrdinalIgnoreCase));
             }
 
-            if (!string.IsNullOrWhiteSpace(entityId))
+            if (!string.IsNullOrWhiteSpace(normEntityId))
             {
-                query = query.Where(e => string.Equals(e.EntityId, entityId, StringComparison.OrdinalIgnoreCase));
+                query = query.Where(e => string.Equals(e.EntityId, normEntityId, StringComparison.OrdinalIgnoreCase));
             }
 
-            if (!string.IsNullOrWhiteSpace(restrictedActorId))
+            if (!string.IsNullOrWhiteSpace(normActorId))
             {
-                query = query.Where(e => string.Equals(e.ActorId, restrictedActorId, StringComparison.OrdinalIgnoreCase));
+                query = query.Where(e => string.Equals(e.ActorId, normActorId, StringComparison.OrdinalIgnoreCase));
             }
 
-            return query
+            var fallbackList = query
                 .OrderByDescending(e => e.SequenceNo)
-                .Take(limit)
+                .Take(effectiveLimit)
                 .Select(e => new AuditEventItemDto(
                     e.Id,
                     e.SequenceNo,
@@ -132,6 +160,9 @@ public sealed class AuditQueryReader : IAuditReader
                     e.PrevHash.Value,
                     e.RecordHash.Value))
                 .ToList();
+
+            QueryCache[key] = new CacheEntry(DateTimeOffset.UtcNow.AddSeconds(5), currentCount, fallbackList);
+            return fallbackList;
         }
     }
 

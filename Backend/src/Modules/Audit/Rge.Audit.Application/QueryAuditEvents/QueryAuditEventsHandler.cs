@@ -17,6 +17,9 @@ public sealed record AuditEventsResponse(
 
 public sealed class QueryAuditEventsHandler : IQueryHandler<QueryAuditEventsQuery, AuditEventsResponse>
 {
+    private sealed record ChainCacheSnapshot(DateTimeOffset TimestampUtc, string Fingerprint, ChainIntegrityDto Integrity);
+    private static volatile ChainCacheSnapshot? _chainCacheSnapshot;
+
     private static readonly HashSet<string> PrivilegedRoles = new(StringComparer.OrdinalIgnoreCase)
     {
         "supervisor", "finance_reviewer", "finance_controller", "auditor", "bank_approver", "system_admin"
@@ -46,10 +49,36 @@ public sealed class QueryAuditEventsHandler : IQueryHandler<QueryAuditEventsQuer
         int effectiveLimit = Math.Clamp(query.Limit, 1, 500);
 
         var events = await _auditReader.QueryEventsAsync(query.EntityType, query.EntityId, effectiveLimit, restrictedActorId, cancellationToken).ConfigureAwait(false);
-        var chain = await _chainVerifier.VerifyChainAsync(cancellationToken).ConfigureAwait(false);
+
+        ChainIntegrityDto chain;
+        string fingerprint = ComputeEventsFingerprint(events);
+        var snapshot = _chainCacheSnapshot;
+        if (snapshot != null &&
+            DateTimeOffset.UtcNow - snapshot.TimestampUtc < TimeSpan.FromSeconds(5) &&
+            string.Equals(snapshot.Fingerprint, fingerprint, StringComparison.Ordinal))
+        {
+            chain = snapshot.Integrity;
+        }
+        else
+        {
+            chain = await _chainVerifier.VerifyChainAsync(cancellationToken).ConfigureAwait(false);
+            _chainCacheSnapshot = new ChainCacheSnapshot(DateTimeOffset.UtcNow, fingerprint, chain);
+        }
 
         var response = new AuditEventsResponse(chain, events);
         return Result.Success(response);
+    }
+
+    private static string ComputeEventsFingerprint(IReadOnlyList<AuditEventItemDto> events)
+    {
+        if (events.Count == 0)
+        {
+            return "0:empty";
+        }
+
+        var first = events[0];
+        var last = events[^1];
+        return $"{events.Count}:{first.SequenceNo}:{first.RecordHash}:{last.SequenceNo}:{last.RecordHash}";
     }
 }
 
