@@ -12,6 +12,8 @@ public static class DependencyInjection
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddSingleton<ICostAllocationStore, JsonConfigurationStore>();
+        services.AddScoped<ICostAllocationPostgresStore, PgCostAllocationStore>();
+        services.AddScoped<IPgCostAllocationStore, PgCostAllocationStore>();
         services.AddSingleton<LegacyDashboardReader>();
         services.AddScoped<GetCostAllocationHandler>();
         services.AddScoped<UpdateDepartmentCostHandler>();

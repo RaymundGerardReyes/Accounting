@@ -8,9 +8,9 @@ public sealed record GetCostAllocationQuery : IQuery<CostAllocationSnapshotDto>;
 
 public sealed class GetCostAllocationHandler : IQueryHandler<GetCostAllocationQuery, CostAllocationSnapshotDto>
 {
-    private readonly ICostAllocationStore _store;
+    private readonly ICostAllocationPostgresStore _store;
 
-    public GetCostAllocationHandler(ICostAllocationStore store)
+    public GetCostAllocationHandler(ICostAllocationPostgresStore store)
     {
         ArgumentNullException.ThrowIfNull(store);
         _store = store;
@@ -20,7 +20,27 @@ public sealed class GetCostAllocationHandler : IQueryHandler<GetCostAllocationQu
         GetCostAllocationQuery query,
         CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(Result.Success(_store.GetSnapshot()));
+        return BuildSnapshotAsync(cancellationToken);
+    }
+
+    private async Task<Result<CostAllocationSnapshotDto>> BuildSnapshotAsync(CancellationToken cancellationToken)
+    {
+        IReadOnlyList<CostAllocationDepartmentRecord> departments =
+            await _store.GetActiveDepartmentsAsync(cancellationToken).ConfigureAwait(false);
+        var mapped = departments.Select(department => new CostDepartmentDto(
+            department.DepartmentId,
+            department.DepartmentName,
+            department.CostCenterId,
+            department.DirectCostCentavos,
+            0,
+            department.DirectCostCentavos,
+            department.BudgetCapCentavos,
+            department.BudgetCapCentavos - department.DirectCostCentavos,
+            department.HeadcountDriverWeight,
+            0,
+            0)).ToList();
+        return Result.Success(new CostAllocationSnapshotDto(
+            mapped, [], [], mapped.Sum(x => x.DirectCostMinor), 0, "PHP"));
     }
 }
 

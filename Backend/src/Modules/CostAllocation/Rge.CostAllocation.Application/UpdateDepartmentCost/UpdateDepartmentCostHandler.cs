@@ -13,15 +13,15 @@ public sealed record UpdateDepartmentCostCommand(
 
 public sealed class UpdateDepartmentCostHandler : ICommandHandler<UpdateDepartmentCostCommand, CostDepartmentDto>
 {
-    private readonly ICostAllocationStore _store;
+    private readonly ICostAllocationPostgresStore _store;
 
-    public UpdateDepartmentCostHandler(ICostAllocationStore store)
+    public UpdateDepartmentCostHandler(ICostAllocationPostgresStore store)
     {
         ArgumentNullException.ThrowIfNull(store);
         _store = store;
     }
 
-    public Task<Result<CostDepartmentDto>> HandleAsync(
+    public async Task<Result<CostDepartmentDto>> HandleAsync(
         UpdateDepartmentCostCommand command,
         CancellationToken cancellationToken = default)
     {
@@ -29,30 +29,45 @@ public sealed class UpdateDepartmentCostHandler : ICommandHandler<UpdateDepartme
 
         if (string.IsNullOrWhiteSpace(command.DepartmentName))
         {
-            return Task.FromResult(Result.Failure<CostDepartmentDto>(
-                Error.Validation("CostAllocation.MissingDepartment", "Department name is required.")));
+            return Result.Failure<CostDepartmentDto>(
+                Error.Validation("CostAllocation.MissingDepartment", "Department name is required."));
         }
 
         if (command.DirectCostMinor < 0 || command.MachineHours < 0 || command.LaborHours < 0 || command.OutputVolume < 0)
         {
-            return Task.FromResult(Result.Failure<CostDepartmentDto>(
-                Error.Validation("CostAllocation.NegativeMetric", "Cost and driver metrics cannot be negative.")));
+            return Result.Failure<CostDepartmentDto>(
+                Error.Validation("CostAllocation.NegativeMetric", "Cost and driver metrics cannot be negative."));
         }
 
-        CostDepartmentDto? updated = _store.UpdateDepartmentMetrics(
-            command.DepartmentName.Trim(),
-            command.DirectCostMinor,
-            command.MachineHours,
-            command.LaborHours,
-            command.OutputVolume);
-
-        if (updated is null)
+        IReadOnlyList<CostAllocationDepartmentRecord> departments =
+            await _store.GetActiveDepartmentsAsync(cancellationToken).ConfigureAwait(false);
+        CostAllocationDepartmentRecord? department = departments.FirstOrDefault(
+            x => string.Equals(x.DepartmentName, command.DepartmentName.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(x.DepartmentId, command.DepartmentName.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (department is null)
         {
-            return Task.FromResult(Result.Failure<CostDepartmentDto>(
-                Error.NotFound("CostAllocation.DepartmentNotFound", $"Department '{command.DepartmentName}' was not found.")));
+            return Result.Failure<CostDepartmentDto>(
+                Error.NotFound("CostAllocation.DepartmentNotFound", $"Department '{command.DepartmentName}' was not found."));
         }
 
-        return Task.FromResult(Result.Success(updated));
+        return await UpdateAsync(department, command.DirectCostMinor, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<Result<CostDepartmentDto>> UpdateAsync(
+        CostAllocationDepartmentRecord department,
+        long directCostMinor,
+        CancellationToken cancellationToken)
+    {
+        bool updated = await _store.UpdateDepartmentDirectCostAsync(
+            department.DepartmentId, directCostMinor, cancellationToken).ConfigureAwait(false);
+        if (!updated)
+            return Result.Failure<CostDepartmentDto>(
+                Error.Validation("CostAllocation.BudgetCapExceeded", "Direct cost cannot exceed the effective budget cap."));
+        return Result.Success(new CostDepartmentDto(
+            department.DepartmentId, department.DepartmentName, department.CostCenterId,
+            directCostMinor, 0, directCostMinor, department.BudgetCapCentavos,
+            department.BudgetCapCentavos - directCostMinor,
+            department.HeadcountDriverWeight, 0, 0));
     }
 }
 

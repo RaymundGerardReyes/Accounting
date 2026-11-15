@@ -50,3 +50,24 @@ public interface ICostAllocationStore
     void SaveConfiguration(Dictionary<string, object> config);
 }
 
+public interface ICostAllocationPostgresStore
+{
+    Task<IReadOnlyList<CostAllocationDepartmentRecord>> GetActiveDepartmentsAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<bool> UpdateDepartmentDirectCostAsync(
+        string departmentId,
+        long newDirectCostCentavos,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed record CostAllocationDepartmentRecord(
+    string DepartmentId,
+    string RuleVersionId,
+    string DepartmentName,
+    string CostCenterId,
+    long DirectCostCentavos,
+    long BudgetCapCentavos,
+    int HeadcountDriverWeight,
+    bool IsActive);
+

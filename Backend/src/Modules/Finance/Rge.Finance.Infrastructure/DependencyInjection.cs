@@ -86,6 +86,9 @@ public static class DependencyInjection
         services.AddTransient<Application.Payables.ExecutePayment.ExecutePaymentHandler>();
         services.AddTransient<Application.Payables.ReconcilePayment.ReconcilePaymentHandler>();
         services.AddTransient<Application.Payables.SetPaymentExceptionState.SetPaymentExceptionStateHandler>();
+        services.AddTransient<Application.Payables.RegisterOfficialPayableHandler>();
+        services.AddTransient<Application.Payables.ExecuteOfficialPayablePaymentHandler>();
+        services.AddTransient<Application.GeneralLedger.PayMongoSettlement.ReconcilePayMongoSettlementHandler>();
 
         // Policy handlers
         services.AddTransient<Application.Policies.List.ListHandler>();
