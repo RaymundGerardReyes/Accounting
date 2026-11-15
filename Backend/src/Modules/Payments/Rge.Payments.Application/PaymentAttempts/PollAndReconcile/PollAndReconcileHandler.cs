@@ -187,16 +187,31 @@ public sealed class PollAndReconcileHandler : IQueryHandler<PollAndReconcileQuer
                 {
                     attempt.MarkFailed("source_cancelled", gw.FailureMessage ?? "Payment source was cancelled.", nowUtc);
                     TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
+                    if (order is not null && !string.Equals(order.Status, "paid", StringComparison.OrdinalIgnoreCase))
+                    {
+                        order.Cancel("Payment source was cancelled", nowUtc);
+                        await _orderRepository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
+                    }
                 }
                 else if (gwStatus is "failed")
                 {
                     attempt.MarkFailed(gw.FailureCode ?? "source_failed", gw.FailureMessage ?? "Payment failed", nowUtc);
                     TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
+                    if (order is not null && !string.Equals(order.Status, "paid", StringComparison.OrdinalIgnoreCase))
+                    {
+                        order.Cancel(gw.FailureMessage ?? "Payment failed", nowUtc);
+                        await _orderRepository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
+                    }
                 }
                 else if (gwStatus is "expired")
                 {
                     attempt.MarkExpired(nowUtc, gw.FailureCode ?? "source_expired", gw.FailureMessage);
                     TriggerBackgroundSessionExpire(attempt.ProviderPaymentId);
+                    if (order is not null && !string.Equals(order.Status, "paid", StringComparison.OrdinalIgnoreCase))
+                    {
+                        order.Cancel(gw.FailureMessage ?? "Payment expired", nowUtc);
+                        await _orderRepository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
+                    }
                 }
                 else if (hasClientRedirect)
                 {

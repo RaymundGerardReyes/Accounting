@@ -41,12 +41,15 @@ public sealed record SimulateWebhookRequest(
     string? FailureMessage = null);
 
 public sealed record UpdateOrderRequest(
-    string? Title = null,
-    string? Description = null,
-    long? Amount = null,
-    long? AmountMinor = null,
-    string? Currency = null,
-    System.Text.Json.JsonElement? Metadata = null);
+    [property: System.Text.Json.Serialization.JsonPropertyName("title")] string? Title = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("description")] string? Description = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("amount")] long? Amount = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("amount_minor")] long? AmountMinor = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("amount_centavos")] long? AmountCentavos = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("customer_name")] string? CustomerName = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("customer_email")] string? CustomerEmail = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("currency")] string? Currency = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("metadata")] System.Text.Json.JsonElement? Metadata = null);
 
 public sealed record CancelOrderRequest(
     string? Reason = null);

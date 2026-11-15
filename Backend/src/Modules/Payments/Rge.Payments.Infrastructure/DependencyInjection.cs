@@ -102,6 +102,7 @@ public static class DependencyInjection
         services.AddScoped<CreateOrderHandler>();
         services.AddScoped<UpdateOrderHandler>();
         services.AddScoped<CancelOrderHandler>();
+        services.AddScoped<DeleteOrderHandler>();
         services.AddScoped<GetOrderHandler>();
         services.AddScoped<ListOrdersHandler>();
         services.AddScoped<InitiateAttemptHandler>();

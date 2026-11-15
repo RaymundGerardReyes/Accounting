@@ -42,7 +42,7 @@ public sealed class ManageOrderEndpoints : IEndpointModule
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(handler);
 
-        long? amount = request.AmountMinor ?? request.Amount;
+        long? amount = request.AmountMinor ?? request.AmountCentavos ?? request.Amount;
         string? title = request.Title ?? request.Description;
 
         var command = new UpdateOrderCommand(
@@ -50,7 +50,9 @@ public sealed class ManageOrderEndpoints : IEndpointModule
             Title: title,
             AmountMinor: amount,
             Currency: request.Currency,
-            Metadata: request.Metadata);
+            Metadata: request.Metadata,
+            CustomerName: request.CustomerName,
+            CustomerEmail: request.CustomerEmail);
 
         var result = await handler.HandleAsync(command, cancellationToken).ConfigureAwait(false);
         return result.ToHttpResult(httpContext, response => Results.Ok(response));
@@ -60,18 +62,31 @@ public sealed class ManageOrderEndpoints : IEndpointModule
         HttpContext httpContext,
         string order_id,
         string? reason,
-        CancelOrderHandler handler,
+        CancelOrderHandler cancelHandler,
+        DeleteOrderHandler deleteHandler,
+        bool? hard,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(httpContext);
-        ArgumentNullException.ThrowIfNull(handler);
+        ArgumentNullException.ThrowIfNull(cancelHandler);
+        ArgumentNullException.ThrowIfNull(deleteHandler);
 
-        var command = new CancelOrderCommand(
+        if (hard == true)
+        {
+            var command = new DeleteOrderCommand(
+                OrderId: order_id,
+                Reason: reason ?? "Order deleted via API");
+
+            var result = await deleteHandler.HandleAsync(command, cancellationToken).ConfigureAwait(false);
+            return result.ToHttpResult(httpContext, response => Results.Ok(response));
+        }
+
+        var cancelCommand = new CancelOrderCommand(
             OrderId: order_id,
             Reason: reason ?? "Order deleted via API");
 
-        var result = await handler.HandleAsync(command, cancellationToken).ConfigureAwait(false);
-        return result.ToHttpResult(httpContext, response => Results.Ok(response));
+        var cancelResult = await cancelHandler.HandleAsync(cancelCommand, cancellationToken).ConfigureAwait(false);
+        return cancelResult.ToHttpResult(httpContext, response => Results.Ok(response));
     }
 
     private static async Task<IResult> HandleCancelAsync(
@@ -92,4 +107,3 @@ public sealed class ManageOrderEndpoints : IEndpointModule
         return result.ToHttpResult(httpContext, response => Results.Ok(response));
     }
 }
-

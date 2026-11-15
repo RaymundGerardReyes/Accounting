@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Rge.BuildingBlocks.SharedKernel.Guards;
 using Rge.BuildingBlocks.SharedKernel.Money;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
@@ -12,6 +13,9 @@ namespace Rge.Payments.Domain.Orders;
 /// </summary>
 public sealed class Order : AggregateRoot<string>
 {
+    private string? _customerName;
+    private string? _customerEmail;
+
     public string UserId { get; private set; }
     public string OrderNumber { get; private set; }
     public string Title { get; private set; }
@@ -22,6 +26,21 @@ public sealed class Order : AggregateRoot<string>
     public string MetadataJson { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
+
+    public Money TotalAmount => Amount;
+    public string Description => Title;
+
+    public string? CustomerName
+    {
+        get => !string.IsNullOrWhiteSpace(_customerName) ? _customerName : TryExtractMetadataKey("customer_name");
+        private set => _customerName = value;
+    }
+
+    public string? CustomerEmail
+    {
+        get => !string.IsNullOrWhiteSpace(_customerEmail) ? _customerEmail : TryExtractMetadataKey("customer_email");
+        private set => _customerEmail = value;
+    }
 
     private Order(
         string id,
@@ -150,6 +169,36 @@ public sealed class Order : AggregateRoot<string>
         return Result.Success();
     }
 
+    public void UpdateDetails(
+        string? customerName,
+        string? customerEmail,
+        string? description,
+        Money amount,
+        DateTimeOffset updatedAt)
+    {
+        if (!string.IsNullOrWhiteSpace(customerName))
+        {
+            CustomerName = customerName.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(customerEmail))
+        {
+            CustomerEmail = customerEmail.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            Title = description.Trim();
+        }
+
+        if (amount.AmountMinor > 0)
+        {
+            Amount = amount;
+        }
+
+        UpdatedAt = updatedAt;
+    }
+
     public Result Cancel(string reason, DateTimeOffset cancelledAtUtc)
     {
         if (Status == "paid")
@@ -166,5 +215,40 @@ public sealed class Order : AggregateRoot<string>
         UpdatedAt = cancelledAtUtc;
         return Result.Success();
     }
-}
 
+    public void MarkCancelled(string reason, DateTimeOffset updatedAt)
+    {
+        Cancel(reason, updatedAt);
+    }
+
+    public void MarkExpired(DateTimeOffset updatedAt)
+    {
+        if (Status != "paid")
+        {
+            Status = "cancelled";
+            UpdatedAt = updatedAt;
+        }
+    }
+
+    private string? TryExtractMetadataKey(string key)
+    {
+        if (string.IsNullOrWhiteSpace(MetadataJson) || MetadataJson == "{}")
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(MetadataJson);
+            if (doc.RootElement.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.String)
+            {
+                return prop.GetString();
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return null;
+    }
+}

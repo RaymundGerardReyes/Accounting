@@ -220,7 +220,7 @@ public sealed class OrderRepository : IOrderRepository
         string? userId = null,
         CancellationToken cancellationToken = default)
     {
-        int effectiveLimit = Math.Clamp(limit, 1, 100);
+        int effectiveLimit = Math.Clamp(limit, 1, 250);
 
         var normalizedUserId = string.IsNullOrWhiteSpace(userId) ||
                                string.Equals(userId, Guid.Empty.ToString(), StringComparison.OrdinalIgnoreCase) ||
@@ -438,6 +438,107 @@ public sealed class OrderRepository : IOrderRepository
         }
         catch (Exception ex) when (ex is DbException or InvalidOperationException)
         {
+        }
+    }
+
+    public async Task UpdateAsync(Order order, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(order);
+
+        MemoryById[order.Id] = order;
+        MemoryByNumber[order.OrderNumber] = order;
+        InvalidateListCache();
+
+        const string sql = """
+            UPDATE public.orders
+            SET
+                title = COALESCE(NULLIF(@title, ''), title),
+                amount_minor = @amount_minor,
+                status = LOWER(@status),
+                metadata_json = @metadata_json::jsonb,
+                updated_at = @updated_at
+            WHERE id = @id;
+
+            UPDATE public.google_form_submissions
+            SET
+                customer_name = COALESCE(NULLIF(@customer_name, ''), customer_name),
+                customer_email = COALESCE(NULLIF(@customer_email, ''), customer_email),
+                description = COALESCE(NULLIF(@title, ''), description),
+                amount_minor = @amount_minor,
+                status = LOWER(@status),
+                updated_at = @updated_at
+            WHERE order_id = @id OR order_number = @order_number;
+            """;
+
+        try
+        {
+            DbConnection connection = await _connectionScope.GetOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            await using DbCommand cmd = connection.CreateCommand();
+            cmd.Transaction = _connectionScope.CurrentTransaction;
+            cmd.CommandText = sql;
+            cmd.CommandTimeout = SqlTimeouts.StandardCommandSeconds;
+
+            AddParam(cmd, "@id", order.Id);
+            AddParam(cmd, "@order_number", order.OrderNumber);
+            AddParam(cmd, "@title", order.Title);
+            AddParam(cmd, "@customer_name", order.CustomerName);
+            AddParam(cmd, "@customer_email", order.CustomerEmail);
+            AddParam(cmd, "@amount_minor", order.Amount.AmountMinor);
+            AddParam(cmd, "@status", order.Status.ToLowerInvariant());
+            AddParam(cmd, "@metadata_json", order.MetadataJson);
+            AddParam(cmd, "@updated_at", order.UpdatedAt);
+
+            await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is DbException or InvalidOperationException)
+        {
+            _logger?.LogWarning(ex, "Failed executing SQL UpdateAsync for order {OrderId}. In-memory state updated.", order.Id);
+        }
+    }
+
+    public async Task DeleteAsync(string orderId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(orderId)) return;
+        string cleanId = orderId.Trim();
+
+        MemoryById.TryRemove(cleanId, out _);
+        var matchingNumber = MemoryByNumber.FirstOrDefault(kvp => kvp.Value.Id.Equals(cleanId, StringComparison.OrdinalIgnoreCase)).Key;
+        if (!string.IsNullOrEmpty(matchingNumber))
+        {
+            MemoryByNumber.TryRemove(matchingNumber, out _);
+        }
+        InvalidateListCache();
+
+        const string sql = """
+            DELETE FROM public.google_form_submissions
+            WHERE order_id = @order_id;
+
+            DELETE FROM public.fulfillment_outbox
+            WHERE order_id = @order_id;
+
+            DELETE FROM public.payment_attempts
+            WHERE order_id = @order_id;
+
+            DELETE FROM public.orders
+            WHERE id = @order_id
+              AND LOWER(status) NOT IN ('paid', 'succeeded', 'completed');
+            """;
+
+        try
+        {
+            DbConnection connection = await _connectionScope.GetOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            await using DbCommand cmd = connection.CreateCommand();
+            cmd.Transaction = _connectionScope.CurrentTransaction;
+            cmd.CommandText = sql;
+            cmd.CommandTimeout = SqlTimeouts.StandardCommandSeconds;
+
+            AddParam(cmd, "@order_id", cleanId);
+
+            await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is DbException or InvalidOperationException)
+        {
+            _logger?.LogWarning(ex, "Failed executing SQL DeleteAsync for order {OrderId}. In-memory state removed.", cleanId);
         }
     }
 

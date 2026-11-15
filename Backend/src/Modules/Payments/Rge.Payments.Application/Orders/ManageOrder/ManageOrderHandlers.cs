@@ -9,6 +9,29 @@ using Rge.Payments.Domain.Orders;
 
 namespace Rge.Payments.Application.Orders.ManageOrder;
 
+public static class ManageOrderSecurity
+{
+    private static readonly string[] SharedSystemUserIds =
+    {
+        "google_forms_agent",
+        "google_forms_bridge",
+        "acme_admin",
+        "anonymous",
+        "system"
+    };
+
+    public static bool CanActorAccessOrder(string orderUserId, string orderId, string? currentActorId)
+    {
+        ArgumentNullException.ThrowIfNull(orderUserId);
+        ArgumentNullException.ThrowIfNull(orderId);
+
+        if (string.IsNullOrWhiteSpace(currentActorId)) return true;
+        if (string.Equals(orderUserId, currentActorId, StringComparison.OrdinalIgnoreCase)) return true;
+        if (orderId.StartsWith("ord_gf_", StringComparison.OrdinalIgnoreCase)) return true;
+        return SharedSystemUserIds.Contains(orderUserId, StringComparer.OrdinalIgnoreCase);
+    }
+}
+
 public sealed record UpdateOrderResponse(
     bool Success,
     string OrderId,
@@ -23,7 +46,9 @@ public sealed record UpdateOrderCommand(
     string? Title,
     long? AmountMinor,
     string? Currency,
-    JsonElement? Metadata) : ICommand<UpdateOrderResponse>;
+    JsonElement? Metadata,
+    string? CustomerName = null,
+    string? CustomerEmail = null) : ICommand<UpdateOrderResponse>;
 
 public sealed class UpdateOrderHandler : ICommandHandler<UpdateOrderCommand, UpdateOrderResponse>
 {
@@ -94,6 +119,17 @@ public sealed class UpdateOrderHandler : ICommandHandler<UpdateOrderCommand, Upd
             return Result.Failure<UpdateOrderResponse>(updateResult.Error);
         }
 
+        if (!string.IsNullOrWhiteSpace(command.CustomerName) || !string.IsNullOrWhiteSpace(command.CustomerEmail))
+        {
+            order.UpdateDetails(
+                customerName: command.CustomerName,
+                customerEmail: command.CustomerEmail,
+                description: command.Title,
+                amount: newAmount ?? order.Amount,
+                updatedAt: _clock.UtcNow);
+        }
+
+        await _repository.UpdateAsync(order, cancellationToken).ConfigureAwait(false);
         await _repository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
 
         return Result.Success(new UpdateOrderResponse(
@@ -159,6 +195,7 @@ public sealed class CancelOrderHandler : ICommandHandler<CancelOrderCommand, Can
             return Result.Failure<CancelOrderResponse>(cancelResult.Error);
         }
 
+        await _repository.UpdateAsync(order, cancellationToken).ConfigureAwait(false);
         await _repository.SaveAsync(order, cancellationToken).ConfigureAwait(false);
 
         return Result.Success(new CancelOrderResponse(
@@ -170,3 +207,59 @@ public sealed class CancelOrderHandler : ICommandHandler<CancelOrderCommand, Can
     }
 }
 
+public sealed record DeleteOrderResponse(
+    bool Success,
+    string OrderId,
+    bool Deleted,
+    string Message);
+
+public sealed record DeleteOrderCommand(
+    string OrderId,
+    string? Reason = null) : ICommand<DeleteOrderResponse>;
+
+public sealed class DeleteOrderHandler : ICommandHandler<DeleteOrderCommand, DeleteOrderResponse>
+{
+    private readonly IOrderRepository _repository;
+
+    public DeleteOrderHandler(IOrderRepository repository)
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        _repository = repository;
+    }
+
+    public async Task<Result<DeleteOrderResponse>> HandleAsync(
+        DeleteOrderCommand command,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        if (string.IsNullOrWhiteSpace(command.OrderId))
+        {
+            return Result.Failure<DeleteOrderResponse>(
+                Error.Validation("Payments.OrderIdRequired", "Order ID must not be empty."));
+        }
+
+        string cleanId = command.OrderId.Trim();
+        Order? order = await _repository.GetByIdAsync(cleanId, cancellationToken).ConfigureAwait(false)
+            ?? await _repository.GetByOrderNumberAsync(cleanId, cancellationToken).ConfigureAwait(false);
+
+        if (order is null)
+        {
+            return Result.Failure<DeleteOrderResponse>(OrderErrors.NotFound(cleanId));
+        }
+
+        if (order.Status == "paid")
+        {
+            return Result.Failure<DeleteOrderResponse>(
+                Error.Conflict("Payments.OrderAlreadyPaid", $"Paid order '{order.OrderNumber}' with official treasury records cannot be deleted."));
+        }
+
+        await _repository.DeleteAsync(order.Id, cancellationToken).ConfigureAwait(false);
+
+        return Result.Success(new DeleteOrderResponse(
+            Success: true,
+            OrderId: order.Id,
+            Deleted: true,
+            Message: "Order deleted successfully."));
+    }
+}

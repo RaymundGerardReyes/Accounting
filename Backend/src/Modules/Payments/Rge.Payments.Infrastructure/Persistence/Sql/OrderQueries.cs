@@ -57,9 +57,9 @@ public static class OrderQueries
                OR LOWER(o.status) = LOWER(CAST(@status AS text))
                OR (LOWER(CAST(@status AS text)) = 'pending' AND LOWER(o.status) IN ('pending', 'pending_payment'))
                OR (LOWER(CAST(@status AS text)) = 'paid' AND LOWER(o.status) IN ('paid', 'settled')))
-          AND (CAST(@UserId AS text) IS NULL OR o.user_id = CAST(@UserId AS text))
+          AND (CAST(@UserId AS text) IS NULL OR o.user_id = CAST(@UserId AS text) OR o.user_id = 'google_forms_bridge' OR o.user_id = 'anonymous' OR o.id LIKE 'ord_gf_%')
         ORDER BY o.created_at DESC, o.id DESC
-        LIMIT @limit;
+        LIMIT COALESCE(@limit, 250);
         """;
 
     public const string ListOrders = SelectListSql;
