@@ -61,6 +61,20 @@ var app = builder.Build();
 
 // Seed default development credentials if running in Development or FINANCE_SEED == "dev"
 await IdentityDbSeeder.SeedDevelopmentCredentialsAsync(app.Services);
+
+// Warm the database connection pool at startup to eliminate cold TLS handshakes on hot paths
+try
+{
+    var dataSource = app.Services.GetService<System.Data.Common.DbDataSource>();
+    if (dataSource != null)
+    {
+        await using var warmupConn = await dataSource.OpenConnectionAsync().ConfigureAwait(false);
+    }
+}
+catch (Exception)
+{
+    // Non-fatal if running in offline test harness or disconnected container
+}
 // 4. Pre-compute version payload once at startup (zero reflection on hot requests)
 var entryAssembly = Assembly.GetEntryAssembly() ?? typeof(Program).Assembly;
 
