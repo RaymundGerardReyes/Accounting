@@ -358,11 +358,35 @@ public sealed class OrderRepository : IOrderRepository
         }
     }
 
-    private static void AddParam(DbCommand cmd, string name, object? value)
+    private static void AddParam(DbCommand cmd, string name, object? value, System.Data.DbType? dbType = null)
     {
         DbParameter param = cmd.CreateParameter();
         param.ParameterName = name;
         param.Value = value ?? DBNull.Value;
+        if (dbType.HasValue)
+        {
+            param.DbType = dbType.Value;
+        }
+        else if (value is string)
+        {
+            param.DbType = System.Data.DbType.String;
+        }
+        else if (value is long)
+        {
+            param.DbType = System.Data.DbType.Int64;
+        }
+        else if (value is int)
+        {
+            param.DbType = System.Data.DbType.Int32;
+        }
+        else if (value is DateTimeOffset)
+        {
+            param.DbType = System.Data.DbType.DateTimeOffset;
+        }
+        else if (value is null)
+        {
+            param.DbType = System.Data.DbType.String;
+        }
         cmd.Parameters.Add(param);
     }
 }

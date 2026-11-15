@@ -31,16 +31,6 @@ public static class OrderQueries
         """;
 
     public const string SelectListSql = """
-        SELECT id, user_id, order_number, title, category, reference_code,
-               amount_minor, currency, status, metadata_json, created_at, updated_at
-        FROM orders
-        WHERE (@status IS NULL OR status = @status)
-          AND (@UserId IS NULL OR user_id = @UserId)
-        ORDER BY created_at DESC, id DESC
-        LIMIT @limit;
-        """;
-
-    public const string ListOrders = """
         SELECT
             o.id,
             o.user_id,
@@ -53,13 +43,26 @@ public static class OrderQueries
             o.status,
             o.metadata_json,
             o.created_at,
-            o.updated_at
+            o.updated_at,
+            o.customer_name,
+            o.customer_email,
+            o.description,
+            o.subtotal_minor,
+            o.vat_minor,
+            o.source_channel,
+            o.external_reference_id,
+            o.idempotency_key
         FROM public.orders o
-        WHERE (@UserId IS NULL OR o.user_id = @UserId)
-          AND (@status IS NULL OR LOWER(o.status) = LOWER(@status))
+        WHERE (CAST(@status AS text) IS NULL
+               OR LOWER(o.status) = LOWER(CAST(@status AS text))
+               OR (LOWER(CAST(@status AS text)) = 'pending' AND LOWER(o.status) IN ('pending', 'pending_payment'))
+               OR (LOWER(CAST(@status AS text)) = 'paid' AND LOWER(o.status) IN ('paid', 'settled')))
+          AND (CAST(@UserId AS text) IS NULL OR o.user_id = CAST(@UserId AS text))
         ORDER BY o.created_at DESC, o.id DESC
         LIMIT @limit;
         """;
+
+    public const string ListOrders = SelectListSql;
 
     public const string ListAllOrders = """
         SELECT id, user_id, order_number, title, category, reference_code,

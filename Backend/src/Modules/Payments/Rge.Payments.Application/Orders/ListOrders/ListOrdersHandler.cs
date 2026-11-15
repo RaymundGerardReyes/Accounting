@@ -14,10 +14,30 @@ namespace Rge.Payments.Application.Orders.ListOrders;
 
 public sealed class ListOrdersHandler : IQueryHandler<ListOrdersQuery, IReadOnlyList<OrderDto>>
 {
-    private static readonly HashSet<string> PrivilegedRoles = new(StringComparer.OrdinalIgnoreCase)
+    private static bool IsPrivilegedRole(string role)
     {
-        "admin", "finance", "finance_admin", "treasury", "accounting", "approver", "auditor", "operator", "system", "bridge"
-    };
+        if (string.IsNullOrWhiteSpace(role))
+        {
+            return false;
+        }
+
+        var r = role.Trim();
+        return r.Contains("admin", StringComparison.OrdinalIgnoreCase) ||
+               r.Contains("finance", StringComparison.OrdinalIgnoreCase) ||
+               r.Contains("treasury", StringComparison.OrdinalIgnoreCase) ||
+               r.Contains("account", StringComparison.OrdinalIgnoreCase) ||
+               r.Contains("control", StringComparison.OrdinalIgnoreCase) ||
+               r.Contains("review", StringComparison.OrdinalIgnoreCase) ||
+               r.Contains("audit", StringComparison.OrdinalIgnoreCase) ||
+               r.Contains("approv", StringComparison.OrdinalIgnoreCase) ||
+               r.Contains("supervisor", StringComparison.OrdinalIgnoreCase) ||
+               r.Contains("maker", StringComparison.OrdinalIgnoreCase) ||
+               r.Contains("verifier", StringComparison.OrdinalIgnoreCase) ||
+               r.Contains("manager", StringComparison.OrdinalIgnoreCase) ||
+               r.Contains("operator", StringComparison.OrdinalIgnoreCase) ||
+               r.Contains("system", StringComparison.OrdinalIgnoreCase) ||
+               r.Contains("bridge", StringComparison.OrdinalIgnoreCase);
+    }
 
     private readonly IOrderRepository _orders;
     private readonly IPaymentAttemptRepository _attemptRepository;
@@ -84,7 +104,7 @@ public sealed class ListOrdersHandler : IQueryHandler<ListOrdersQuery, IReadOnly
         }
 
         var roles = _actor.Roles;
-        if (roles == null || roles.Count == 0 || roles.Any(r => PrivilegedRoles.Contains(r)))
+        if (roles == null || roles.Count == 0 || roles.Any(IsPrivilegedRole))
         {
             return null;
         }
