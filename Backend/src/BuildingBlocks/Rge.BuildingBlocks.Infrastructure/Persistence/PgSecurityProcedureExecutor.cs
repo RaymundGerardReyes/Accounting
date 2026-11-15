@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Data;
 using System.Data.Common;
 using Rge.BuildingBlocks.SharedKernel.Results;
@@ -13,9 +14,14 @@ public sealed record AtomicWebhookDbOutcome(
 /// <summary>
 /// Executes the hardened PostgreSQL SECURITY DEFINER stored procedures for
 /// RBAC/SoD verification, single-round-trip PayMongo webhook ingestion, and set-based audit chain verification.
+/// Features strongly-typed parameter binding, synchronous column reads, and a short-lived SoD decision cache.
 /// </summary>
 public sealed class PgSecurityProcedureExecutor
 {
+    private sealed record SodCacheKey(string ActorId, string? RequestorId, string Workflow, string Stage, string TargetDepartmentId, long AmountMinor);
+    private sealed record SodCacheEntry(DateTimeOffset ExpiresAtUtc, Result Result);
+    private static readonly ConcurrentDictionary<SodCacheKey, SodCacheEntry> SodCache = new();
+
     private const string EnforceSodSql = """
         SELECT is_authorized, error_code, error_message
         FROM fn_enforce_sod_and_approval_limit(
@@ -41,6 +47,11 @@ public sealed class PgSecurityProcedureExecutor
         _connectionScope = connectionScope;
     }
 
+    public static void InvalidateSodCache()
+    {
+        SodCache.Clear();
+    }
+
     public async Task<Result> EnforceSodAndApprovalLimitAsync(
         string actorId,
         string? requestorId,
@@ -50,18 +61,24 @@ public sealed class PgSecurityProcedureExecutor
         long amountMinor,
         CancellationToken cancellationToken = default)
     {
+        var cacheKey = new SodCacheKey(actorId, requestorId, workflow, stage, targetDepartmentId, amountMinor);
+        if (SodCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresAtUtc > DateTimeOffset.UtcNow)
+        {
+            return cached.Result;
+        }
+
         DbConnection conn = await _connectionScope.GetOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using DbCommand cmd = conn.CreateCommand();
         cmd.Transaction = _connectionScope.CurrentTransaction;
         cmd.CommandText = EnforceSodSql;
         cmd.CommandTimeout = SqlTimeouts.FastReadSeconds;
 
-        AddParam(cmd, "@p_actor_id", actorId);
-        AddParam(cmd, "@p_requestor_id", requestorId);
-        AddParam(cmd, "@p_workflow", workflow);
-        AddParam(cmd, "@p_stage", stage);
-        AddParam(cmd, "@p_target_department_id", targetDepartmentId);
-        AddParam(cmd, "@p_amount_minor", amountMinor);
+        AddParam(cmd, "@p_actor_id", DbType.String, actorId);
+        AddParam(cmd, "@p_requestor_id", DbType.String, requestorId);
+        AddParam(cmd, "@p_workflow", DbType.String, workflow);
+        AddParam(cmd, "@p_stage", DbType.String, stage);
+        AddParam(cmd, "@p_target_department_id", DbType.String, targetDepartmentId);
+        AddParam(cmd, "@p_amount_minor", DbType.Int64, amountMinor);
 
         await using DbDataReader reader = await cmd
             .ExecuteReaderAsync(CommandBehavior.SingleRow, cancellationToken)
@@ -75,7 +92,9 @@ public sealed class PgSecurityProcedureExecutor
         bool isAuthorized = reader.GetBoolean(0);
         if (isAuthorized)
         {
-            return Result.Success();
+            var success = Result.Success();
+            SodCache[cacheKey] = new SodCacheEntry(DateTimeOffset.UtcNow.AddSeconds(3), success);
+            return success;
         }
 
         string code = await reader.IsDBNullAsync(1, cancellationToken).ConfigureAwait(false)
@@ -85,9 +104,11 @@ public sealed class PgSecurityProcedureExecutor
             ? "Access denied by database security policy."
             : reader.GetString(2);
 
-        return code.Contains("SoD", StringComparison.OrdinalIgnoreCase)
+        var failure = code.Contains("SoD", StringComparison.OrdinalIgnoreCase)
             ? Result.Failure(Error.SodViolation(code, message))
             : Result.Failure(Error.Forbidden(code, message));
+
+        return failure;
     }
 
     public async Task<AtomicWebhookDbOutcome> IngestPayMongoWebhookAtomicAsync(
@@ -109,16 +130,16 @@ public sealed class PgSecurityProcedureExecutor
         cmd.CommandText = IngestWebhookAtomicSql;
         cmd.CommandTimeout = SqlTimeouts.WebhookHotWriteSeconds;
 
-        AddParam(cmd, "@p_webhook_id", webhookId);
-        AddParam(cmd, "@p_provider", provider);
-        AddParam(cmd, "@p_provider_event_id", providerEventId);
-        AddParam(cmd, "@p_event_type", eventType);
-        AddParam(cmd, "@p_raw_payload", rawPayload);
-        AddParam(cmd, "@p_payment_attempt_id", paymentAttemptId);
-        AddParam(cmd, "@p_provider_payment_id", providerPaymentId);
-        AddParam(cmd, "@p_actual_method", actualMethod);
-        AddParam(cmd, "@p_outbox_id", outboxId);
-        AddParam(cmd, "@p_correlation_id", correlationId);
+        AddParam(cmd, "@p_webhook_id", DbType.String, webhookId);
+        AddParam(cmd, "@p_provider", DbType.String, provider);
+        AddParam(cmd, "@p_provider_event_id", DbType.String, providerEventId);
+        AddParam(cmd, "@p_event_type", DbType.String, eventType);
+        AddParam(cmd, "@p_raw_payload", DbType.String, rawPayload);
+        AddParam(cmd, "@p_payment_attempt_id", DbType.String, paymentAttemptId);
+        AddParam(cmd, "@p_provider_payment_id", DbType.String, providerPaymentId);
+        AddParam(cmd, "@p_actual_method", DbType.String, actualMethod);
+        AddParam(cmd, "@p_outbox_id", DbType.String, outboxId);
+        AddParam(cmd, "@p_correlation_id", DbType.String, correlationId);
 
         await using DbDataReader reader = await cmd
             .ExecuteReaderAsync(CommandBehavior.SingleRow, cancellationToken)
@@ -136,10 +157,11 @@ public sealed class PgSecurityProcedureExecutor
             ResolvedAttemptId: await reader.IsDBNullAsync(3, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(3));
     }
 
-    private static void AddParam(DbCommand cmd, string name, object? value)
+    private static void AddParam(DbCommand cmd, string name, DbType dbType, object? value)
     {
         DbParameter param = cmd.CreateParameter();
         param.ParameterName = name;
+        param.DbType = dbType;
         param.Value = value ?? DBNull.Value;
         cmd.Parameters.Add(param);
     }

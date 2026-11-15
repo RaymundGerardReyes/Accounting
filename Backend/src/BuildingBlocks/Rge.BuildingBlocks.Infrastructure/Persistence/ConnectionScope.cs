@@ -16,6 +16,11 @@ public sealed class ConnectionScope : IAsyncDisposable, IDisposable
     private DbConnection? _connection;
     public DbTransaction? CurrentTransaction { get; internal set; }
 
+    public void SetActiveTransaction(DbTransaction? tx)
+    {
+        CurrentTransaction = tx;
+    }
+
     public ConnectionScope(NpgsqlDataSourceFactory? dataSourceFactory = null)
     {
         _dataSourceFactory = dataSourceFactory;

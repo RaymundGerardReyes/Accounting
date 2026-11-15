@@ -2,7 +2,11 @@ using System.Reflection;
 using Rge.Accounting.Host.Composition;
 using Rge.Accounting.Host.Configuration;
 using Rge.Accounting.Host.Pipeline;
+using Rge.BuildingBlocks.Infrastructure.Observability;
 using Rge.Identity.Infrastructure;
+
+// 0. Initialize RuntimeLogEnvironmentGate from .env and environment
+RuntimeLogEnvironmentGate.InitializeFromDotEnvAndEnvironment(Directory.GetCurrentDirectory());
 
 if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")) &&
     string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DYNO")))
@@ -120,6 +124,9 @@ app.UseMiddleware<RequestLoggingEnricher>();
 
 // 6. Map probes (/health, /api/health, /version) and all registered modules
 app.MapAccountingPlatformEndpoints(cachedVersionPayload);
+
+// 7. Map Centralized Runtime Logs Controller (enabled in Development, 403 Forbidden in Production)
+app.MapCentralizedRuntimeLogsController();
 
 await app.RunAsync();
 

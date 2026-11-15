@@ -1,5 +1,7 @@
 using System.Data.Common;
+using Microsoft.Extensions.Logging;
 using Npgsql;
+using Rge.BuildingBlocks.Infrastructure.Observability;
 
 namespace Rge.BuildingBlocks.Infrastructure.Persistence;
 
@@ -18,10 +20,21 @@ public sealed class NpgsqlDataSourceFactory : IAsyncDisposable, IDisposable
         _dataSource = dataSource;
     }
 
-    public static NpgsqlDataSource Create(string rawConnectionString)
+    public static NpgsqlDataSource Create(string rawConnectionString, ILoggerFactory? loggerFactory = null)
     {
         string normalized = NormalizeConnectionString(rawConnectionString);
         var builder = new NpgsqlDataSourceBuilder(normalized);
+        if (loggerFactory is not null)
+        {
+            builder.UseLoggerFactory(loggerFactory);
+        }
+
+        // STRICT GATE: Enable raw Npgsql parameter logging IF AND ONLY IF ASPNETCORE_ENVIRONMENT == "Development"
+        if (RuntimeLogEnvironmentGate.IsDevelopmentFullBlast)
+        {
+            builder.EnableParameterLogging();
+        }
+
         return builder.Build();
     }
 
@@ -52,6 +65,7 @@ public sealed class NpgsqlDataSourceFactory : IAsyncDisposable, IDisposable
             {
                 kvBuilder.SslMode = SslMode.Require;
             }
+            ApplyPoolDefaults(kvBuilder);
             return kvBuilder.ConnectionString;
         }
 
@@ -87,24 +101,35 @@ public sealed class NpgsqlDataSourceFactory : IAsyncDisposable, IDisposable
                     Database = database,
                     Username = username,
                     Password = password,
-                    Pooling = true,
-                    MinPoolSize = 5,
-                    MaxPoolSize = 50,
                     SslMode = sslExplicitlyRequired
                         ? SslMode.Require
                         : (sslExplicitlyDisabled || isLocal ? SslMode.Disable : SslMode.Require),
 #pragma warning disable CS0618 // TrustServerCertificate is obsolete in Npgsql
                     TrustServerCertificate = true,
 #pragma warning restore CS0618
-                    NoResetOnClose = true,
-                    MaxAutoPrepare = 0
                 };
 
+                ApplyPoolDefaults(csb);
                 return csb.ConnectionString;
             }
         }
 
         return cleaned;
+    }
+
+    private static void ApplyPoolDefaults(NpgsqlConnectionStringBuilder builder)
+    {
+        builder.Pooling = true;
+        builder.MinPoolSize = 5;
+        builder.MaxPoolSize = 50;
+        builder.KeepAlive = 30;
+        builder.NoResetOnClose = true;
+        builder.MaxAutoPrepare = 32;
+        builder.AutoPrepareMinUsages = 2;
+        builder.ConnectionIdleLifetime = 300;
+        builder.ConnectionPruningInterval = 10;
+        builder.Timeout = 15;
+        builder.CommandTimeout = 30;
     }
 
     public ValueTask<DbConnection> OpenConnectionAsync(CancellationToken cancellationToken = default) =>

@@ -401,7 +401,7 @@ public static class ServiceCollectionExtensions
             {
                 try
                 {
-                    return NpgsqlDataSourceFactory.Create(rawConn);
+                    return NpgsqlDataSourceFactory.Create(rawConn, sp.GetService<ILoggerFactory>());
                 }
                 catch
                 {
