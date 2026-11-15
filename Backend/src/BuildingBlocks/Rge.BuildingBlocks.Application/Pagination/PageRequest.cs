@@ -1,127 +1,102 @@
-using System.Globalization;
-
-using System.Text;
-
-
+using System;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Rge.BuildingBlocks.Application.Pagination;
 
-
-
-/// <summary>
-
-/// Encodes and decodes keyset pagination cursors (TimestampTicks + EntityId)
-
-/// so SQL queries use indexed seek predicates instead of slow OFFSET scans.
-
-/// </summary>
-
-public static class KeysetCursor
-
+public sealed record PageRequest
 {
+    public const int DefaultPage = 1;
+    public const int DefaultPageSize = 20;
+    public const int MaxPageSize = 100;
 
-    public static string Encode(DateTimeOffset createdAtUtc, string id)
+    public int Page { get; }
+    public int PageSize { get; }
+    public string? Status { get; }
+    public string? Category { get; }
+    public string? Search { get; }
+    public string? SortBy { get; }
+    public string SortDir { get; }
 
+    public PageRequest(
+        int? page = DefaultPage,
+        int? pageSize = DefaultPageSize,
+        string? status = null,
+        string? category = null,
+        string? search = null,
+        string? sortBy = null,
+        string? sortDir = "desc")
     {
+        Page = Math.Max(DefaultPage, page ?? DefaultPage);
+        PageSize = Math.Clamp(pageSize ?? DefaultPageSize, 1, MaxPageSize);
 
-        ArgumentException.ThrowIfNullOrWhiteSpace(id);
-
-        string raw = $"{createdAtUtc.UtcTicks.ToString(CultureInfo.InvariantCulture)}|{id}";
-
-        byte[] bytes = Encoding.UTF8.GetBytes(raw);
-
-        return Convert.ToBase64String(bytes)
-
-            .Replace('+', '-')
-
-            .Replace('/', '_')
-
-            .TrimEnd('=');
-
+        Status = NormalizeFilter(status);
+        Category = NormalizeFilter(category);
+        Search = NormalizeSearch(search);
+        SortBy = string.IsNullOrWhiteSpace(sortBy) ? "createdAt" : sortBy.Trim();
+        SortDir = string.Equals(sortDir?.Trim(), "asc", StringComparison.OrdinalIgnoreCase)
+            ? "asc"
+            : "desc";
     }
 
-
-
-    public static bool TryDecode(string? cursor, out DateTimeOffset createdAtUtc, out string id)
-
+    /// <summary>
+    /// Backward-compatibility constructor for single-cursor / limit queries.
+    /// </summary>
+    public PageRequest(string? cursor, int limit = 50)
+        : this(page: 1, pageSize: limit, search: cursor)
     {
-
-        createdAtUtc = default;
-
-        id = string.Empty;
-
-
-
-        if (string.IsNullOrWhiteSpace(cursor))
-
-        {
-
-            return false;
-
-        }
-
-
-
-        try
-
-        {
-
-            string padded = cursor.Replace('-', '+').Replace('_', '/');
-
-            switch (padded.Length % 4)
-
-            {
-
-                case 2: padded += "=="; break;
-
-                case 3: padded += "="; break;
-
-            }
-
-
-
-            byte[] bytes = Convert.FromBase64String(padded);
-
-            string decoded = Encoding.UTF8.GetString(bytes);
-
-            int separatorIndex = decoded.IndexOf('|', StringComparison.Ordinal);
-
-            if (separatorIndex <= 0 || separatorIndex == decoded.Length - 1)
-
-            {
-
-                return false;
-
-            }
-
-
-
-            if (!long.TryParse(decoded.AsSpan(0, separatorIndex), NumberStyles.Integer, CultureInfo.InvariantCulture, out long ticks))
-
-            {
-
-                return false;
-
-            }
-
-
-
-            createdAtUtc = new DateTimeOffset(ticks, TimeSpan.Zero);
-
-            id = decoded[(separatorIndex + 1)..];
-
-            return !string.IsNullOrWhiteSpace(id);
-
-        }
-
-        catch (FormatException)
-
-        {
-
-            return false;
-
-        }
-
     }
 
+    /// <summary>
+    /// Overflow-safe SQL OFFSET calculation.
+    /// </summary>
+    public int Offset => (int)Math.Min(int.MaxValue, (long)(Page - 1) * PageSize);
+
+    public int ClampedLimit => PageSize;
+
+    private static string? NormalizeFilter(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var trimmed = value.Trim();
+        return string.Equals(trimmed, "All", StringComparison.OrdinalIgnoreCase) ? null : trimmed;
+    }
+
+    private static string? NormalizeSearch(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var trimmed = value.Trim();
+        return trimmed.Length > 120 ? trimmed[..120] : trimmed;
+    }
+}
+
+[SuppressMessage("Design", "CA1000:Do not declare static members on generic types", Justification = "Standard factory pattern")]
+public sealed record PagedResult<T>(
+    IReadOnlyList<T> Items,
+    int Page,
+    int PageSize,
+    int TotalCount,
+    int TotalPages,
+    bool HasNextPage,
+    bool HasPreviousPage)
+{
+    public static PagedResult<T> Create(
+        IReadOnlyList<T> items,
+        int page,
+        int pageSize,
+        int totalCount)
+    {
+        var safePageSize = Math.Clamp(pageSize, 1, PageRequest.MaxPageSize);
+        var safeTotalCount = Math.Max(0, totalCount);
+        var totalPages = Math.Max(1, (int)Math.Ceiling(safeTotalCount / (double)safePageSize));
+        var safePage = Math.Max(1, page);
+
+        return new PagedResult<T>(
+            Items: items,
+            Page: safePage,
+            PageSize: safePageSize,
+            TotalCount: safeTotalCount,
+            TotalPages: totalPages,
+            HasNextPage: safePage < totalPages,
+            HasPreviousPage: safePage > 1);
+    }
 }

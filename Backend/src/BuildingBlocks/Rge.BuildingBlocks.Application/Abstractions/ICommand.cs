@@ -18,8 +18,7 @@ public interface ICommandHandler<in TCommand>
     Task<Result> HandleAsync(TCommand command, CancellationToken cancellationToken = default);
 }
 
-public interface ICommandHandler<in TCommand, TResponse>
+public interface ICommandHandler<in TCommand, TResponse> : IHandler<TCommand, TResponse>
     where TCommand : ICommand<TResponse>
 {
-    Task<Result<TResponse>> HandleAsync(TCommand command, CancellationToken cancellationToken = default);
 }

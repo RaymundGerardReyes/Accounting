@@ -13,5 +13,13 @@ public interface IReceiptMailer
         string recipientEmail,
         byte[] pdfBytes,
         CancellationToken cancellationToken = default);
+
+    Task SendReceiptAsync(
+        OfficialReceipt receipt,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(receipt);
+        return SendReceiptEmailAsync(receipt, receipt.CustomerEmail, [], ct);
+    }
 }
 

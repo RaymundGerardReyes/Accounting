@@ -994,3 +994,84 @@ export async function fetchAuditEvents(actorUserId: string, entityType?: string)
   return handleResponse(res)
 }
 
+// =========================================================================
+// Multi-Tab Paginated Finance Endpoints & Keyset Audit
+// =========================================================================
+
+import { apiFetchWithMetrics } from "@/lib/api-client"
+import {
+  buildOrdersQueryString,
+  normalizePagedResponse,
+  PageRequestParams,
+  PagedResultWithMetrics,
+} from "@/lib/payment-api"
+import {
+  KeysetPagePayload,
+  normalizeKeysetResponse,
+} from "@/hooks/use-keyset-paginated-resource"
+
+export type FinanceResourceKey =
+  | "cash-advances"
+  | "expense-reports"
+  | "purchase-requests"
+  | "payables"
+  | "vendors"
+  | "exceptions"
+  | "policies"
+  | "tracker"
+
+const FINANCE_ENDPOINT_MAP: Record<FinanceResourceKey, string> = {
+  "cash-advances": "/api/finance/cash-advances",
+  "expense-reports": "/api/finance/expense-reports",
+  "purchase-requests": "/api/finance/purchase-requests",
+  "payables": "/api/finance/payables",
+  "vendors": "/api/finance/vendors",
+  "exceptions": "/api/finance/exceptions",
+  "policies": "/api/finance/policies",
+  "tracker": "/api/finance/reporting/tracker",
+}
+
+export async function listFinanceResourcePaginated<TItem>(
+  resource: FinanceResourceKey,
+  params: PageRequestParams = {},
+  options: { signal?: AbortSignal } = {}
+): Promise<PagedResultWithMetrics<TItem>> {
+  const endpoint = FINANCE_ENDPOINT_MAP[resource]
+  const qs = buildOrdersQueryString(params)
+  const res = await apiFetchWithMetrics<unknown>(`${endpoint}?${qs}`, {
+    signal: options.signal,
+  })
+
+  const page = Math.max(1, params.page ?? 1)
+  const pageSize = Math.min(100, Math.max(1, params.pageSize ?? 20))
+
+  return {
+    data: normalizePagedResponse<TItem>(res.data, page, pageSize),
+    metrics: {
+      apiDurationMs: res.metrics.durationMs,
+      payloadBytes: res.metrics.payloadBytes,
+      serverTiming: res.metrics.serverTiming,
+    },
+  }
+}
+
+export async function listAuditEventsKeyset<TEvent>(
+  params: { limit?: number; cursor?: string | null; action?: string; search?: string } = {},
+  options: { signal?: AbortSignal } = {}
+): Promise<{ data: KeysetPagePayload<TEvent>; durationMs: number }> {
+  const limit = Math.min(100, Math.max(1, params.limit ?? 20))
+  const qs = new URLSearchParams({ limit: String(limit) })
+  if (params.cursor) qs.set("cursor", params.cursor)
+  if (params.action && params.action !== "All") qs.set("action", params.action)
+  if (params.search?.trim()) qs.set("search", params.search.trim())
+
+  const res = await apiFetchWithMetrics<unknown>(`/api/audit/events?${qs.toString()}`, {
+    signal: options.signal,
+  })
+
+  return {
+    data: normalizeKeysetResponse<TEvent>(res.data, limit),
+    durationMs: res.metrics.durationMs,
+  }
+}
+

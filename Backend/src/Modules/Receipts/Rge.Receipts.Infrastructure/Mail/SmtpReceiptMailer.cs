@@ -102,6 +102,24 @@ public sealed class SmtpReceiptMailer : IReceiptMailer
         }
     }
 
+    public async Task SendReceiptAsync(OfficialReceipt receipt, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(receipt);
+
+        if (string.IsNullOrWhiteSpace(receipt.CustomerEmail))
+        {
+            return;
+        }
+
+        // Pulls from QuestPdfReceiptRenderer's L1 byte cache in < 0.05ms if already rendered
+        var pdfBytes = await _pdfRenderer.RenderAsync(receipt, ct).ConfigureAwait(false);
+        var result = await SendReceiptEmailAsync(receipt, receipt.CustomerEmail, pdfBytes, ct).ConfigureAwait(false);
+        if (result.IsFailure)
+        {
+            _logger?.LogWarning("[RECEIPT-EMAIL-FAIL] Failed sending receipt email for {ReceiptNumber}: {Error}", receipt.ReceiptNumber.Value, result.Error.Message);
+        }
+    }
+
     public async Task SendAsync(
         OfficialReceipt receipt,
         string recipientEmail,

@@ -1,3 +1,5 @@
+using System.Threading;
+using System.Threading.Tasks;
 using Rge.Receipts.Domain;
 
 namespace Rge.Receipts.Application.Ports;
@@ -8,5 +10,5 @@ namespace Rge.Receipts.Application.Ports;
 public interface IPdfRenderer
 {
     byte[] RenderOfficialReceiptPdf(OfficialReceipt receipt);
+    Task<byte[]> RenderAsync(OfficialReceipt receipt, CancellationToken ct = default);
 }
-

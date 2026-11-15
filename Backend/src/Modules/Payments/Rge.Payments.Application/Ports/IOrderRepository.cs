@@ -1,6 +1,19 @@
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Rge.BuildingBlocks.Application.Pagination;
 using Rge.Payments.Domain.Orders;
 
 namespace Rge.Payments.Application.Ports;
+
+public sealed record RepositoryPageTiming(
+    double ConnectionAcquireMs,
+    double SqlDurationMs,
+    double MaterializeDurationMs);
+
+public sealed record RepositoryPagedOrders(
+    PagedResult<Order> Page,
+    RepositoryPageTiming Timing);
 
 /// <summary>
 /// Persistence port for querying and updating Order aggregates.
@@ -17,4 +30,16 @@ public interface IOrderRepository
     Task AddAsync(Order order, CancellationToken cancellationToken = default) => SaveAsync(order, cancellationToken);
     Task UpdateAsync(Order order, CancellationToken cancellationToken = default);
     Task DeleteAsync(string orderId, CancellationToken cancellationToken = default);
+
+    Task<RepositoryPagedOrders> ListPagedAsync(
+        PageRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<KeysetPage<Order>> ListKeysetAsync(
+        int limit,
+        KeysetCursor? cursor,
+        string? status,
+        string? category,
+        string? search,
+        CancellationToken cancellationToken = default);
 }

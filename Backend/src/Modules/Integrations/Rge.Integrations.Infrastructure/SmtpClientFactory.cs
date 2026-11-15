@@ -1,41 +1,175 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Mail;
 using System.Net.Sockets;
 using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using Rge.Integrations.Application.Ports;
 using Rge.Integrations.Contracts;
 
 namespace Rge.Integrations.Infrastructure;
 
+public sealed record SmtpClientLease(
+    SmtpClient Client,
+    string FromAddress,
+    string FromDisplayName,
+    bool IsConfigured);
+
+[SuppressMessage("Usage", "CA1849:Call async methods when in an async method", Justification = "CreateClient is an in-memory client construction helper without IO")]
 public sealed class SmtpClientFactory : ISmtpClientFactory
 {
+    private static readonly TimeSpan ConfigCacheTtl = TimeSpan.FromSeconds(60);
+
     private readonly IConfiguration? _configuration;
     private readonly Microsoft.Extensions.Logging.ILogger<SmtpClientFactory>? _logger;
     private readonly ISecretStore? _secretStore;
+    private readonly IServiceScopeFactory? _scopeFactory;
 
-    public SmtpClientFactory(ISecretStore secretStore)
-    {
-        _secretStore = secretStore;
-    }
+    private SmtpResolvedSettings? _cachedSettings;
+    private DateTimeOffset _cacheExpiresAtUtc = DateTimeOffset.MinValue;
 
-    public SmtpClientFactory(IConfiguration configuration, Microsoft.Extensions.Logging.ILogger<SmtpClientFactory> logger)
-    {
-        _configuration = configuration;
-        _logger = logger;
-    }
-
+    [ActivatorUtilitiesConstructor]
     public SmtpClientFactory(
         IConfiguration? configuration = null,
         Microsoft.Extensions.Logging.ILogger<SmtpClientFactory>? logger = null,
-        ISecretStore? secretStore = null)
+        ISecretStore? secretStore = null,
+        IServiceScopeFactory? scopeFactory = null)
     {
         _configuration = configuration;
         _logger = logger;
         _secretStore = secretStore;
+        _scopeFactory = scopeFactory;
     }
+
+    public SmtpClientFactory(
+        IServiceScopeFactory scopeFactory,
+        IConfiguration configuration)
+        : this(configuration, null, null, scopeFactory)
+    {
+    }
+
+    public SmtpClientFactory(ISecretStore secretStore)
+        : this(null, null, secretStore, null)
+    {
+    }
+
+    public SmtpClientFactory(IConfiguration configuration, Microsoft.Extensions.Logging.ILogger<SmtpClientFactory> logger)
+        : this(configuration, logger, null, null)
+    {
+    }
+
+    public void InvalidateCache()
+    {
+        _cacheExpiresAtUtc = DateTimeOffset.MinValue;
+        _cachedSettings = null;
+    }
+
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope", Justification = "Ownership of SmtpClient is transferred to caller via SmtpClientLease")]
+    public async Task<SmtpClientLease?> CreateClientAsync(CancellationToken ct = default)
+    {
+        var settings = await ResolveSettingsCachedAsync(ct).ConfigureAwait(false);
+        if (settings is null || string.IsNullOrWhiteSpace(settings.Host))
+        {
+            return null;
+        }
+
+        var client = new SmtpClient(settings.Host, settings.Port)
+        {
+            EnableSsl = settings.UseTls,
+            DeliveryMethod = SmtpDeliveryMethod.Network,
+            Timeout = 10_000
+        };
+
+        if (!string.IsNullOrWhiteSpace(settings.Username) && !string.IsNullOrWhiteSpace(settings.Password))
+        {
+            client.UseDefaultCredentials = false;
+            client.Credentials = new NetworkCredential(settings.Username, settings.Password);
+        }
+
+        return new SmtpClientLease(
+            Client: client,
+            FromAddress: settings.FromAddress,
+            FromDisplayName: settings.FromDisplayName,
+            IsConfigured: true);
+    }
+
+    private async Task<SmtpResolvedSettings?> ResolveSettingsCachedAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var now = DateTimeOffset.UtcNow;
+        var current = _cachedSettings;
+        if (current is not null && now < _cacheExpiresAtUtc)
+        {
+            return current;
+        }
+
+        string? host = null;
+        string? portRaw = null;
+        string? username = null;
+        string? password = null;
+        string? fromAddress = null;
+
+        if (_scopeFactory is not null)
+        {
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var secretStore = scope.ServiceProvider.GetService<ISecretStore>();
+            if (secretStore is not null)
+            {
+                host = secretStore.GetSecret("smtp_host");
+                portRaw = secretStore.GetSecret("smtp_port");
+                username = secretStore.GetSecret("smtp_user");
+                password = secretStore.GetSecret("smtp_pass");
+                fromAddress = secretStore.GetSecret("smtp_from");
+            }
+        }
+        else if (_secretStore is not null)
+        {
+            host = _secretStore.GetSecret("smtp_host");
+            portRaw = _secretStore.GetSecret("smtp_port");
+            username = _secretStore.GetSecret("smtp_user");
+            password = _secretStore.GetSecret("smtp_pass");
+            fromAddress = _secretStore.GetSecret("smtp_from");
+        }
+
+        host ??= _configuration?["Smtp:Host"] ?? Environment.GetEnvironmentVariable("SMTP_HOST");
+        portRaw ??= _configuration?["Smtp:Port"] ?? Environment.GetEnvironmentVariable("SMTP_PORT");
+        username ??= _configuration?["Smtp:Username"] ?? Environment.GetEnvironmentVariable("SMTP_USER");
+        password ??= _configuration?["Smtp:Password"] ?? Environment.GetEnvironmentVariable("SMTP_PASS");
+        fromAddress ??= _configuration?["Smtp:From"] ?? Environment.GetEnvironmentVariable("SMTP_FROM") ?? username ?? "no-reply@raymundgerardestaca.dev";
+
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return null;
+        }
+
+        var port = int.TryParse(portRaw, out var parsedPort) && parsedPort > 0 ? parsedPort : 587;
+        var useTls = port is 587 or 465 or 2525;
+
+        var resolved = new SmtpResolvedSettings(
+            Host: host.Trim(),
+            Port: port,
+            Username: username?.Trim(),
+            Password: password,
+            FromAddress: fromAddress.Trim(),
+            FromDisplayName: "RGE Accounting Treasury",
+            UseTls: useTls);
+
+        _cachedSettings = resolved;
+        _cacheExpiresAtUtc = now.Add(ConfigCacheTtl);
+        return resolved;
+    }
+
+    private sealed record SmtpResolvedSettings(
+        string Host,
+        int Port,
+        string? Username,
+        string? Password,
+        string FromAddress,
+        string FromDisplayName,
+        bool UseTls);
 
     public SmtpRuntimeSettings ResolveSettings()
     {

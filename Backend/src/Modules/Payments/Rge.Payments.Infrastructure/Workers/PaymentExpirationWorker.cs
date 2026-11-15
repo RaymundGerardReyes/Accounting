@@ -211,6 +211,37 @@ public sealed class PaymentExpirationWorker : BackgroundService
 
                             // Eagerly pre-issue the Official Receipt and warm the L1 cache in the background via Outbox integration event
                             // (already dispatched via outboxPublisher.PublishOrderPaidAsync above)
+                            var attemptId = attempt.Id;
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    await using var receiptScope = _scopeFactory.CreateAsyncScope();
+                                    var handlerType = Type.GetType("Rge.Receipts.Application.RenderReceiptPdf.RenderReceiptPdfHandler, Rge.Receipts.Application");
+                                    var queryType = Type.GetType("Rge.Receipts.Application.RenderReceiptPdf.RenderReceiptPdfQuery, Rge.Receipts.Application");
+                                    if (handlerType is not null && queryType is not null)
+                                    {
+                                        var handler = receiptScope.ServiceProvider.GetService(handlerType);
+                                        if (handler is not null)
+                                        {
+                                            var query = Activator.CreateInstance(queryType, attemptId, null);
+                                            var method = handlerType.GetMethod("HandleAsync", [queryType, typeof(CancellationToken)]);
+                                            if (method is not null && query is not null)
+                                            {
+                                                var task = (Task?)method.Invoke(handler, [query, CancellationToken.None]);
+                                                if (task is not null)
+                                                {
+                                                    await task.ConfigureAwait(false);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                catch
+                                {
+                                    // Background pre-warming must never fail the worker loop
+                                }
+                            }, CancellationToken.None);
                         }
 
                         continue;

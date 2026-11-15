@@ -136,4 +136,108 @@ public static class OrderQueries
             END IF;
         END $$;
         """;
+
+    public const string ListOrdersPagedSql = """
+        WITH filtered_base AS (
+            SELECT
+                o.id,
+                o.order_number,
+                o.customer_name,
+                o.customer_email,
+                o.category,
+                o.status,
+                COALESCE(o.subtotal_minor, 0) AS subtotal_centavos,
+                COALESCE(o.vat_minor, 0) AS vat_centavos,
+                o.amount_minor AS total_centavos,
+                o.currency,
+                o.created_at,
+                o.updated_at
+            FROM public.orders o
+            WHERE (@Status IS NULL OR LOWER(o.status) = LOWER(@Status))
+              AND (@Category IS NULL OR LOWER(o.category) = LOWER(@Category))
+              AND (
+                  @SearchPattern IS NULL
+                  OR o.order_number ILIKE @SearchPattern ESCAPE '\'
+                  OR o.customer_name ILIKE @SearchPattern ESCAPE '\'
+                  OR o.customer_email ILIKE @SearchPattern ESCAPE '\'
+              )
+        ),
+        total_meta AS (
+            SELECT COUNT(*)::int AS total_count
+            FROM filtered_base
+        ),
+        paged_orders AS (
+            SELECT
+                fb.*
+            FROM filtered_base fb
+            ORDER BY fb.created_at DESC, fb.id DESC
+            LIMIT @PageSize OFFSET @Offset
+        )
+        SELECT
+            tm.total_count,
+            po.id,
+            po.order_number,
+            po.customer_name,
+            po.customer_email,
+            po.category,
+            po.status,
+            po.subtotal_centavos,
+            po.vat_centavos,
+            po.total_centavos,
+            po.currency,
+            po.created_at,
+            po.updated_at
+        FROM total_meta tm
+        LEFT JOIN paged_orders po ON TRUE
+        ORDER BY po.created_at DESC NULLS LAST, po.id DESC NULLS LAST;
+        """;
+
+    public const string ListOrdersKeysetSql = """
+        WITH paged_orders AS (
+            SELECT
+                o.id,
+                o.order_number,
+                o.customer_name,
+                o.customer_email,
+                o.category,
+                o.status,
+                COALESCE(o.subtotal_minor, 0) AS subtotal_centavos,
+                COALESCE(o.vat_minor, 0) AS vat_centavos,
+                o.amount_minor AS total_centavos,
+                o.currency,
+                o.created_at,
+                o.updated_at
+            FROM public.orders o
+            WHERE (@Status IS NULL OR LOWER(o.status) = LOWER(@Status))
+              AND (@Category IS NULL OR LOWER(o.category) = LOWER(@Category))
+              AND (
+                  @SearchPattern IS NULL
+                  OR o.order_number ILIKE @SearchPattern ESCAPE '\'
+                  OR o.customer_name ILIKE @SearchPattern ESCAPE '\'
+                  OR o.customer_email ILIKE @SearchPattern ESCAPE '\'
+              )
+              AND (
+                  @CursorCreatedAt IS NULL
+                  OR (o.created_at, o.id) < (@CursorCreatedAt, @CursorId)
+              )
+            ORDER BY o.created_at DESC, o.id DESC
+            LIMIT @PageSizePlusOne
+        )
+        SELECT
+            0 AS total_count,
+            po.id,
+            po.order_number,
+            po.customer_name,
+            po.customer_email,
+            po.category,
+            po.status,
+            po.subtotal_centavos,
+            po.vat_centavos,
+            po.total_centavos,
+            po.currency,
+            po.created_at,
+            po.updated_at
+        FROM paged_orders po
+        ORDER BY po.created_at DESC, po.id DESC;
+        """;
 }

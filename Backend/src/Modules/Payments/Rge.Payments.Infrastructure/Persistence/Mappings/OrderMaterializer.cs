@@ -36,8 +36,94 @@ public sealed record OrderRow
     public string? IdempotencyKey { get; init; }
 }
 
+public sealed class OrderJoinedRow
+{
+    public int TotalCount { get; init; }
+    public string? Id { get; init; }
+    public string? UserId { get; init; }
+    public string? OrderNumber { get; init; }
+    public string? Title { get; init; }
+    public string? CustomerName { get; init; }
+    public string? CustomerEmail { get; init; }
+    public string? Category { get; init; }
+    public string? Status { get; init; }
+    public long SubtotalCentavos { get; init; }
+    public long VatCentavos { get; init; }
+    public long TotalCentavos { get; init; }
+    public string? Currency { get; init; }
+    public string? MetadataJson { get; init; }
+    public DateTimeOffset CreatedAt { get; init; }
+    public DateTimeOffset UpdatedAt { get; init; }
+
+    public string? LineItemId { get; init; }
+    public string? LineItemOrderId { get; init; }
+    public string? ProductCode { get; init; }
+    public string? ProductName { get; init; }
+    public int Quantity { get; init; }
+    public long UnitPriceCentavos { get; init; }
+    public long LineTotalCentavos { get; init; }
+}
+
+public sealed record MaterializedOrderPage(
+    IReadOnlyList<Order> Orders,
+    int TotalCount);
+
 public static class OrderMaterializer
 {
+    public static MaterializedOrderPage MaterializePage(IEnumerable<OrderJoinedRow> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        var orderedKeys = new List<string>(capacity: 24);
+        var accumulators = new Dictionary<string, (OrderJoinedRow Header, List<object> Lines)>(StringComparer.OrdinalIgnoreCase);
+        var totalCount = 0;
+
+        foreach (var row in rows)
+        {
+            totalCount = row.TotalCount;
+
+            if (string.IsNullOrWhiteSpace(row.Id))
+            {
+                continue;
+            }
+
+            var orderId = row.Id.Trim();
+            if (!accumulators.TryGetValue(orderId, out var entry))
+            {
+                entry = (row, new List<object>(capacity: 4));
+                accumulators.Add(orderId, entry);
+                orderedKeys.Add(orderId);
+            }
+        }
+
+        var orders = new List<Order>(orderedKeys.Count);
+        foreach (var orderId in orderedKeys)
+        {
+            var (header, _) = accumulators[orderId];
+            var row = new OrderRow
+            {
+                Id = header.Id ?? orderId,
+                UserId = header.UserId ?? header.CustomerEmail ?? "anonymous",
+                OrderNumber = header.OrderNumber ?? string.Empty,
+                Title = header.Title ?? header.OrderNumber ?? "Order",
+                Category = header.Category ?? "General",
+                ReferenceCode = header.OrderNumber ?? string.Empty,
+                AmountMinor = header.TotalCentavos,
+                Currency = header.Currency ?? "PHP",
+                Status = header.Status ?? "pending",
+                MetadataJson = header.MetadataJson ?? "{}",
+                CreatedAt = header.CreatedAt,
+                UpdatedAt = header.UpdatedAt,
+                CustomerName = header.CustomerName,
+                CustomerEmail = header.CustomerEmail,
+                SubtotalMinor = header.SubtotalCentavos,
+                VatMinor = header.VatCentavos
+            };
+            orders.Add(ToDomain(row));
+        }
+
+        return new MaterializedOrderPage(orders, totalCount);
+    }
+
     public static async Task<Order> MaterializeAsync(DbDataReader reader, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(reader);

@@ -13,6 +13,28 @@ public static class HybridCacheKeys
     public const string AdminWebhooksTag = "admin:webhooks";
     public const string GoogleFormsTag = "google-forms";
 
+    public const string ReceiptsTag = "receipts";
+    public const string ReceiptsPdfTag = "receipts:pdf";
+
+    public static string ReceiptByPaymentId(string paymentId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(paymentId);
+        return $"receipt:payment:{paymentId.Trim()}";
+    }
+
+    public static string ReceiptPdfByPaymentId(string paymentId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(paymentId);
+        return $"receipt:pdf:payment:{paymentId.Trim()}";
+    }
+
+    public static string ReceiptPdfByDigest(string receiptNumber, string auditDigest)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(receiptNumber);
+        ArgumentException.ThrowIfNullOrWhiteSpace(auditDigest);
+        return $"receipt:pdf:digest:{receiptNumber.Trim()}:{auditDigest.Trim()}";
+    }
+
     public const string ActivePoliciesPrefix = "rge:finance:policies:active";
     public const string ApprovalMatrixKey = "rge:finance:approval-matrix:v1";
     public const string ProductCatalogKey = "rge:payments:product-catalog:v1";

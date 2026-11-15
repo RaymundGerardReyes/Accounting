@@ -259,6 +259,17 @@ public sealed class ReceiptEndpoints : IEndpointModule
         bool renderInline,
         HttpContext httpContext)
     {
+        var etag = $"\"{pdfResponse.FileName.Replace(".pdf", "", StringComparison.OrdinalIgnoreCase)}-{pdfResponse.PdfBytes.Length}\"";
+
+        httpContext.Response.Headers.ETag = etag;
+        httpContext.Response.Headers.CacheControl = "private, max-age=3600, immutable";
+
+        if (httpContext.Request.Headers.TryGetValue("If-None-Match", out var inm) &&
+            string.Equals(inm.ToString().Trim(), etag, StringComparison.Ordinal))
+        {
+            return Results.StatusCode(StatusCodes.Status304NotModified);
+        }
+
         if (renderInline)
         {
             httpContext.Response.Headers.ContentDisposition = $"inline; filename=\"{pdfResponse.FileName}\"";

@@ -137,3 +137,137 @@ export async function apiRequest<T = any>(
  * Backwards-compatible alias for apiRequest
  */
 export const apiFetch = apiRequest
+
+// =========================================================================
+// API Client Deduplication, In-Flight GET Coalescing & Telemetry
+// =========================================================================
+
+export interface ApiRequestMetrics {
+  url: string
+  durationMs: number
+  payloadBytes: number
+  serverTiming: string | null
+  correlationId: string | null
+  deduplicated: boolean
+}
+
+export interface ApiResponseWithMetrics<T> {
+  data: T
+  metrics: ApiRequestMetrics
+}
+
+export interface ApiFetchOptions extends Omit<RequestInit, "signal"> {
+  signal?: AbortSignal
+  /**
+   * When true (default for GET), identical concurrent in-flight requests
+   * share the same network promise unless explicitly aborted.
+   */
+  deduplicate?: boolean
+}
+
+interface InFlightEntry {
+  promise: Promise<{ rawText: string; status: number; ok: boolean; headers: Headers }>
+  refCount: number
+  controller: AbortController
+}
+
+const inFlightGetRequests = new Map<string, InFlightEntry>()
+
+export async function apiFetchWithMetrics<T>(
+  path: string,
+  options: ApiFetchOptions = {}
+): Promise<ApiResponseWithMetrics<T>> {
+  const method = (options.method ?? "GET").toUpperCase()
+  const isGet = method === "GET"
+  const shouldDeduplicate = isGet && (options.deduplicate ?? true)
+  const requestKey = `${method}:${path}`
+  const startTime = performance.now()
+
+  let entry = shouldDeduplicate ? inFlightGetRequests.get(requestKey) : undefined
+  let wasDeduplicated = false
+
+  if (entry) {
+    wasDeduplicated = true
+    entry.refCount += 1
+  } else {
+    const controller = new AbortController()
+    const fetchPromise = fetch(path, {
+      ...options,
+      method,
+      credentials: options.credentials ?? "include",
+      headers: {
+        Accept: "application/json",
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.headers ?? {}),
+      },
+      signal: controller.signal,
+    }).then(async (res) => {
+      const rawText = await res.text()
+      return {
+        rawText,
+        status: res.status,
+        ok: res.ok,
+        headers: res.headers,
+      }
+    })
+
+    entry = {
+      promise: fetchPromise,
+      refCount: 1,
+      controller,
+    }
+
+    if (shouldDeduplicate) {
+      inFlightGetRequests.set(requestKey, entry)
+    }
+  }
+
+  // Handle caller-specific AbortSignal
+  const currentEntry = entry
+  const onAbort = () => {
+    currentEntry.refCount -= 1
+    if (currentEntry.refCount <= 0) {
+      currentEntry.controller.abort()
+      inFlightGetRequests.delete(requestKey)
+    }
+  }
+
+  if (options.signal) {
+    if (options.signal.aborted) {
+      onAbort()
+      throw new DOMException("The operation was aborted.", "AbortError")
+    }
+    options.signal.addEventListener("abort", onAbort, { once: true })
+  }
+
+  try {
+    const result = await currentEntry.promise
+    const durationMs = Math.round((performance.now() - startTime) * 100) / 100
+    const payloadBytes = new TextEncoder().encode(result.rawText).length
+
+    if (!result.ok) {
+      throw new Error(`HTTP ${result.status} on ${path}: ${result.rawText}`)
+    }
+
+    const parsed: T = result.rawText ? (JSON.parse(result.rawText) as T) : ({} as T)
+
+    return {
+      data: parsed,
+      metrics: {
+        url: path,
+        durationMs,
+        payloadBytes,
+        serverTiming: result.headers.get("Server-Timing"),
+        correlationId: result.headers.get("X-Correlation-Id"),
+        deduplicated: wasDeduplicated,
+      },
+    }
+  } finally {
+    if (options.signal) {
+      options.signal.removeEventListener("abort", onAbort)
+    }
+    if (shouldDeduplicate) {
+      inFlightGetRequests.delete(requestKey)
+    }
+  }
+}

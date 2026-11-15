@@ -42,6 +42,11 @@ public sealed class VatBreakdown : ValueObject
         return new VatBreakdown(vatable, vat, zero, zero);
     }
 
+    public static VatBreakdown FromGrossInclusive(
+        Money grossAmount,
+        int vatRateBps = VatCalculator.DefaultPhilippineVatBps) =>
+        FromVatInclusiveGross(grossAmount, vatRateBps);
+
     public static VatBreakdown CreateVatExempt(Money grossAmount)
     {
         Money zero = Money.Zero(grossAmount.CurrencyCode);

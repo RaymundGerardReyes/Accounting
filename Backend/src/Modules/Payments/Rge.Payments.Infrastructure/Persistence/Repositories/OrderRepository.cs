@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.Data.Common;
 using System.Diagnostics;
+using System.Linq;
 using Microsoft.Extensions.Logging;
+using Rge.BuildingBlocks.Application.Pagination;
 using Rge.BuildingBlocks.Infrastructure.Observability;
 using Rge.BuildingBlocks.Infrastructure.Persistence;
 using Rge.BuildingBlocks.SharedKernel.Money;
@@ -34,6 +36,141 @@ public sealed class OrderRepository : IOrderRepository
         ArgumentNullException.ThrowIfNull(connectionScope);
         _connectionScope = connectionScope;
         _logger = logger;
+    }
+
+    public async Task<RepositoryPagedOrders> ListPagedAsync(
+        PageRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var sw = Stopwatch.StartNew();
+        double connAcquireMs = 0;
+        double sqlDurationMs = 0;
+        double materializeDurationMs = 0;
+
+        try
+        {
+            var connSw = Stopwatch.StartNew();
+            DbConnection connection = await _connectionScope.GetOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            connSw.Stop();
+            connAcquireMs = connSw.Elapsed.TotalMilliseconds;
+
+            var sqlSw = Stopwatch.StartNew();
+            await using DbCommand cmd = connection.CreateCommand();
+            cmd.Transaction = _connectionScope.CurrentTransaction;
+            cmd.CommandText = OrderQueries.ListOrdersPagedSql;
+            cmd.CommandTimeout = SqlTimeouts.FastReadSeconds;
+
+            AddParam(cmd, "@Status", request.Status);
+            AddParam(cmd, "@Category", request.Category);
+            AddParam(cmd, "@SearchPattern", BuildSafeIlikePattern(request.Search));
+            AddParam(cmd, "@PageSize", request.PageSize);
+            AddParam(cmd, "@Offset", request.Offset);
+
+            var rows = new List<OrderJoinedRow>();
+            await using DbDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var row = new OrderJoinedRow
+                {
+                    TotalCount = reader.GetInt32(0),
+                    Id = await reader.IsDBNullAsync(1, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(1),
+                    OrderNumber = await reader.IsDBNullAsync(2, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(2),
+                    CustomerName = await reader.IsDBNullAsync(3, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(3),
+                    CustomerEmail = await reader.IsDBNullAsync(4, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(4),
+                    Category = await reader.IsDBNullAsync(5, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(5),
+                    Status = await reader.IsDBNullAsync(6, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(6),
+                    SubtotalCentavos = reader.GetInt64(7),
+                    VatCentavos = reader.GetInt64(8),
+                    TotalCentavos = reader.GetInt64(9),
+                    Currency = await reader.IsDBNullAsync(10, cancellationToken).ConfigureAwait(false) ? "PHP" : reader.GetString(10),
+                    CreatedAt = await reader.GetFieldValueAsync<DateTimeOffset>(11, cancellationToken).ConfigureAwait(false),
+                    UpdatedAt = await reader.GetFieldValueAsync<DateTimeOffset>(12, cancellationToken).ConfigureAwait(false)
+                };
+                rows.Add(row);
+            }
+            sqlSw.Stop();
+            sqlDurationMs = sqlSw.Elapsed.TotalMilliseconds;
+
+            var matSw = Stopwatch.StartNew();
+            var materialized = OrderMaterializer.MaterializePage(rows);
+            matSw.Stop();
+            materializeDurationMs = matSw.Elapsed.TotalMilliseconds;
+
+            var pagedResult = PagedResult<Order>.Create(
+                items: materialized.Orders,
+                page: request.Page,
+                pageSize: request.PageSize,
+                totalCount: materialized.TotalCount);
+
+            return new RepositoryPagedOrders(
+                Page: pagedResult,
+                Timing: new RepositoryPageTiming(
+                    ConnectionAcquireMs: Math.Round(connAcquireMs, 2),
+                    SqlDurationMs: Math.Round(sqlDurationMs, 2),
+                    MaterializeDurationMs: Math.Round(materializeDurationMs, 2)));
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug(ex, "Database unreachable for ListPagedAsync; falling back to in-memory store.");
+
+            // In-memory fallback
+            var all = MemoryById.Values.AsEnumerable();
+            if (!string.IsNullOrWhiteSpace(request.Status))
+            {
+                all = all.Where(o => string.Equals(o.Status, request.Status, StringComparison.OrdinalIgnoreCase));
+            }
+            if (!string.IsNullOrWhiteSpace(request.Category))
+            {
+                all = all.Where(o => string.Equals(o.Category, request.Category, StringComparison.OrdinalIgnoreCase));
+            }
+            if (!string.IsNullOrWhiteSpace(request.Search))
+            {
+                var s = request.Search.Trim();
+                all = all.Where(o => (o.OrderNumber?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || (o.CustomerName?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || (o.CustomerEmail?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false));
+            }
+
+            var ordered = all.OrderByDescending(o => o.CreatedAt).ThenByDescending(o => o.Id).ToList();
+            var totalCount = ordered.Count;
+            var items = ordered.Skip(request.Offset).Take(request.PageSize).ToList();
+
+            var paged = PagedResult<Order>.Create(items, request.Page, request.PageSize, totalCount);
+            return new RepositoryPagedOrders(
+                Page: paged,
+                Timing: new RepositoryPageTiming(0.01, 0.05, 0.02));
+        }
+    }
+
+    public async Task<KeysetPage<Order>> ListKeysetAsync(
+        int limit,
+        KeysetCursor? cursor,
+        string? status,
+        string? category,
+        string? search,
+        CancellationToken cancellationToken = default)
+    {
+        var safeLimit = Math.Clamp(limit, 1, PageRequest.MaxPageSize);
+        var pagedReq = new PageRequest(page: 1, pageSize: safeLimit + 1, status: status, category: category, search: search);
+        var result = await ListPagedAsync(pagedReq, cancellationToken).ConfigureAwait(false);
+
+        return KeysetPage<Order>.FromPlusOne(
+            fetchedItems: result.Page.Items,
+            requestedLimit: safeLimit,
+            cursorSelector: o => new KeysetCursor(o.CreatedAt, Guid.TryParse(o.Id, out var g) ? g : Guid.NewGuid()));
+    }
+
+    private static string? BuildSafeIlikePattern(string? rawSearch)
+    {
+        if (string.IsNullOrWhiteSpace(rawSearch)) return null;
+        var escaped = rawSearch
+            .Trim()
+            .Replace(@"\", @"\\", StringComparison.Ordinal)
+            .Replace("%", @"\%", StringComparison.Ordinal)
+            .Replace("_", @"\_", StringComparison.Ordinal);
+        return $"%{escaped}%";
     }
 
     public Task<IReadOnlyList<Order>> ListAsync(

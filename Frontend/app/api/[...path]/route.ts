@@ -6,6 +6,7 @@ async function proxyRequest(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> }
 ) {
+  const proxyStart = performance.now()
   let backendBase =
     process.env.BACKEND_INTERNAL_URL ||
     process.env.BACKEND_API_URL ||
@@ -41,6 +42,8 @@ async function proxyRequest(
     "paymongo-signature",
     "x-google-forms-secret",
     "x-google-forms-signature",
+    "if-none-match",
+    "if-match",
   ]
 
   for (const name of forwardHeaderNames) {
@@ -101,6 +104,7 @@ async function proxyRequest(
   const bodyBuffer = hasBody ? await request.arrayBuffer() : undefined
 
   try {
+    const upstreamStart = performance.now()
     const backendRes = await fetch(targetUrl.toString(), {
       method,
       headers,
@@ -170,6 +174,20 @@ async function proxyRequest(
     if (disposition) {
       response.headers.set("content-disposition", disposition)
     }
+
+    const existingServerTiming = backendRes.headers.get("server-timing")
+    const proxyTotalMs = Math.round((performance.now() - proxyStart) * 100) / 100
+    const upstreamDurationMs = Math.round((performance.now() - upstreamStart) * 100) / 100
+    const proxyTimingMetric = `nextjs-proxy;dur=${proxyTotalMs}, dotnet-upstream;dur=${upstreamDurationMs}`
+    response.headers.set(
+      "Server-Timing",
+      existingServerTiming ? `${existingServerTiming}, ${proxyTimingMetric}` : proxyTimingMetric
+    )
+
+    const etag = backendRes.headers.get("etag")
+    if (etag) response.headers.set("etag", etag)
+    const cacheControl = backendRes.headers.get("cache-control")
+    if (cacheControl) response.headers.set("cache-control", cacheControl)
 
     // Forward Set-Cookie headers from Backend to Browser
     const setCookieHeaders = backendRes.headers.getSetCookie?.() || []

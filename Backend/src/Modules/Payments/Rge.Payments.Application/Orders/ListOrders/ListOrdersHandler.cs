@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Rge.BuildingBlocks.Application.Abstractions;
+using Rge.BuildingBlocks.Application.Pagination;
 using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Payments.Application.Mapping;
 using Rge.Payments.Application.Ports;
@@ -12,7 +13,10 @@ using Rge.Payments.Domain.PaymentAttempts;
 
 namespace Rge.Payments.Application.Orders.ListOrders;
 
-public sealed class ListOrdersHandler : IQueryHandler<ListOrdersQuery, IReadOnlyList<OrderDto>>
+public sealed class ListOrdersHandler :
+    IQueryHandler<ListOrdersQuery, IReadOnlyList<OrderDto>>,
+    IQueryHandler<ListOrdersQuery, ListOrdersResponse>,
+    IHandler<ListOrdersQuery, ListOrdersResponse>
 {
     private static bool IsPrivilegedRole(string role)
     {
@@ -86,6 +90,68 @@ public sealed class ListOrdersHandler : IQueryHandler<ListOrdersQuery, IReadOnly
 
         return Result.Success<IReadOnlyList<OrderDto>>(dtos);
     }
+
+    public async Task<Result<ListOrdersResponse>> HandlePagedAsync(
+        ListOrdersQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var pageReq = query.PageRequest ?? new PageRequest(
+            page: 1,
+            pageSize: query.Limit,
+            status: query.Status,
+            search: query.CustomerId ?? query.UserId);
+
+        var repoResult = await _orders.ListPagedAsync(pageReq, cancellationToken).ConfigureAwait(false);
+
+        var dtos = new List<OrderSummaryDto>(repoResult.Page.Items.Count);
+        foreach (var order in repoResult.Page.Items)
+        {
+            var lineItems = new List<OrderLineItemDto>
+            {
+                new(
+                    Id: Guid.NewGuid(),
+                    ProductCode: order.ReferenceCode ?? "PROD-01",
+                    ProductName: order.Title ?? "Order Item",
+                    Quantity: 1,
+                    UnitPriceCentavos: order.Amount.AmountMinor,
+                    LineTotalCentavos: order.Amount.AmountMinor)
+            };
+
+            dtos.Add(new OrderSummaryDto(
+                Id: Guid.TryParse(order.Id, out var gid) ? gid : Guid.NewGuid(),
+                OrderNumber: order.OrderNumber,
+                CustomerName: order.CustomerName ?? "Valued Customer",
+                CustomerEmail: order.CustomerEmail ?? string.Empty,
+                Category: order.Category,
+                Status: order.Status,
+                SubtotalCentavos: order.Amount.AmountMinor,
+                VatCentavos: 0,
+                TotalCentavos: order.Amount.AmountMinor,
+                Currency: order.Amount.CurrencyCode,
+                CreatedAt: order.CreatedAt,
+                UpdatedAt: order.UpdatedAt,
+                LineItems: lineItems));
+        }
+
+        var response = new ListOrdersResponse(
+            Items: dtos,
+            Page: repoResult.Page.Page,
+            PageSize: repoResult.Page.PageSize,
+            TotalCount: repoResult.Page.TotalCount,
+            TotalPages: repoResult.Page.TotalPages,
+            HasNextPage: repoResult.Page.HasNextPage,
+            HasPreviousPage: repoResult.Page.HasPreviousPage,
+            Timing: repoResult.Timing);
+
+        return Result.Success(response);
+    }
+
+    async Task<Result<ListOrdersResponse>> IHandler<ListOrdersQuery, ListOrdersResponse>.HandleAsync(
+        ListOrdersQuery query,
+        CancellationToken cancellationToken) =>
+        await HandlePagedAsync(query, cancellationToken).ConfigureAwait(false);
 
     private string? ResolveEffectiveCustomerFilter(string? requestedCustomerId)
     {

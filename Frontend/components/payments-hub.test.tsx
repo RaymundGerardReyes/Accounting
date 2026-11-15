@@ -4,6 +4,8 @@ import { describe, it, test, expect, vi, beforeEach, afterEach } from "vitest"
 import { useRouter } from "next/navigation"
 import { PaymentsHub } from "@/components/payments-hub"
 import type { Order } from "@/lib/payment-api"
+import { buildPaginationTokens } from "@/components/payment/ServerPaginationBar"
+import { normalizePagedResponse, buildOrdersQueryString } from "@/lib/payment-api"
 
 vi.mock("@/lib/auth-context", () => ({
   useAuth: vi.fn(() => ({
@@ -516,6 +518,48 @@ describe("PaymentsHub Component", () => {
       expect(screen.queryByText("Loading orders...")).toBeNull()
       expect(screen.getAllByText("ORD-2026-001").length).toBeGreaterThan(0)
       vi.useRealTimers()
+    })
+  })
+
+  describe("Server-Driven Pagination Contracts & Helpers", () => {
+    it("clamps pageSize between 1 and 100 and omits 'All' filter values", () => {
+      const qs = buildOrdersQueryString({
+        page: 2,
+        pageSize: 500,
+        status: "All",
+        category: "Subscription",
+        search: "  ORD-100  ",
+      })
+      expect(qs).toBe("page=2&pageSize=100&category=Subscription&search=ORD-100")
+    })
+
+    it("normalizes both server PagedResponse and legacy array payloads safely", () => {
+      const serverPayload = {
+        items: [{ id: "1" }, { id: "2" }],
+        page: 2,
+        pageSize: 20,
+        totalCount: 45,
+        totalPages: 3,
+        hasNextPage: true,
+        hasPreviousPage: true,
+      }
+      const normalized = normalizePagedResponse(serverPayload, 2, 20)
+      expect(normalized.totalPages).toBe(3)
+      expect(normalized.hasNextPage).toBe(true)
+      expect(normalized.items).toHaveLength(2)
+    })
+
+    it("generates deterministic pagination tokens with ellipsis for deep pages", () => {
+      expect(buildPaginationTokens(1, 5)).toEqual([1, 2, 3, 4, 5])
+      expect(buildPaginationTokens(5, 20)).toEqual([
+        1,
+        "ellipsis-start",
+        4,
+        5,
+        6,
+        "ellipsis-end",
+        20,
+      ])
     })
   })
 })

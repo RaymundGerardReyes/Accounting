@@ -22,6 +22,8 @@ public sealed class OfficialReceipt : AggregateRoot<string>
     public string PaymentMethod { get; private set; }
     public VatBreakdown VatBreakdown { get; private set; }
     public AuditDigest Digest { get; private set; }
+    public AuditDigest AuditDigest => Digest;
+    public string PaymentId => PaymentAttemptId;
     public DateTimeOffset IssuedAtUtc { get; private set; }
 
     public OfficialReceipt(
@@ -99,6 +101,38 @@ public sealed class OfficialReceipt : AggregateRoot<string>
             issuedAtUtc: issuedAtUtc);
 
         return Result.Success(receipt);
+    }
+
+    public static OfficialReceipt Issue(
+        OfficialReceiptNumber receiptNumber,
+        string orderId,
+        string paymentId,
+        string customerName,
+        string customerEmail,
+        VatBreakdown vatBreakdown,
+        string paymentMethod,
+        AuditDigest auditDigest,
+        DateTimeOffset issuedAtUtc)
+    {
+        ArgumentNullException.ThrowIfNull(receiptNumber);
+        ArgumentNullException.ThrowIfNull(vatBreakdown);
+        ArgumentNullException.ThrowIfNull(auditDigest);
+
+        var ack = TreasuryAcknowledgement.Create(issuedAtUtc, 1, auditDigest.ShortHash8);
+        return new OfficialReceipt(
+            id: Guid.NewGuid().ToString("D"),
+            orderId: orderId,
+            orderNumber: orderId,
+            paymentAttemptId: paymentId,
+            receiptNumber: receiptNumber,
+            acknowledgement: ack,
+            customerName: customerName,
+            customerEmail: customerEmail,
+            description: "Official Receipt",
+            paymentMethod: paymentMethod,
+            vatBreakdown: vatBreakdown,
+            digest: auditDigest,
+            issuedAtUtc: issuedAtUtc);
     }
 }
 

@@ -911,4 +911,198 @@ export async function syncGoogleForms(): Promise<boolean> {
   }
 }
 
+// =========================================================================
+// Standardized Server-Driven Pagination Contracts & Telemetry
+// =========================================================================
+
+export interface PageRequestParams {
+  page?: number
+  pageSize?: number
+  status?: string
+  category?: string
+  search?: string
+  sortBy?: string
+  sortDir?: "asc" | "desc"
+}
+
+export interface PagedResponse<T> {
+  items: T[]
+  page: number
+  pageSize: number
+  totalCount: number
+  totalPages: number
+  hasNextPage: boolean
+  hasPreviousPage: boolean
+}
+
+export interface KeysetPageRequestParams {
+  limit?: number
+  cursor?: string | null
+  status?: string
+  search?: string
+}
+
+export interface KeysetPageResponse<T> {
+  items: T[]
+  nextCursor: string | null
+  hasMore: boolean
+}
+
+export interface PaginationTimingMetrics {
+  apiDurationMs: number
+  payloadBytes: number
+  serverTiming: string | null
+}
+
+export interface PagedResultWithMetrics<T> {
+  data: PagedResponse<T>
+  metrics: PaginationTimingMetrics
+}
+
+const DEFAULT_PAGE = 1
+const DEFAULT_PAGE_SIZE = 20
+const MAX_PAGE_SIZE = 100
+
+export function sanitizePageParams(params: PageRequestParams = {}): Required<
+  Pick<PageRequestParams, "page" | "pageSize">
+> &
+  Omit<PageRequestParams, "page" | "pageSize"> {
+  const page = Math.max(DEFAULT_PAGE, Math.floor(Number(params.page) || DEFAULT_PAGE))
+  const rawPageSize = Math.floor(Number(params.pageSize) || DEFAULT_PAGE_SIZE)
+  const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, rawPageSize))
+
+  const trimmedSearch = params.search?.trim()
+  const normalizedStatus =
+    params.status && params.status !== "All" ? params.status.trim() : undefined
+  const normalizedCategory =
+    params.category && params.category !== "All" ? params.category.trim() : undefined
+
+  return {
+    page,
+    pageSize,
+    status: normalizedStatus,
+    category: normalizedCategory,
+    search: trimmedSearch && trimmedSearch.length > 0 ? trimmedSearch : undefined,
+    sortBy: params.sortBy,
+    sortDir: params.sortDir,
+  }
+}
+
+/**
+ * Normalizes both the new server-paginated contract and legacy array responses
+ * so existing Vitest suites and incremental backend rollouts never break.
+ */
+export function normalizePagedResponse<T>(
+  raw: unknown,
+  requestedPage = DEFAULT_PAGE,
+  requestedPageSize = DEFAULT_PAGE_SIZE
+): PagedResponse<T> {
+  if (raw && typeof raw === "object" && "items" in raw && Array.isArray((raw as any).items)) {
+    const obj = raw as Partial<PagedResponse<T>> & { items: T[] }
+    const page = Math.max(1, Number(obj.page) || requestedPage)
+    const pageSize = Math.max(1, Number(obj.pageSize) || requestedPageSize)
+    const totalCount =
+      typeof obj.totalCount === "number" ? Math.max(0, obj.totalCount) : obj.items.length
+    const totalPages =
+      typeof obj.totalPages === "number"
+        ? Math.max(1, obj.totalPages)
+        : Math.max(1, Math.ceil(totalCount / pageSize))
+
+    return {
+      items: obj.items,
+      page,
+      pageSize,
+      totalCount,
+      totalPages,
+      hasNextPage:
+        typeof obj.hasNextPage === "boolean" ? obj.hasNextPage : page < totalPages,
+      hasPreviousPage:
+        typeof obj.hasPreviousPage === "boolean" ? obj.hasPreviousPage : page > 1,
+    }
+  }
+
+  // Fallback for legacy unpaginated array or { orders: T[] }
+  const legacyItems: T[] = Array.isArray(raw)
+    ? raw
+    : raw && typeof raw === "object" && Array.isArray((raw as any).orders)
+      ? (raw as any).orders
+      : []
+
+  const totalCount = legacyItems.length
+  const totalPages = Math.max(1, Math.ceil(totalCount / requestedPageSize))
+  const safePage = Math.min(Math.max(1, requestedPage), totalPages)
+  const startIndex = (safePage - 1) * requestedPageSize
+  const slicedItems = legacyItems.slice(startIndex, startIndex + requestedPageSize)
+
+  return {
+    items: slicedItems,
+    page: safePage,
+    pageSize: requestedPageSize,
+    totalCount,
+    totalPages,
+    hasNextPage: safePage < totalPages,
+    hasPreviousPage: safePage > 1,
+  }
+}
+
+/**
+ * Builds the query string for GET /api/orders with only defined parameters.
+ */
+export function buildOrdersQueryString(params: PageRequestParams): string {
+  const clean = sanitizePageParams(params)
+  const searchParams = new URLSearchParams()
+
+  searchParams.set("page", String(clean.page))
+  searchParams.set("pageSize", String(clean.pageSize))
+
+  if (clean.status) searchParams.set("status", clean.status)
+  if (clean.category) searchParams.set("category", clean.category)
+  if (clean.search) searchParams.set("search", clean.search)
+  if (clean.sortBy) searchParams.set("sortBy", clean.sortBy)
+  if (clean.sortDir) searchParams.set("sortDir", clean.sortDir)
+
+  return searchParams.toString()
+}
+
+/**
+ * Executes a paginated orders request with AbortSignal support and Phase 7 latency telemetry.
+ */
+export async function listOrdersPaginated<TOrder = any>(
+  params: PageRequestParams = {},
+  options: { signal?: AbortSignal } = {}
+): Promise<PagedResultWithMetrics<TOrder>> {
+  const clean = sanitizePageParams(params)
+  const queryString = buildOrdersQueryString(clean)
+  const url = `/api/orders?${queryString}`
+
+  const startTime = performance.now()
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    credentials: "include",
+    signal: options.signal,
+  })
+
+  const rawText = await response.text()
+  const apiDurationMs = Math.round((performance.now() - startTime) * 100) / 100
+  const payloadBytes = new Blob([rawText]).size
+  const serverTiming = response.headers.get("Server-Timing")
+
+  if (!response.ok) {
+    throw new Error(`Failed to load orders (${response.status}): ${rawText}`)
+  }
+
+  const parsed = rawText ? JSON.parse(rawText) : []
+  const data = normalizePagedResponse<TOrder>(parsed, clean.page, clean.pageSize)
+
+  return {
+    data,
+    metrics: {
+      apiDurationMs,
+      payloadBytes,
+      serverTiming,
+    },
+  }
+}
+
 

@@ -17,7 +17,23 @@ public sealed record IssueReceiptCommand(
     string CustomerName,
     string CustomerEmail,
     string Description,
-    string PaymentMethod) : ICommand<ReceiptDto>;
+    string PaymentMethod) : ICommand<ReceiptDto>
+{
+    public IssueReceiptCommand(string paymentId) : this(
+        OrderId: $"ord_{paymentId}",
+        OrderNumber: $"ORD-{paymentId}",
+        PaymentAttemptId: paymentId,
+        AmountMinor: 0,
+        Currency: "PHP",
+        CustomerName: "Valued Customer",
+        CustomerEmail: string.Empty,
+        Description: "Official Receipt",
+        PaymentMethod: "card")
+    {
+    }
+}
+
+public sealed record IssueReceiptResponse(ReceiptDto Receipt);
 
 public sealed record ReceiptDto(
     string ReceiptId,
@@ -46,16 +62,26 @@ public sealed record ReceiptDto(
 /// Issues a collision-safe BIR Official Receipt (OR-YYYYMM-XXXX-HASH8) and Treasury Acknowledgement.
 /// Idempotent: returns the existing receipt if already issued for the given payment or order.
 /// </summary>
-public class IssueReceiptHandler : ICommandHandler<IssueReceiptCommand, ReceiptDto>
+public class IssueReceiptHandler : ICommandHandler<IssueReceiptCommand, ReceiptDto>, IHandler<IssueReceiptCommand, IssueReceiptResponse>
 {
     private readonly IReceiptRepository _repository;
     private readonly ICanonicalJsonSerializer _canonicalSerializer;
     private readonly IClock _clock;
+    private readonly IReceiptEmailQueue? _emailQueue;
 
     public IssueReceiptHandler(
         IReceiptRepository repository,
         ICanonicalJsonSerializer canonicalSerializer,
         IClock clock)
+        : this(repository, canonicalSerializer, clock, null)
+    {
+    }
+
+    public IssueReceiptHandler(
+        IReceiptRepository repository,
+        ICanonicalJsonSerializer canonicalSerializer,
+        IClock clock,
+        IReceiptEmailQueue? emailQueue)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(canonicalSerializer);
@@ -64,6 +90,7 @@ public class IssueReceiptHandler : ICommandHandler<IssueReceiptCommand, ReceiptD
         _repository = repository;
         _canonicalSerializer = canonicalSerializer;
         _clock = clock;
+        _emailQueue = emailQueue;
     }
 
     public virtual async Task<Result<ReceiptDto>> HandleAsync(
@@ -122,7 +149,25 @@ public class IssueReceiptHandler : ICommandHandler<IssueReceiptCommand, ReceiptD
 
         await _repository.SaveAsync(receiptResult.Value, cancellationToken).ConfigureAwait(false);
 
+        // Non-blocking in-memory channel write (< 0.02ms); never blocks receipt generation
+        if (_emailQueue is not null && !string.IsNullOrWhiteSpace(receiptResult.Value.CustomerEmail))
+        {
+            await _emailQueue.EnqueueAsync(receiptResult.Value, forceResend: false, CancellationToken.None).ConfigureAwait(false);
+        }
+
         return Result.Success(MapToDto(receiptResult.Value));
+    }
+
+    async Task<Result<IssueReceiptResponse>> IHandler<IssueReceiptCommand, IssueReceiptResponse>.HandleAsync(
+        IssueReceiptCommand request,
+        CancellationToken cancellationToken)
+    {
+        var result = await HandleAsync(request, cancellationToken).ConfigureAwait(false);
+        if (result.IsFailure)
+        {
+            return Result.Failure<IssueReceiptResponse>(result.Error);
+        }
+        return Result.Success(new IssueReceiptResponse(result.Value));
     }
 
     public static ReceiptDto MapToDto(OfficialReceipt receipt)

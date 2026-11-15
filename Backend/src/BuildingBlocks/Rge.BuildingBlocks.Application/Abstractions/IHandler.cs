@@ -87,3 +87,11 @@ public interface ICacheableQuery
     TimeSpan? Expiration { get; }
 
 }
+
+/// <summary>
+/// Universal handler abstraction for request processing.
+/// </summary>
+public interface IHandler<in TRequest, TResponse>
+{
+    Task<Result<TResponse>> HandleAsync(TRequest request, CancellationToken cancellationToken = default);
+}
