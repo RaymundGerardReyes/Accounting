@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useAuth } from "@/lib/auth-context"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   CreditCard,
   Plus,
@@ -56,6 +57,50 @@ import {
 import { CurrencyDisplay, FinancialStatusBadge } from "@/components/ui/financial-primitives"
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card"
 
+export type NormalizedOrderStatus = "pending" | "paid" | "cancelled"
+
+/**
+ * Resolves the effective status ('pending' | 'paid' | 'cancelled')
+ * by inspecting both Order.status and its latest PaymentAttempt status.
+ */
+export function getEffectiveOrderStatus(order: Partial<Order>): NormalizedOrderStatus {
+  const rawOrderStatus = (order.status ?? "").trim().toLowerCase()
+  const rawPaymentStatus = ((order as any).payment_status ?? "").trim().toLowerCase()
+  const latestAttempt =
+    order.latest_attempt ??
+    (order as any).latest_payment_attempt ??
+    (Array.isArray((order as any).payment_attempts) && (order as any).payment_attempts.length > 0
+      ? (order as any).payment_attempts[0]
+      : null)
+  const rawAttemptStatus = (latestAttempt?.status ?? "").trim().toLowerCase()
+  const rawFailureCode = ((latestAttempt as any)?.failure_code ?? "").trim().toLowerCase()
+
+  const states = [rawOrderStatus, rawPaymentStatus, rawAttemptStatus]
+
+  if (states.some((s) => ["paid", "succeeded", "completed", "settled"].includes(s))) {
+    return "paid"
+  }
+
+  if (
+    states.some((s) =>
+      [
+        "cancelled",
+        "canceled",
+        "expired",
+        "failed",
+        "abandoned",
+        "voided",
+        "qrph_source_expired",
+      ].includes(s)
+    ) ||
+    rawFailureCode === "qrph_source_expired"
+  ) {
+    return "cancelled"
+  }
+
+  return "pending"
+}
+
 // ============================================================================
 // Subcomponents for Modular Performance & Error Isolation
 // ============================================================================
@@ -68,10 +113,13 @@ interface OrderMobileCardProps {
   onView: (attemptId: string) => void
   onPay: (orderId: string) => void
   onExpire?: (attemptId: string) => void
+  onEdit?: (order: Order) => void
+  onCancel?: (orderId: string) => void
+  onDelete?: (orderId: string) => void
   isAdmin?: boolean
 }
 
-function OrderMobileCard({ order, copiedKey, onCopy, onReconcile, onView, onPay, onExpire, isAdmin }: OrderMobileCardProps) {
+function OrderMobileCard({ order, copiedKey, onCopy, onReconcile, onView, onPay, onExpire, onEdit, onCancel, onDelete, isAdmin }: OrderMobileCardProps) {
   const latest = order.latest_attempt
   return (
     <div className="p-4 space-y-3 bg-card hover:bg-muted/10 transition-colors">
@@ -259,6 +307,40 @@ function OrderMobileCard({ order, copiedKey, onCopy, onReconcile, onView, onPay,
             <span>Receipt</span>
           </Button>
         )}
+        {order.status !== "paid" && (
+          <>
+            {onEdit && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs h-8 flex-1 min-w-[70px] whitespace-nowrap"
+                onClick={() => onEdit(order)}
+              >
+                Edit
+              </Button>
+            )}
+            {order.status === "pending" && onCancel && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs h-8 flex-1 min-w-[70px] whitespace-nowrap"
+                onClick={() => onCancel(order.id)}
+              >
+                Cancel
+              </Button>
+            )}
+            {onDelete && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs text-rose-500 hover:text-rose-600 h-8 flex-1 min-w-[70px] whitespace-nowrap"
+                onClick={() => onDelete(order.id)}
+              >
+                Delete
+              </Button>
+            )}
+          </>
+        )}
         {latest && (
           <Button
             variant="ghost"
@@ -282,10 +364,13 @@ interface OrderDesktopRowProps {
   onView: (attemptId: string) => void
   onPay: (orderId: string) => void
   onExpire?: (attemptId: string) => void
+  onEdit?: (order: Order) => void
+  onCancel?: (orderId: string) => void
+  onDelete?: (orderId: string) => void
   isAdmin?: boolean
 }
 
-function OrderDesktopRow({ order, copiedKey, onCopy, onReconcile, onView, onPay, onExpire, isAdmin }: OrderDesktopRowProps) {
+function OrderDesktopRow({ order, copiedKey, onCopy, onReconcile, onView, onPay, onExpire, onEdit, onCancel, onDelete, isAdmin }: OrderDesktopRowProps) {
   const latest = order.latest_attempt
   return (
     <tr className="hover:bg-muted/30 transition-colors">
@@ -517,6 +602,40 @@ function OrderDesktopRow({ order, copiedKey, onCopy, onReconcile, onView, onPay,
               <Receipt className="w-3.5 h-3.5" />
               <span>Receipt</span>
             </Button>
+          )}
+          {order.status !== "paid" && (
+            <>
+              {onEdit && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-8 shrink-0 whitespace-nowrap"
+                  onClick={() => onEdit(order)}
+                >
+                  Edit
+                </Button>
+              )}
+              {order.status === "pending" && onCancel && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-8 shrink-0 whitespace-nowrap"
+                  onClick={() => onCancel(order.id)}
+                >
+                  Cancel
+                </Button>
+              )}
+              {onDelete && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-rose-500 hover:text-rose-600 h-8 shrink-0 whitespace-nowrap"
+                  onClick={() => onDelete(order.id)}
+                >
+                  Delete
+                </Button>
+              )}
+            </>
           )}
           {latest && (
             <Button
@@ -944,10 +1063,20 @@ export function PaymentsHub() {
       }
 
       if (Array.isArray(data)) {
-        // 3. Fallback synthesis if orders list is empty but submissions exist in googleFormsStatus
+        // Continuous unification: merge authoritative /api/v1/orders with recentSubmissions
         const status = googleFormsStatusRef.current
-        if (data.length === 0 && status?.recentSubmissions && status.recentSubmissions.length > 0) {
-          const synthesized = status.recentSubmissions.map((sub) => {
+        const map = new Map<string, Order>()
+
+        // 1. Add authoritative orders from /api/v1/orders
+        for (const o of data) {
+          const id = (o.id || (o as any).orderId || "").trim()
+          if (!id) continue
+          map.set(id, o)
+        }
+
+        // 2. Merge recent Google Forms submissions from /google-forms/status
+        if (status?.recentSubmissions && status.recentSubmissions.length > 0) {
+          for (const sub of status.recentSubmissions) {
             const total = Math.max(sub.amountCentavos || 0, 100)
             const vat = Math.round((total * 12) / 112)
             const responseId = (sub as any).responseId || (sub as any).submissionId || ""
@@ -959,50 +1088,65 @@ export function PaymentsHub() {
                 .slice(0, 8)
                 .toUpperCase()}`
 
-            return {
-              id: orderId,
-              orderId,
-              user_id: sub.respondentEmail || (sub as any).customerEmail || "google-forms-respondent",
-              customerId: sub.respondentEmail || (sub as any).customerEmail || "google-forms-respondent",
-              order_number: orderNumber,
-              orderNumber,
-              title: sub.itemDescription || (sub as any).description || "Google Form Order",
-              category: "product_order",
-              reference_code: sub.itemDescription || (sub as any).description || "GFORM-ITEM",
-              amount_minor: total,
-              totalCentavos: total,
-              amount: total / 100,
-              subtotalCentavos: Math.max(total - vat, 0),
-              vatCentavos: vat,
-              currency: sub.currency || "PHP",
-              status: (sub.syncStatus?.toLowerCase() === "paid" ? "paid" : "pending") as any,
-              customerEmail: sub.respondentEmail || (sub as any).customerEmail || "noreply@example.com",
-              customerName: sub.customerName || "Google Form Respondent",
-              metadata: {
-                source: "google_forms",
-                submission_id: (sub as any).submissionId,
-                response_id: (sub as any).responseId,
-                sheet_row_number: (sub as any).sheetRowNumber,
-              },
-              created_at: sub.submittedAt || new Date().toISOString(),
-              createdAt: sub.submittedAt || new Date().toISOString(),
-              updated_at: sub.submittedAt || new Date().toISOString(),
-              updatedAt: sub.submittedAt || new Date().toISOString(),
-              lineItems: [
-                {
-                  sku: "GFORM-ITEM",
-                  name: sub.itemDescription || (sub as any).description || "Google Form Order",
-                  quantity: 1,
-                  unitPriceCentavos: total,
-                  lineTotalCentavos: total,
+            const existing = map.get(orderId)
+            const subStatus = String((sub as any).status || sub.syncStatus || "").toLowerCase()
+
+            if (!existing) {
+              const synthesized: Order = {
+                id: orderId,
+                orderId,
+                user_id: sub.respondentEmail || (sub as any).customerEmail || "google-forms-respondent",
+                customerId: sub.respondentEmail || (sub as any).customerEmail || "google-forms-respondent",
+                order_number: orderNumber,
+                orderNumber,
+                title: sub.itemDescription || (sub as any).description || "Google Form Order",
+                category: "product_order",
+                reference_code: sub.itemDescription || (sub as any).description || "GFORM-ITEM",
+                amount_minor: total,
+                totalCentavos: total,
+                amount: total / 100,
+                subtotalCentavos: Math.max(total - vat, 0),
+                vatCentavos: vat,
+                currency: sub.currency || "PHP",
+                status: (subStatus === "paid" ? "paid" : subStatus === "cancelled" || subStatus === "expired" ? "cancelled" : "pending") as any,
+                customerEmail: sub.respondentEmail || (sub as any).customerEmail || "noreply@example.com",
+                customerName: sub.customerName || "Google Form Respondent",
+                metadata: {
+                  source: "google_forms",
+                  submission_id: (sub as any).submissionId,
+                  response_id: (sub as any).responseId,
+                  sheet_row_number: (sub as any).sheetRowNumber,
                 },
-              ],
-            } as any
-          })
-          setOrders(synthesized)
-        } else {
-          setOrders(data)
+                created_at: sub.submittedAt || (sub as any).createdAt || new Date().toISOString(),
+                createdAt: sub.submittedAt || (sub as any).createdAt || new Date().toISOString(),
+                updated_at: sub.submittedAt || (sub as any).createdAt || new Date().toISOString(),
+                updatedAt: sub.submittedAt || (sub as any).createdAt || new Date().toISOString(),
+                lineItems: [
+                  {
+                    sku: "GFORM-ITEM",
+                    name: sub.itemDescription || (sub as any).description || "Google Form Order",
+                    quantity: 1,
+                    unitPriceCentavos: total,
+                    lineTotalCentavos: total,
+                  },
+                ],
+              } as any
+              map.set(orderId, synthesized)
+            } else {
+              // Reconcile status if recent submission has reached paid / terminal state
+              if (subStatus === "paid" && existing.status !== "paid") {
+                existing.status = "paid" as any
+              } else if ((subStatus === "cancelled" || subStatus === "expired") && existing.status === "pending") {
+                existing.status = subStatus as any
+              }
+            }
+          }
         }
+
+        const unifiedList = Array.from(map.values()).sort(
+          (a, b) => new Date(b.created_at || (b as any).createdAt).getTime() - new Date(a.created_at || (a as any).createdAt).getTime()
+        )
+        setOrders(unifiedList)
       }
     } catch (err) {
       console.error("Error loading orders:", err)
@@ -1062,6 +1206,7 @@ export function PaymentsHub() {
     const intervalId = setInterval(() => {
       if (typeof document !== "undefined" && document.visibilityState === "visible") {
         void loadOrders()
+        void loadGoogleFormsStatus()
         if (isAdminRef.current) {
           void loadAdminDiagnostics()
         }
@@ -1071,7 +1216,7 @@ export function PaymentsHub() {
     return () => {
       ;(globalThis.clearInterval ?? window?.clearInterval)?.(intervalId)
     }
-  }, [loadOrders, loadAdminDiagnostics])
+  }, [loadOrders, loadGoogleFormsStatus, loadAdminDiagnostics])
 
   useEffect(() => {
     setMounted(true)
@@ -1130,6 +1275,130 @@ export function PaymentsHub() {
   const [orderTitle, setOrderTitle] = useState("")
   const [orderQuantity, setOrderQuantity] = useState(1)
 
+  // CRUD Order State (Edit, Cancel, Delete)
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null)
+  const [editName, setEditName] = useState<string>("")
+  const [editEmail, setEditEmail] = useState<string>("")
+  const [editDescription, setEditDescription] = useState<string>("")
+  const [editAmountPhp, setEditAmountPhp] = useState<string>("")
+
+  const openEditOrder = (order: Order) => {
+    setEditingOrder(order)
+    setEditName(order.customerName || (order.metadata as any)?.customer_name || "")
+    setEditEmail((order as any).customerEmail || (order.metadata as any)?.customer_email || "")
+    setEditDescription(order.title || (order as any).description || "")
+    setEditAmountPhp(((order.amount_minor ?? 0) / 100).toFixed(2))
+  }
+
+  const getCsrfHeaders = async (): Promise<Record<string, string>> => {
+    try {
+      const csrfRes = await fetch("/api/auth/csrf", { credentials: "include" })
+      if (csrfRes.ok) {
+        const data = await csrfRes.json()
+        const token = data?.csrfToken || data?.csrf_token || data?.token
+        if (token) {
+          return {
+            "Content-Type": "application/json",
+            "X-CSRF-Token": token,
+          }
+        }
+      }
+    } catch {
+      // Fallback if CSRF cookie is handled automatically
+    }
+    return { "Content-Type": "application/json" }
+  }
+
+  const handleUpdateOrder = async (
+    orderId: string,
+    updates: {
+      customer_name?: string
+      customer_email?: string
+      description?: string
+      amount_centavos?: number
+    }
+  ) => {
+    try {
+      const headers = await getCsrfHeaders()
+      const res = await fetch(`/api/v1/orders/${encodeURIComponent(orderId)}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers,
+        body: JSON.stringify(updates),
+      })
+
+      if (res.ok) {
+        setFeedbackMessage(`Order ${orderId} updated successfully.`)
+        await loadAllData()
+      } else {
+        setFeedbackMessage(`Failed to update order ${orderId}.`)
+      }
+    } catch (err: any) {
+      console.error("[PaymentsHub] Update order error:", err)
+      setFeedbackMessage(`Update error: ${err.message}`)
+    }
+  }
+
+  const handleCancelOrder = async (orderId: string) => {
+    try {
+      const headers = await getCsrfHeaders()
+      const res = await fetch(`/api/v1/orders/${encodeURIComponent(orderId)}/cancel`, {
+        method: "POST",
+        credentials: "include",
+        headers,
+        body: JSON.stringify({ reason: "Cancelled from Payments Hub" }),
+      })
+
+      if (res.ok) {
+        setFeedbackMessage(`Order ${orderId} cancelled.`)
+        await loadAllData()
+      } else {
+        setFeedbackMessage(`Failed to cancel order ${orderId}.`)
+      }
+    } catch (err: any) {
+      console.error("[PaymentsHub] Cancel order error:", err)
+      setFeedbackMessage(`Cancel error: ${err.message}`)
+    }
+  }
+
+  const handleDeleteOrder = async (orderId: string) => {
+    try {
+      const headers = await getCsrfHeaders()
+      const res = await fetch(`/api/v1/orders/${encodeURIComponent(orderId)}`, {
+        method: "DELETE",
+        credentials: "include",
+        headers,
+      })
+
+      if (res.ok || res.status === 204) {
+        setRawOrders((prev) => prev.filter((o) => o.id !== orderId))
+        setFeedbackMessage(`Order ${orderId} deleted successfully.`)
+        await loadAllData()
+      } else {
+        setFeedbackMessage(`Failed to delete order ${orderId}.`)
+      }
+    } catch (err: any) {
+      console.error("[PaymentsHub] Delete order error:", err)
+      setFeedbackMessage(`Delete error: ${err.message}`)
+    }
+  }
+
+  const submitEditOrder = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingOrder) return
+    const parsedPhp = parseFloat(editAmountPhp)
+    await handleUpdateOrder(editingOrder.id, {
+      customer_name: editName.trim(),
+      customer_email: editEmail.trim(),
+      description: editDescription.trim(),
+      amount_centavos:
+        Number.isFinite(parsedPhp) && parsedPhp > 0
+          ? Math.round(parsedPhp * 100)
+          : editingOrder.amount_minor,
+    })
+    setEditingOrder(null)
+  }
+
   const productOptions = [
     { name: "Product A", unitPrice: 1 },
     { name: "Product B", unitPrice: 89 },
@@ -1150,18 +1419,20 @@ export function PaymentsHub() {
   // Filtered Orders Calculation
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
-      const orderStatusLower = String(order.status || "").toLowerCase()
+      const effectiveBucket = getEffectiveOrderStatus(order)
       const matchesStatus =
         statusFilter === "all" ||
-        orderStatusLower === statusFilter ||
-        (statusFilter === "pending" && (orderStatusLower === "pending_payment" || orderStatusLower === "pending")) ||
-        (statusFilter === "paid" && (orderStatusLower === "paid" || orderStatusLower === "settled"))
+        effectiveBucket === statusFilter ||
+        String(order.status || "").toLowerCase() === statusFilter
+
       const query = searchQuery.trim().toLowerCase()
       const matchesSearch =
         !query ||
         order.order_number.toLowerCase().includes(query) ||
         order.title.toLowerCase().includes(query) ||
-        order.reference_code.toLowerCase().includes(query)
+        order.reference_code.toLowerCase().includes(query) ||
+        (order.customerName && order.customerName.toLowerCase().includes(query)) ||
+        (order.metadata?.customer_name && String(order.metadata.customer_name).toLowerCase().includes(query))
       return matchesStatus && matchesSearch
     })
   }, [orders, statusFilter, searchQuery])
@@ -1591,6 +1862,67 @@ export function PaymentsHub() {
               </span>
             </CardHeader>
             <CardContent className="p-0">
+              {editingOrder && (
+                <div className="p-4 border-b border-amber-500/30 bg-amber-500/5">
+                  <div className="flex items-center justify-between pb-3">
+                    <h4 className="text-sm font-semibold text-foreground">
+                      Edit Order {editingOrder.order_number} ({editingOrder.id})
+                    </h4>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      onClick={() => setEditingOrder(null)}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  <form
+                    onSubmit={submitEditOrder}
+                    className="grid grid-cols-1 gap-3 sm:grid-cols-5"
+                  >
+                    <Input
+                      placeholder="Customer Name"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                    />
+                    <Input
+                      type="email"
+                      placeholder="Customer Email"
+                      value={editEmail}
+                      onChange={(e) => setEditEmail(e.target.value)}
+                    />
+                    <Input
+                      placeholder="Description"
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                    />
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="1"
+                      placeholder="Amount (PHP)"
+                      value={editAmountPhp}
+                      onChange={(e) => setEditAmountPhp(e.target.value)}
+                    />
+                    <div className="flex items-center gap-2">
+                      <Button type="submit" size="sm" className="h-9">
+                        Save
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-9"
+                        onClick={() => setEditingOrder(null)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </form>
+                </div>
+              )}
               {loading ? (
                 <div className="p-8 text-center text-sm text-muted-foreground">Loading orders...</div>
               ) : filteredOrders.length === 0 ? (
@@ -1611,6 +1943,9 @@ export function PaymentsHub() {
                         onView={(attemptId) => router.push(`/payment/result/${attemptId}`)}
                         onPay={(orderId) => router.push(`/checkout?order_id=${orderId}`)}
                         onExpire={handleExpireAttempt}
+                        onEdit={openEditOrder}
+                        onCancel={handleCancelOrder}
+                        onDelete={handleDeleteOrder}
                         isAdmin={isAdmin}
                       />
                     ))}
@@ -1641,6 +1976,9 @@ export function PaymentsHub() {
                             onView={(attemptId) => router.push(`/payment/result/${attemptId}`)}
                             onPay={(orderId) => router.push(`/checkout?order_id=${orderId}`)}
                             onExpire={handleExpireAttempt}
+                            onEdit={openEditOrder}
+                            onCancel={handleCancelOrder}
+                            onDelete={handleDeleteOrder}
                             isAdmin={isAdmin}
                           />
                         ))}
