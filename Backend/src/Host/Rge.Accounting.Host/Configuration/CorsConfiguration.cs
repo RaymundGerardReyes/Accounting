@@ -87,7 +87,12 @@ public static class CorsConfiguration
                     {
                         string host = uri.Host;
                         if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-                            host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase))
+                            host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                            host.Equals("0.0.0.0", StringComparison.OrdinalIgnoreCase) ||
+                            host.Equals("::1", StringComparison.OrdinalIgnoreCase) ||
+                            host.Equals("[::1]", StringComparison.OrdinalIgnoreCase) ||
+                            host.Equals("::", StringComparison.OrdinalIgnoreCase) ||
+                            host.Equals("[::]", StringComparison.OrdinalIgnoreCase))
                         {
                             return true;
                         }

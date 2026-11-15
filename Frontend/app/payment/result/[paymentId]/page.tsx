@@ -70,6 +70,43 @@ function PaymentResultContent({ params }: PageProps) {
   const [receiptLoadingError, setReceiptLoadingError] = useState<string | null>(null)
   const lastFocusSyncMsRef = useRef<number>(0)
   const isFocusSyncInFlightRef = useRef<boolean>(false)
+  const receiptInFlightRef = useRef<Promise<ReceiptData | null> | null>(null)
+  const receiptLoadedForRef = useRef<string | null>(null)
+
+  const loadReceiptOnce = useCallback(
+    async (targetPaymentId: string, force = false): Promise<ReceiptData | null> => {
+      if (!targetPaymentId) return null
+
+      if (!force && receiptLoadedForRef.current === targetPaymentId && receipt) {
+        return receipt
+      }
+
+      if (receiptInFlightRef.current) {
+        return receiptInFlightRef.current
+      }
+
+      const fetchPromise = (async () => {
+        try {
+          const data = await fetchPaymentReceipt(targetPaymentId)
+          if (data) {
+            receiptLoadedForRef.current = targetPaymentId
+            setReceipt(data)
+            setReceiptLoadingError(null)
+          }
+          return data
+        } catch (err: any) {
+          console.warn("[PaymentResult] Receipt fetch deferred or unavailable:", err)
+          return null
+        } finally {
+          receiptInFlightRef.current = null
+        }
+      })()
+
+      receiptInFlightRef.current = fetchPromise
+      return fetchPromise
+    },
+    [receipt]
+  )
 
   // Terminal Succeeded State Guard: Prevents late polls or webhooks from downgrading Succeeded status
   const safeSetPayment = useCallback(
@@ -105,7 +142,7 @@ function PaymentResultContent({ params }: PageProps) {
       if (payload.status) {
         safeSetPayment((prev) => (prev ? { ...prev, status: payload.status.toLowerCase() as any } : null))
         if (payload.status.toLowerCase() === "succeeded" || payload.status.toLowerCase() === "paid") {
-          fetchPaymentReceipt(paymentId).then(setReceipt).catch(() => {})
+          void loadReceiptOnce(paymentId)
         }
       }
     },
