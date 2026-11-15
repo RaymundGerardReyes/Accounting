@@ -37,6 +37,7 @@ public sealed class OrderCrudLifecycleIntegrationTests : IClassFixture<Accountin
     {
         _client.Dispose();
         OrderRepository.ResetToBaseline();
+        PaymentAttemptRepository.ResetToBaseline();
     }
 
     // =========================================================================

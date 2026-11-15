@@ -40,6 +40,10 @@ public sealed class ReceiptEndpoints : IEndpointModule
             CancellationToken ct) =>
         {
             var result = await handler.HandleAsync(new GetReceiptByPaymentQuery(payment_id), ct).ConfigureAwait(false);
+            if (result.IsSuccess)
+            {
+                httpContext.Response.Headers.CacheControl = "private, max-age=300, stale-while-revalidate=86400";
+            }
             return result.ToHttpResult(httpContext, receipt => Results.Json(ToPresentationModel(receipt), JsonDefaults.Options));
         }).WithTags("Receipts");
 

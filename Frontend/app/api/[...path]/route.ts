@@ -71,10 +71,22 @@ async function proxyRequest(
     if (incomingHost) headers.set("x-forwarded-host", incomingHost)
   }
 
-  // Forward or synthesize origin
-  if (!headers.has("origin")) {
+  // Forward or synthesize origin & sanitize internal PaaS bind origins (0.0.0.0 / 127.0.0.1)
+  const rawOrigin = request.headers.get("origin")
+  if (rawOrigin) {
+    if (rawOrigin.includes("0.0.0.0") || rawOrigin.includes("127.0.0.1")) {
+      const forwardedHost = headers.get("x-forwarded-host")
+      const forwardedProto = headers.get("x-forwarded-proto") || "https"
+      if (forwardedHost && !forwardedHost.includes("0.0.0.0")) {
+        headers.set("origin", `${forwardedProto}://${forwardedHost.split(",")[0].trim()}`)
+      } else {
+        headers.delete("origin")
+      }
+    } else {
+      headers.set("origin", rawOrigin)
+    }
+  } else if (!headers.has("origin")) {
     const incomingOrigin =
-      request.headers.get("origin") ||
       (configuredDomain
         ? (configuredDomain.startsWith("http://") || configuredDomain.startsWith("https://")
             ? configuredDomain
@@ -125,15 +137,22 @@ async function proxyRequest(
     }
 
     const contentType = backendRes.headers.get("content-type") || ""
+    const isStreamingHubOrSse =
+      joinedPath.startsWith("hubs/") ||
+      contentType.includes("text/event-stream") ||
+      request.headers.get("accept")?.includes("text/event-stream")
 
-    // Handle streaming responses (e.g. Server-Sent Events text/event-stream)
-    if (contentType.includes("text/event-stream") && backendRes.body) {
+    // Handle streaming responses (e.g. SignalR hubs and Server-Sent Events text/event-stream)
+    if (isStreamingHubOrSse && backendRes.body) {
       const streamResponse = new NextResponse(backendRes.body, {
         status: backendRes.status,
         statusText: backendRes.statusText,
       })
-      streamResponse.headers.set("content-type", contentType)
+      if (contentType) {
+        streamResponse.headers.set("content-type", contentType)
+      }
       streamResponse.headers.set("cache-control", "no-cache, no-transform")
+      streamResponse.headers.set("x-accel-buffering", "no")
       streamResponse.headers.set("connection", "keep-alive")
       return streamResponse
     }

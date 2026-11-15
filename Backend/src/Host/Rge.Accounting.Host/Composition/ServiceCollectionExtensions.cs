@@ -392,6 +392,10 @@ public static class ServiceCollectionExtensions
         // 1. Core SharedKernel & Persistence BuildingBlocks
         services.AddSingleton<IClock>(Rge.BuildingBlocks.Infrastructure.Persistence.SystemClock.Instance);
         services.AddSingleton<IBusinessDayService>(_ => new PhilippineBusinessCalendar());
+        services.AddMemoryCache();
+#pragma warning disable EXTEXP0018
+        services.AddHybridCache();
+#pragma warning restore EXTEXP0018
         services.AddSingleton<CacheInvalidator>();
         services.AddSingleton<DbDataSource>(sp =>
         {

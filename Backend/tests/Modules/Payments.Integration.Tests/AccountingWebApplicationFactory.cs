@@ -167,6 +167,7 @@ public sealed class AccountingWebApplicationFactory : WebApplicationFactory<Prog
     {
         base.Dispose(disposing);
         OrderRepository.ResetToBaseline();
+        PaymentAttemptRepository.ResetToBaseline();
     }
 }
 

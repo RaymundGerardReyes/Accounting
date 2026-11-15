@@ -208,6 +208,9 @@ public sealed class PaymentExpirationWorker : BackgroundService
                             transitionedCount++;
                             await NotifyFrontendAsync(notifier, attempt.Id, attempt.ProviderPaymentId, nameof(PaymentAttemptStatus.Succeeded), paidAt, cancellationToken)
                                 .ConfigureAwait(false);
+
+                            // Eagerly pre-issue the Official Receipt and warm the L1 cache in the background via Outbox integration event
+                            // (already dispatched via outboxPublisher.PublishOrderPaidAsync above)
                         }
 
                         continue;

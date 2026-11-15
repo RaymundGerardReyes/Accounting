@@ -1,5 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Caching.Hybrid" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\..\BuildingBlocks\Rge.BuildingBlocks.Api\Rge.BuildingBlocks.Api.csproj" />
     <ProjectReference Include="..\Rge.Payments.Application\Rge.Payments.Application.csproj" />
     <ProjectReference Include="..\Rge.Payments.Infrastructure\Rge.Payments.Infrastructure.csproj" />

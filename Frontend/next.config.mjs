@@ -69,6 +69,25 @@ const nextConfig = {
       },
     ]
   },
+  async rewrites() {
+    const backendInternalUrl = (
+      process.env.BACKEND_INTERNAL_URL ||
+      process.env.BACKEND_API_URL ||
+      process.env.BACKEND_URL ||
+      `http://127.0.0.1:${process.env.BACKEND_PORT || "5080"}`
+    ).replace(/\/+$/, "")
+
+    return {
+      beforeFiles: [
+        {
+          source: "/hubs/:path*",
+          destination: `${backendInternalUrl}/hubs/:path*`,
+        },
+      ],
+      afterFiles: [],
+      fallback: [],
+    }
+  },
   webpack: (config) => {
     config.resolve.alias = {
       ...config.resolve.alias,

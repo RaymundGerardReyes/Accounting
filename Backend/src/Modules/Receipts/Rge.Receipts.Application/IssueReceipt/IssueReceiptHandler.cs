@@ -46,7 +46,7 @@ public sealed record ReceiptDto(
 /// Issues a collision-safe BIR Official Receipt (OR-YYYYMM-XXXX-HASH8) and Treasury Acknowledgement.
 /// Idempotent: returns the existing receipt if already issued for the given payment or order.
 /// </summary>
-public sealed class IssueReceiptHandler : ICommandHandler<IssueReceiptCommand, ReceiptDto>
+public class IssueReceiptHandler : ICommandHandler<IssueReceiptCommand, ReceiptDto>
 {
     private readonly IReceiptRepository _repository;
     private readonly ICanonicalJsonSerializer _canonicalSerializer;
@@ -66,7 +66,7 @@ public sealed class IssueReceiptHandler : ICommandHandler<IssueReceiptCommand, R
         _clock = clock;
     }
 
-    public async Task<Result<ReceiptDto>> HandleAsync(
+    public virtual async Task<Result<ReceiptDto>> HandleAsync(
         IssueReceiptCommand command,
         CancellationToken cancellationToken = default)
     {

@@ -124,6 +124,11 @@ app.UseRouting();
 
 app.UseCors(CorsConfiguration.PolicyName);
 
+app.UseWebSockets(new WebSocketOptions
+{
+    KeepAliveInterval = TimeSpan.FromSeconds(15)
+});
+
 app.UseRateLimiter();
 
 app.UseAuthentication();

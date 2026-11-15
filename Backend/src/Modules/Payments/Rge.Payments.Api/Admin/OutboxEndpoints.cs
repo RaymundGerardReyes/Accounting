@@ -1,9 +1,17 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Caching.Hybrid;
 using Rge.BuildingBlocks.Api.Endpoints;
 using Rge.BuildingBlocks.Application.Abstractions;
 using Rge.BuildingBlocks.Application.Messaging;
+using Rge.BuildingBlocks.Infrastructure.Caching;
 using Rge.BuildingBlocks.Infrastructure.Outbox;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
 
@@ -11,6 +19,19 @@ namespace Rge.Payments.Api.Admin;
 
 public sealed class OutboxEndpoints : IEndpointModule
 {
+    private static readonly HybridCacheEntryOptions OutboxCacheOptions = new()
+    {
+        Expiration = TimeSpan.FromSeconds(15),
+        LocalCacheExpiration = TimeSpan.FromSeconds(5)
+    };
+
+    private static readonly string[] OutboxCacheTags =
+    [
+        HybridCacheKeys.OutboxTag,
+        HybridCacheKeys.AdminOutboxTag,
+        HybridCacheKeys.OrdersTag
+    ];
+
     public void MapEndpoints(IEndpointRouteBuilder app)
     {
         ArgumentNullException.ThrowIfNull(app);
@@ -24,11 +45,14 @@ public sealed class OutboxEndpoints : IEndpointModule
            .WithTags("Payments.Admin");
     }
 
-    private static async Task<IResult> ListOutboxAsync(
+    public static async Task<IResult> ListOutboxAsync(
         IOutboxStore outboxStore,
         IClock clock,
         ICurrentActor actor,
-        CancellationToken cancellationToken)
+        [FromQuery(Name = "status")] string? status = null,
+        [FromQuery(Name = "limit")] int? limit = null,
+        [FromServices] HybridCache? cache = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(outboxStore);
         ArgumentNullException.ThrowIfNull(clock);
@@ -44,14 +68,58 @@ public sealed class OutboxEndpoints : IEndpointModule
             return Results.Forbid();
         }
 
+        var effectiveLimit = limit is null or <= 0 ? 50 : Math.Min(limit.Value, 500);
+        var cacheKey = HybridCacheKeys.AdminFulfillmentOutboxList(status, effectiveLimit);
+
+        if (cache is not null)
+        {
+            var cachedRecords = await cache.GetOrCreateAsync(
+                cacheKey,
+                async cancel => await FetchOutboxMessagesAsync(outboxStore, clock, status, effectiveLimit, cancel).ConfigureAwait(false),
+                OutboxCacheOptions,
+                OutboxCacheTags,
+                cancellationToken).ConfigureAwait(false);
+
+            return Results.Ok(cachedRecords);
+        }
+
+        var records = await FetchOutboxMessagesAsync(outboxStore, clock, status, effectiveLimit, cancellationToken).ConfigureAwait(false);
+        return Results.Ok(records);
+    }
+
+    private static async Task<IReadOnlyList<OutboxMessage>> FetchOutboxMessagesAsync(
+        IOutboxStore outboxStore,
+        IClock clock,
+        string? statusFilter,
+        int limit,
+        CancellationToken cancellationToken)
+    {
         var records = await outboxStore.ClaimBatchAsync(
             workerId: "admin-inspector",
-            batchSize: 50,
+            batchSize: limit,
             leaseDuration: TimeSpan.FromSeconds(30),
             nowUtc: clock.UtcNow,
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        return Results.Ok(records);
+        if (!string.IsNullOrWhiteSpace(statusFilter))
+        {
+            records = records
+                .Where(m => string.Equals(m.Status, statusFilter, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        return records;
+    }
+
+    public static async Task EvictOutboxCacheAsync(HybridCache? cache, CancellationToken ct = default)
+    {
+        if (cache is null)
+        {
+            return;
+        }
+
+        await cache.RemoveByTagAsync(HybridCacheKeys.OutboxTag, ct).ConfigureAwait(false);
+        await cache.RemoveByTagAsync(HybridCacheKeys.AdminOutboxTag, ct).ConfigureAwait(false);
     }
 
     private static async Task<IResult> ProcessOutboxAsync(
@@ -60,7 +128,8 @@ public sealed class OutboxEndpoints : IEndpointModule
         OutboxDispatcher dispatcher,
         IClock clock,
         ICurrentActor actor,
-        CancellationToken cancellationToken)
+        [FromServices] HybridCache? cache = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(outboxStore);
         ArgumentNullException.ThrowIfNull(dispatcher);
@@ -98,6 +167,11 @@ public sealed class OutboxEndpoints : IEndpointModule
             {
                 await outboxStore.MarkFailedAsync(message.Id, ex.Message, clock.UtcNow, cancellationToken).ConfigureAwait(false);
             }
+        }
+
+        if (processedCount > 0)
+        {
+            await EvictOutboxCacheAsync(cache, cancellationToken).ConfigureAwait(false);
         }
 
         return Results.Ok(new { processed_count = processedCount, status = "completed" });

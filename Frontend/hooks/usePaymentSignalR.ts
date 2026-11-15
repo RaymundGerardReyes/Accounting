@@ -70,25 +70,30 @@ export function usePaymentSignalR({
         : "http://localhost:3000"
 
     const hubUrl = isDirectKestrel
-      ? `${backendBase!.replace(/\/$/, "")}/api/hubs/payments`
-      : `${origin}/api/hubs/payments`
+      ? `${backendBase!.replace(/\/$/, "")}/hubs/payments`
+      : `${origin}/hubs/payments`
 
-    // When going through Next.js API route proxy (/api/hubs/payments) on Heroku or production,
-    // WebSockets cannot upgrade HTTP 101 and causes Heroku router H18 503 drops.
-    // LongPolling is the 100% stable, fully supported transport across the reverse proxy.
-    const transport = isDirectKestrel
-      ? signalR.HttpTransportType.WebSockets | signalR.HttpTransportType.LongPolling
-      : signalR.HttpTransportType.LongPolling
+    // When going through Next.js rewrite /hubs/:path* or Nginx, WebSockets (101) upgrades natively,
+    // with graceful fallback to ServerSentEvents and LongPolling.
+    const transport =
+      signalR.HttpTransportType.WebSockets |
+      signalR.HttpTransportType.ServerSentEvents |
+      signalR.HttpTransportType.LongPolling
 
     let connection: signalR.HubConnection
     try {
       connection = new signalR.HubConnectionBuilder()
         .withUrl(hubUrl, {
           transport,
+          withCredentials: true,
         })
         .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
         .configureLogging(signalR.LogLevel.Warning)
         .build()
+
+      // Send ping every 15s to stay well under Heroku's 55s H15 idle socket window
+      connection.keepAliveIntervalInMilliseconds = 15_000
+      connection.serverTimeoutInMilliseconds = 60_000
     } catch {
       pollCallbackRef.current?.()
       return

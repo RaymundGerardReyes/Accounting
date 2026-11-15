@@ -18,6 +18,7 @@
         "type": "Project",
         "dependencies": {
           "Dapper": "[2.1.35, )",
+          "Microsoft.Extensions.Caching.Hybrid": "[9.3.0, )",
           "Npgsql": "[9.0.2, )",
           "Rge.BuildingBlocks.Application": "[1.0.0, )",
           "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
@@ -52,6 +53,12 @@
         "requested": "[2.1.35, )",
         "resolved": "2.1.35",
         "contentHash": "YKRwjVfrG7GYOovlGyQoMvr1/IJdn+7QzNXJxyMh0YfFF5yvDmTYaJOVYWsckreNjGsGSEtrMTpnzxTUq/tZQw=="
+      },
+      "Microsoft.Extensions.Caching.Hybrid": {
+        "type": "CentralTransitive",
+        "requested": "[9.3.0, )",
+        "resolved": "9.3.0",
+        "contentHash": "hE3B/gMUg1et/hbntomsWmYM+Uv9K3CwLjzYkGBBqrx3hIiH+y2KbucV35OR+Rv1tiSpEyiTPVULvwtaXLWCSA=="
       },
       "Npgsql": {
         "type": "CentralTransitive",

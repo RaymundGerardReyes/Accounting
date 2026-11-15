@@ -45,7 +45,7 @@ public sealed class PaymentsEndpoints : IEndpointModule
         // Map SignalR real-time payment hub for checkout countdown and status synchronization
         Action<HttpConnectionDispatcherOptions> configureHub = options =>
         {
-            options.Transports = HttpTransportType.WebSockets | HttpTransportType.LongPolling;
+            options.Transports = HttpTransportType.WebSockets | HttpTransportType.ServerSentEvents | HttpTransportType.LongPolling;
             options.LongPolling.PollTimeout = TimeSpan.FromSeconds(20);
             options.ApplicationMaxBufferSize = 128 * 1024;
             options.TransportMaxBufferSize = 128 * 1024;
