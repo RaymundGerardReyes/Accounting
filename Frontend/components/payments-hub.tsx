@@ -1150,7 +1150,12 @@ export function PaymentsHub() {
   // Filtered Orders Calculation
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
-      const matchesStatus = statusFilter === "all" || order.status === statusFilter
+      const orderStatusLower = String(order.status || "").toLowerCase()
+      const matchesStatus =
+        statusFilter === "all" ||
+        orderStatusLower === statusFilter ||
+        (statusFilter === "pending" && (orderStatusLower === "pending_payment" || orderStatusLower === "pending")) ||
+        (statusFilter === "paid" && (orderStatusLower === "paid" || orderStatusLower === "settled"))
       const query = searchQuery.trim().toLowerCase()
       const matchesSearch =
         !query ||
