@@ -1,4 +1,5 @@
 // File: Backend/src/Modules/Integrations/Rge.Integrations.Application/Ports/IIntegrationPorts.cs
+using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Integrations.Contracts;
 using Rge.Integrations.Domain;
 
@@ -37,20 +38,32 @@ public interface IGoogleFormsStore
 
     Task<IReadOnlyList<GoogleFormSubmission>> GetAllAsync(
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<GoogleFormSubmission>> GetRecentSubmissionsAsync(
+        int limit = 50,
+        CancellationToken cancellationToken = default);
 }
 
 public interface IGoogleFormsSubmissionStore
 {
     Task<GoogleFormsStatusResponse> GetStatusAsync(CancellationToken cancellationToken = default);
     Task SaveSubmissionAsync(GoogleFormSubmission submission, CancellationToken cancellationToken = default);
+    Task UpsertAsync(GoogleFormSubmission submission, CancellationToken cancellationToken = default);
     Task<GoogleFormSubmission?> GetByResponseIdAsync(string responseId, CancellationToken cancellationToken = default);
     Task<int> CountAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<GoogleFormSubmission>> GetAllAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<GoogleFormSubmission>> GetRecentSubmissionsAsync(
+        int limit = 50,
+        CancellationToken cancellationToken = default);
 }
 
 public interface IGoogleSheetsClient
 {
     Task AppendRowAsync(IReadOnlyList<object?> row, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<GoogleFormSubmission>> ReadSubmissionsAsync(
+        string? spreadsheetId = null,
+        string? range = null,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed record GoogleFormOrderCreationRequest(
@@ -135,6 +148,10 @@ public interface IGoogleFormOrderBridge
 
     Task<BridgedGoogleFormOrder> BridgeSubmissionToOrderAsync(
         GoogleFormOrderBridgeRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<BridgedGoogleFormOrder>> EnsureOrderForSubmissionAsync(
+        GoogleFormSubmission submission,
         CancellationToken cancellationToken = default);
 }
 

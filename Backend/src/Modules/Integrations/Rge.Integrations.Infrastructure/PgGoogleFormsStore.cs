@@ -15,11 +15,12 @@ namespace Rge.Integrations.Infrastructure;
 
 public sealed class PgGoogleFormsStore : IGoogleFormsStore, IGoogleFormsSubmissionStore, IDisposable
 {
+    private static readonly SemaphoreSlim SchemaLock = new(1, 1);
+    private static int _schemaInitialized;
+
     private readonly NpgsqlDataSource? _dataSource;
     private readonly ILogger<PgGoogleFormsStore> _logger;
     private readonly ConcurrentDictionary<string, GoogleFormSubmission> _fallbackCache = new(StringComparer.OrdinalIgnoreCase);
-    private volatile bool _schemaEnsured;
-    private readonly SemaphoreSlim _schemaLock = new(1, 1);
 
     private const string EnsureTableSql = """
         CREATE TABLE IF NOT EXISTS public.google_form_submissions (
@@ -295,6 +296,20 @@ public sealed class PgGoogleFormsStore : IGoogleFormsStore, IGoogleFormsSubmissi
         await UpsertSubmissionAsync(submission, cancellationToken).ConfigureAwait(false);
     }
 
+    public Task UpsertAsync(GoogleFormSubmission submission, CancellationToken cancellationToken = default)
+    {
+        return UpsertSubmissionAsync(submission, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<GoogleFormSubmission>> GetRecentSubmissionsAsync(
+        int limit = 50,
+        CancellationToken cancellationToken = default)
+    {
+        var all = await GetAllAsync(cancellationToken).ConfigureAwait(false);
+        int take = limit <= 0 ? 50 : Math.Min(limit, 250);
+        return all.Take(take).ToList();
+    }
+
     public async Task<GoogleFormSubmission?> GetByResponseIdAsync(string responseId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(responseId)) return null;
@@ -316,15 +331,15 @@ public sealed class PgGoogleFormsStore : IGoogleFormsStore, IGoogleFormsSubmissi
 
     private async Task EnsureSchemaAsync(CancellationToken cancellationToken)
     {
-        if (_schemaEnsured || _dataSource is null)
+        if (Volatile.Read(ref _schemaInitialized) == 1 || _dataSource is null)
         {
             return;
         }
 
-        await _schemaLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await SchemaLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_schemaEnsured)
+            if (_schemaInitialized == 1)
             {
                 return;
             }
@@ -333,7 +348,7 @@ public sealed class PgGoogleFormsStore : IGoogleFormsStore, IGoogleFormsSubmissi
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = EnsureTableSql;
             await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-            _schemaEnsured = true;
+            Volatile.Write(ref _schemaInitialized, 1);
         }
         catch (Exception ex)
         {
@@ -341,12 +356,11 @@ public sealed class PgGoogleFormsStore : IGoogleFormsStore, IGoogleFormsSubmissi
         }
         finally
         {
-            _schemaLock.Release();
+            SchemaLock.Release();
         }
     }
 
     public void Dispose()
     {
-        _schemaLock.Dispose();
     }
 }

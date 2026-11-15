@@ -10,6 +10,7 @@ using Rge.BuildingBlocks.SharedKernel.Money;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
 using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Integrations.Application.Ports;
+using Rge.Integrations.Domain;
 using Rge.Integrations.Infrastructure;
 using SmtpClientFactory = Rge.Integrations.Infrastructure.SmtpClientFactory;
 using Rge.Payments.Application.PaymentAttempts.InitiateAttempt;
@@ -463,6 +464,45 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
         }
 
         return (total, paid, pending);
+    }
+
+    public async Task<Result<BridgedGoogleFormOrder>> EnsureOrderForSubmissionAsync(
+        GoogleFormSubmission submission,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(submission);
+        try
+        {
+            var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(submission.OrderNumber))
+            {
+                meta["order_number"] = submission.OrderNumber.Trim();
+            }
+
+            var request = new GoogleFormOrderBridgeRequest(
+                ResponseId: submission.ResponseId,
+                CustomerName: submission.CustomerName,
+                CustomerEmail: submission.CustomerEmail,
+                CustomerPhone: submission.CustomerPhone,
+                ProductCode: submission.ItemReference,
+                ProductTitle: submission.BookTitle ?? submission.ItemReference ?? "Google Form Order",
+                Quantity: Math.Max(1, submission.Quantity),
+                UnitPriceMinor: submission.AmountCentavos / Math.Max(1, submission.Quantity),
+                TotalAmountMinor: Math.Max(100, submission.AmountCentavos),
+                Currency: string.IsNullOrWhiteSpace(submission.Amount.CurrencyCode) ? "PHP" : submission.Amount.CurrencyCode,
+                Status: submission.Status ?? "pending",
+                SubmittedAt: submission.SubmittedAtUtc == default ? DateTimeOffset.UtcNow : submission.SubmittedAtUtc,
+                SendInitialEmail: false,
+                AdditionalMetadata: meta.Count > 0 ? meta : null);
+
+            var bridged = await BridgeSubmissionToOrderAsync(request, cancellationToken).ConfigureAwait(false);
+            return Result.Success(bridged);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed bridging submission {ResponseId} into orders ledger.", submission.ResponseId);
+            return Result.Failure<BridgedGoogleFormOrder>(new Error("Bridge.Failure", ex.Message, ErrorType.Failure));
+        }
     }
 
     private static string ComputeShortHash(string input)

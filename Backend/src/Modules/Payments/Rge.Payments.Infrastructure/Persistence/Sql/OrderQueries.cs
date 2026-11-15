@@ -55,17 +55,8 @@ public static class OrderQueries
             o.created_at,
             o.updated_at
         FROM public.orders o
-        WHERE (@user_id IS NULL OR o.user_id = @user_id)
+        WHERE (@UserId IS NULL OR o.user_id = @UserId)
           AND (@status IS NULL OR LOWER(o.status) = LOWER(@status))
-          AND (@category IS NULL OR LOWER(o.category) = LOWER(@category))
-          AND (
-              @search IS NULL
-              OR o.order_number ILIKE '%' || @search || '%'
-              OR o.title ILIKE '%' || @search || '%'
-              OR o.reference_code ILIKE '%' || @search || '%'
-              OR COALESCE(o.metadata_json, '') ILIKE '%' || @search || '%'
-          )
-          AND (@cursor IS NULL OR o.created_at < @cursor)
         ORDER BY o.created_at DESC, o.id DESC
         LIMIT @limit;
         """;
@@ -82,5 +73,64 @@ public static class OrderQueries
         SELECT COUNT(*)
         FROM orders
         WHERE order_number LIKE @prefix_pattern;
+        """;
+
+    public const string MaterializeUnbridgedGoogleFormSubmissions = """
+        DO $$
+        BEGIN
+            IF to_regclass('public.google_form_submissions') IS NOT NULL AND to_regclass('public.orders') IS NOT NULL THEN
+                INSERT INTO public.orders (
+                    id,
+                    user_id,
+                    order_number,
+                    title,
+                    category,
+                    reference_code,
+                    amount_minor,
+                    currency,
+                    status,
+                    metadata_json,
+                    created_at,
+                    updated_at
+                )
+                SELECT
+                    COALESCE(NULLIF(g.order_id, ''), 'ord_gf_' || SUBSTRING(REPLACE(MD5(g.response_id), '-', ''), 1, 8)),
+                    COALESCE(NULLIF(g.customer_email, ''), 'google_forms_bridge'),
+                    COALESCE(NULLIF(g.order_number, ''), 'ORD-GF-' || UPPER(SUBSTRING(REPLACE(MD5(g.response_id), '-', ''), 1, 8))),
+                    COALESCE(NULLIF(g.description, ''), 'Google Form Order'),
+                    'product_order',
+                    COALESCE(NULLIF(g.description, ''), 'GFORM-ITEM'),
+                    GREATEST(g.amount_minor, 100),
+                    COALESCE(NULLIF(g.currency, ''), 'PHP'),
+                    CASE WHEN LOWER(g.status) = 'paid' THEN 'paid' ELSE 'pending' END,
+                    jsonb_build_object(
+                        'source', 'google_forms',
+                        'customer_name', g.customer_name,
+                        'customer_email', g.customer_email,
+                        'google_form_response_id', g.response_id,
+                        'response_id', g.response_id
+                    )::text,
+                    COALESCE(g.created_at, NOW()),
+                    NOW()
+                FROM public.google_form_submissions g
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM public.orders o
+                    WHERE (g.order_id IS NOT NULL AND g.order_id <> '' AND o.id = g.order_id)
+                       OR (g.order_number IS NOT NULL AND g.order_number <> '' AND o.order_number = g.order_number)
+                       OR (o.metadata_json LIKE '%' || g.response_id || '%')
+                )
+                ON CONFLICT (id) DO NOTHING;
+
+                UPDATE public.google_form_submissions g
+                SET
+                    order_id = o.id,
+                    order_number = o.order_number,
+                    status = CASE WHEN o.status = 'paid' THEN 'paid' ELSE g.status END
+                FROM public.orders o
+                WHERE (g.order_id IS NULL OR g.order_id = '' OR g.order_id <> o.id)
+                  AND (o.metadata_json LIKE '%' || g.response_id || '%');
+            END IF;
+        END $$;
         """;
 }

@@ -43,7 +43,14 @@ public sealed class InMemoryGoogleFormsStore : IGoogleFormsSubmissionStore
     public Task<int> CountAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(_byResponseId.Count);
 
+    public Task UpsertAsync(GoogleFormSubmission submission, CancellationToken cancellationToken = default) =>
+        SaveSubmissionAsync(submission, cancellationToken);
+
     public Task<IReadOnlyList<GoogleFormSubmission>> GetAllAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<GoogleFormSubmission>>(_byResponseId.Values.ToList());
+
+    public Task<IReadOnlyList<GoogleFormSubmission>> GetRecentSubmissionsAsync(int limit = 50, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<GoogleFormSubmission>>(
+            _byResponseId.Values.OrderByDescending(x => x.SubmittedAtUtc).Take(limit <= 0 ? 50 : limit).ToList());
 }
 

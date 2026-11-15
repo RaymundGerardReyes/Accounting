@@ -28,6 +28,15 @@ public sealed class OrderRepository : IOrderRepository
         _connectionScope = connectionScope;
     }
 
+    public Task<IReadOnlyList<Order>> ListAsync(
+        string? customerId,
+        string? status,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        return ListAsync(status, limit, customerId, cancellationToken);
+    }
+
     /// <summary>
     /// Resets the in-memory fallback dictionary to the initial baseline seed orders.
     /// Useful for test isolation.
@@ -209,6 +218,21 @@ public sealed class OrderRepository : IOrderRepository
         try
         {
             DbConnection connection = await _connectionScope.GetOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+
+            // Ensure any unbridged rows in public.google_form_submissions are materialized into public.orders
+            try
+            {
+                await using DbCommand bridgeCmd = connection.CreateCommand();
+                bridgeCmd.Transaction = _connectionScope.CurrentTransaction;
+                bridgeCmd.CommandText = OrderQueries.MaterializeUnbridgedGoogleFormSubmissions;
+                bridgeCmd.CommandTimeout = SqlTimeouts.FastReadSeconds;
+                await bridgeCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Non-fatal if running on a restricted read-only replica or pre-migration schema
+            }
+
             await using DbCommand cmd = connection.CreateCommand();
             cmd.Transaction = _connectionScope.CurrentTransaction;
             cmd.CommandText = OrderQueries.SelectListSql;

@@ -5,13 +5,14 @@ using Microsoft.AspNetCore.Routing;
 using Rge.BuildingBlocks.Api.Endpoints;
 using Rge.BuildingBlocks.Api.Http;
 using Rge.Integrations.Application.GetFormStatus;
+using Rge.Integrations.Application.SheetSyncHandler;
 using Rge.Integrations.Application.SubmitGoogleForm;
 
 namespace Rge.Integrations.Api;
 
 /// <summary>
 /// Minimal API endpoints for Google Forms Integration (INT-003, INT-004).
-/// Supports single form submissions and batch row backfilling for historical records.
+/// Supports single form submissions, sync reconciliation, and batch row backfilling for historical records.
 /// </summary>
 public sealed class GoogleFormsEndpoints : IEndpointModule
 {
@@ -32,6 +33,38 @@ public sealed class GoogleFormsEndpoints : IEndpointModule
 
         app.MapPost("/api/integrations/google-forms/submit", HandleSubmitAsync)
            .WithTags("GoogleForms");
+
+        // INT-005: POST /api/v1/integrations/google-forms/sync and /api/integrations/google-forms/sync
+        app.MapPost("/api/v1/integrations/google-forms/sync", HandleSyncAsync)
+           .WithTags("GoogleForms");
+
+        app.MapPost("/api/integrations/google-forms/sync", HandleSyncAsync)
+           .WithTags("GoogleForms");
+    }
+
+    private static async Task<IResult> HandleSyncAsync(
+        HttpContext httpContext,
+        SheetSyncHandlerHandler handler,
+        CancellationToken ct)
+    {
+        var command = new SheetSyncCommand();
+        var result = await handler.HandleAsync(command, ct).ConfigureAwait(false);
+        if (!result.IsSuccess)
+        {
+            return Results.Problem(
+                title: "Sync Error",
+                detail: result.Error.Message,
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+
+        return Results.Ok(new
+        {
+            ok = true,
+            pulled_from_sheet = result.Value.PulledFromSheet,
+            stored_submissions = result.Value.StoredSubmissions,
+            bridged_orders = result.Value.BridgedOrders,
+            synced_at_utc = result.Value.SyncedAtUtc
+        });
     }
 
     private static async Task<IResult> HandleGetStatusAsync(

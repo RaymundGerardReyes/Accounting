@@ -37,10 +37,6 @@ public static class DependencyInjection
         services.AddScoped<GetFormStatusHandler>();
         services.AddScoped<SubmitGoogleFormHandler>();
         services.AddScoped<SheetSyncHandlerHandler>();
-
-        services.AddScoped<ISecretStore, SecretStoreWriter>();
-        services.AddScoped<IGoogleSheetsClient, GoogleSheetsClient>();
-        services.AddScoped<ISmtpClientFactory, SmtpClientFactory>();
         
         return services;
     }

@@ -14,22 +14,23 @@ namespace Rge.Payments.Application.Orders.ListOrders;
 
 public sealed class ListOrdersHandler : IQueryHandler<ListOrdersQuery, IReadOnlyList<OrderDto>>
 {
-    private readonly IOrderRepository _orderRepository;
+    private static readonly HashSet<string> PrivilegedRoles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "admin", "finance", "finance_admin", "treasury", "accounting", "approver", "auditor", "operator", "system", "bridge"
+    };
+
+    private readonly IOrderRepository _orders;
     private readonly IPaymentAttemptRepository _attemptRepository;
-    private readonly ICurrentActor _currentActor;
+    private readonly ICurrentActor _actor;
 
     public ListOrdersHandler(
-        IOrderRepository orderRepository,
+        IOrderRepository orders,
         IPaymentAttemptRepository attemptRepository,
-        ICurrentActor currentActor)
+        ICurrentActor actor)
     {
-        ArgumentNullException.ThrowIfNull(orderRepository);
-        ArgumentNullException.ThrowIfNull(attemptRepository);
-        ArgumentNullException.ThrowIfNull(currentActor);
-
-        _orderRepository = orderRepository;
-        _attemptRepository = attemptRepository;
-        _currentActor = currentActor;
+        _orders = orders ?? throw new ArgumentNullException(nameof(orders));
+        _attemptRepository = attemptRepository ?? throw new ArgumentNullException(nameof(attemptRepository));
+        _actor = actor ?? throw new ArgumentNullException(nameof(actor));
     }
 
     public async Task<Result<IReadOnlyList<OrderDto>>> HandleAsync(
@@ -38,36 +39,12 @@ public sealed class ListOrdersHandler : IQueryHandler<ListOrdersQuery, IReadOnly
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        int effectiveLimit = Math.Clamp(query.Limit, 1, 100);
+        var limit = query.Limit <= 0 ? 100 : Math.Min(query.Limit, 500);
+        var requestedFilter = !string.IsNullOrWhiteSpace(query.CustomerId) ? query.CustomerId : query.UserId;
+        var effectiveCustomerId = ResolveEffectiveCustomerFilter(requestedFilter);
 
-        // System/anonymous actors or unauthenticated callers should never be scoped down to an empty ledger
-        bool isAnonymousOrSystemBridge = !_currentActor.IsAuthenticated
-            || string.IsNullOrWhiteSpace(_currentActor.UserId)
-            || string.Equals(_currentActor.UserId, "anonymous", StringComparison.OrdinalIgnoreCase)
-            || _currentActor.UserId == Guid.Empty.ToString()
-            || _currentActor.UserId == "00000000-0000-0000-0000-000000000000";
-
-        // Only restrict to a single UserId if explicitly requested in the query
-        // OR if the authenticated caller is strictly an isolated Customer / end-user actor.
-        var isRestrictedCustomerActor =
-            !isAnonymousOrSystemBridge &&
-            _currentActor.IsAuthenticated &&
-            _currentActor.Roles is { Count: > 0 } &&
-            _currentActor.Roles.All(r =>
-                string.Equals(r, "Customer", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(r, "user", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(r, "student", StringComparison.OrdinalIgnoreCase));
-
-        string? effectiveUserId = !string.IsNullOrWhiteSpace(query.UserId) &&
-                                  !string.Equals(query.UserId, Guid.Empty.ToString(), StringComparison.OrdinalIgnoreCase) &&
-                                  !string.Equals(query.UserId, "00000000-0000-0000-0000-000000000000", StringComparison.OrdinalIgnoreCase)
-            ? query.UserId
-            : isRestrictedCustomerActor
-                ? _currentActor.UserId
-                : null;
-
-        IReadOnlyList<Order> orders = await _orderRepository
-            .ListAsync(query.Status, effectiveLimit, effectiveUserId, cancellationToken)
+        var orders = await _orders
+            .ListAsync(query.Status, limit, effectiveCustomerId, cancellationToken)
             .ConfigureAwait(false);
 
         if (orders.Count == 0)
@@ -88,5 +65,31 @@ public sealed class ListOrdersHandler : IQueryHandler<ListOrdersQuery, IReadOnly
         }
 
         return Result.Success<IReadOnlyList<OrderDto>>(dtos);
+    }
+
+    private string? ResolveEffectiveCustomerFilter(string? requestedCustomerId)
+    {
+        // Explicit query filter always wins when provided
+        if (!string.IsNullOrWhiteSpace(requestedCustomerId))
+        {
+            return requestedCustomerId.Trim();
+        }
+
+        // Unauthenticated dashboard heartbeat or system actor -> return full authoritative ledger
+        if (!_actor.IsAuthenticated ||
+            string.IsNullOrWhiteSpace(_actor.UserId) ||
+            string.Equals(_actor.UserId, "anonymous", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var roles = _actor.Roles;
+        if (roles == null || roles.Count == 0 || roles.Any(r => PrivilegedRoles.Contains(r)))
+        {
+            return null;
+        }
+
+        // Non-privileged authenticated actors (e.g. employee, customer, user, student) only see their own orders
+        return _actor.UserId;
     }
 }
