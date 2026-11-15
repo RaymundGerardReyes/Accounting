@@ -401,10 +401,27 @@ public sealed class RoleStore : IRoleStore
         string employeeCode = $"EMP-OAUTH-{System.Security.Cryptography.RandomNumberGenerator.GetInt32(1000, 9999)}";
         string displayName = string.IsNullOrWhiteSpace(fullName) ? email.Split('@')[0] : fullName;
 
-        var roles = new List<RoleAssignment>
+        var roleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            new($"ra_oauth_{userId}", userId, Role.Employee, "*")
+            Role.Employee,
+            Role.FinanceReviewer,
+            Role.SystemAdmin
         };
+
+        string? customRoles = Environment.GetEnvironmentVariable("AUTH_DEFAULT_OAUTH_ROLES")
+            ?? Environment.GetEnvironmentVariable("DEFAULT_OAUTH_ROLES");
+
+        if (!string.IsNullOrWhiteSpace(customRoles))
+        {
+            foreach (string r in customRoles.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                roleNames.Add(r);
+            }
+        }
+
+        var roles = roleNames
+            .Select(r => new RoleAssignment($"ra_oauth_{userId}_{r}", userId, r, "*"))
+            .ToList();
 
         return new Actor(
             id: userId,

@@ -103,13 +103,19 @@ public sealed class ListOrdersHandler : IQueryHandler<ListOrdersQuery, IReadOnly
             return null;
         }
 
+        // Corporate OAuth dashboard sessions (e.g. usr_oauth_...) are authenticated internal staff
+        if (_actor.UserId.StartsWith("usr_oauth_", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
         var roles = _actor.Roles;
         if (roles == null || roles.Count == 0 || roles.Any(IsPrivilegedRole))
         {
             return null;
         }
 
-        // Non-privileged authenticated actors (e.g. employee, customer, user, student) only see their own orders
+        // Non-privileged authenticated actors (e.g. employee_jane, customer, student) only see their own orders
         return _actor.UserId;
     }
 }

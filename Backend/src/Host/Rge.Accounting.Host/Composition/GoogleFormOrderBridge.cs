@@ -389,30 +389,38 @@ public sealed class GoogleFormOrderBridge : IGoogleFormOrderBridge
         string paymentAttemptId = $"att_{orderId}";
         string? providerPaymentId = null;
 
-        var attemptCmd = new InitiateAttemptCommand(
-            OrderId: orderId,
-            PaymentMethod: "hosted_checkout",
-            IdempotencyKey: idempotencyKey,
-            CustomerName: request.CustomerName,
-            CustomerEmail: request.CustomerEmail,
-            CustomerPhone: request.CustomerPhone);
-
-        var attemptRes = await _initiateAttemptHandler.HandleAsync(attemptCmd, cancellationToken).ConfigureAwait(false);
-        if (attemptRes.IsSuccess)
+        if (string.Equals(persistedStatus, "paid", StringComparison.OrdinalIgnoreCase))
         {
-            paymentAttemptId = attemptRes.Value.Id;
-            providerPaymentId = attemptRes.Value.ProviderPaymentId;
-            if (!string.IsNullOrWhiteSpace(attemptRes.Value.CheckoutUrl))
-            {
-                checkoutUrl = attemptRes.Value.CheckoutUrl;
-            }
+            // Already paid: do not initiate redundant payment attempts on historical/reconciled orders
+            checkoutUrl = $"{appBaseUrl}/checkout/success?order_id={Uri.EscapeDataString(orderId)}";
         }
         else
         {
-            _logger.LogWarning(
-                "InitiateAttemptHandler failed for bridged order {OrderId}: {Error}",
-                orderId,
-                attemptRes.Error.Message);
+            var attemptCmd = new InitiateAttemptCommand(
+                OrderId: orderId,
+                PaymentMethod: "hosted_checkout",
+                IdempotencyKey: idempotencyKey,
+                CustomerName: request.CustomerName,
+                CustomerEmail: request.CustomerEmail,
+                CustomerPhone: request.CustomerPhone);
+
+            var attemptRes = await _initiateAttemptHandler.HandleAsync(attemptCmd, cancellationToken).ConfigureAwait(false);
+            if (attemptRes.IsSuccess)
+            {
+                paymentAttemptId = attemptRes.Value.Id;
+                providerPaymentId = attemptRes.Value.ProviderPaymentId;
+                if (!string.IsNullOrWhiteSpace(attemptRes.Value.CheckoutUrl))
+                {
+                    checkoutUrl = attemptRes.Value.CheckoutUrl;
+                }
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "InitiateAttemptHandler failed for bridged order {OrderId}: {Error}",
+                    orderId,
+                    attemptRes.Error.Message);
+            }
         }
 
         return new BridgedGoogleFormOrder(

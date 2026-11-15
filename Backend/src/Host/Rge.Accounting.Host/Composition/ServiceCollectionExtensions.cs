@@ -284,10 +284,16 @@ internal sealed class HybridIdentityStore : IAuthenticator, IOAuthStateStore, IR
             string employeeCode = $"EMP-OAUTH-{_seededActors.Count + 1:D3}";
             string displayName = string.IsNullOrWhiteSpace(fullName) ? email.Split('@')[0] : fullName;
 
-            var roles = new List<RoleAssignment>
+            var roleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
-                new($"ra_oauth_{userId}", userId, Role.Employee, "*")
+                Role.Employee,
+                Role.FinanceReviewer,
+                Role.SystemAdmin
             };
+
+            var roles = roleNames
+                .Select(r => new RoleAssignment($"ra_oauth_{userId}_{r}", userId, r, "*"))
+                .ToList();
 
             var newActor = new Actor(
                 id: userId,
