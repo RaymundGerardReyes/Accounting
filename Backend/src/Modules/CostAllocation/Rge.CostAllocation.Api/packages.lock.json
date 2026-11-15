@@ -10,16 +10,8 @@
       },
       "Microsoft.Extensions.DependencyInjection.Abstractions": {
         "type": "Transitive",
-        "resolved": "8.0.2",
-        "contentHash": "3iE7UF7MQkCv1cxzCahz+Y/guQbTqieyxyaWKhrRO91itI9cOKO76OHeQDahqG4MmW5umr3CcCvGmK92lWNlbg=="
-      },
-      "Microsoft.Extensions.Logging.Abstractions": {
-        "type": "Transitive",
-        "resolved": "8.0.2",
-        "contentHash": "nroMDjS7hNBPtkZqVBbSiQaQjWRDxITI8Y7XnDs97rqG3EbzVTNLZQf7bIeUJcaHOV8bca47s1Uxq94+2oGdxA==",
-        "dependencies": {
-          "Microsoft.Extensions.DependencyInjection.Abstractions": "8.0.2"
-        }
+        "resolved": "9.0.0",
+        "contentHash": "+6f2qv2a3dLwd5w6JanPIPs47CxRbnk+ZocMJUhv9NxP88VlOcJYZs9jY+MYSjxvady08bUZn6qgiNh7DadGgg=="
       },
       "rge.buildingblocks.api": {
         "type": "Project",
@@ -31,12 +23,14 @@
       "rge.buildingblocks.application": {
         "type": "Project",
         "dependencies": {
+          "Microsoft.Extensions.Logging.Abstractions": "[9.0.0, )",
           "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
         }
       },
       "rge.buildingblocks.infrastructure": {
         "type": "Project",
         "dependencies": {
+          "Dapper": "[2.1.35, )",
           "Npgsql": "[9.0.2, )",
           "Rge.BuildingBlocks.Application": "[1.0.0, )",
           "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
@@ -73,6 +67,21 @@
           "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )",
           "Rge.CostAllocation.Application": "[1.0.0, )",
           "Rge.CostAllocation.Domain": "[1.0.0, )"
+        }
+      },
+      "Dapper": {
+        "type": "CentralTransitive",
+        "requested": "[2.1.35, )",
+        "resolved": "2.1.35",
+        "contentHash": "YKRwjVfrG7GYOovlGyQoMvr1/IJdn+7QzNXJxyMh0YfFF5yvDmTYaJOVYWsckreNjGsGSEtrMTpnzxTUq/tZQw=="
+      },
+      "Microsoft.Extensions.Logging.Abstractions": {
+        "type": "CentralTransitive",
+        "requested": "[9.0.0, )",
+        "resolved": "9.0.0",
+        "contentHash": "g0UfujELzlLbHoVG8kPKVBaW470Ewi+jnptGS9KUi6jcb+k2StujtK3m26DFSGGwQ/+bVgZfsWqNzlP6YOejvw==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.0"
         }
       },
       "Npgsql": {
