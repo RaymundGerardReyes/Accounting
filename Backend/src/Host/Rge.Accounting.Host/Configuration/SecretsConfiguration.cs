@@ -49,6 +49,39 @@ public static class SecretsConfiguration
             configuration["GOOGLE_FORMS_SECRET"] = cleanSecret;
         }
 
+        // 1b. Fallback to Local Sandbox Simulator keys for PayMongo when omitted or empty
+        string? payMongoSecretKey = ResolveSecretValue(
+            configuration,
+            "Secrets:PayMongoSecretKey",
+            ["Secrets__PayMongoSecretKey", "PAYMONGO_SECRET_KEY"]);
+
+        if (string.IsNullOrWhiteSpace(payMongoSecretKey) ||
+            payMongoSecretKey.Contains("REPLACE_ME", StringComparison.OrdinalIgnoreCase) ||
+            payMongoSecretKey.Contains("TODO", StringComparison.OrdinalIgnoreCase))
+        {
+            payMongoSecretKey = "sk_test_rge_sandbox_simulator_mock_key_2026";
+            configuration["Secrets:PayMongoSecretKey"] = payMongoSecretKey;
+            configuration["Secrets__PayMongoSecretKey"] = payMongoSecretKey;
+            configuration["PAYMONGO_SECRET_KEY"] = payMongoSecretKey;
+            Environment.SetEnvironmentVariable("PAYMONGO_SECRET_KEY", payMongoSecretKey);
+        }
+
+        string? payMongoWebhookSecret = ResolveSecretValue(
+            configuration,
+            "Secrets:PayMongoWebhookSecret",
+            ["Secrets__PayMongoWebhookSecret", "PAYMONGO_WEBHOOK_SECRET_KEY", "PAYMONGO_WEBHOOK_SECRET"]);
+
+        if (string.IsNullOrWhiteSpace(payMongoWebhookSecret) ||
+            payMongoWebhookSecret.Contains("REPLACE_ME", StringComparison.OrdinalIgnoreCase) ||
+            payMongoWebhookSecret.Contains("TODO", StringComparison.OrdinalIgnoreCase))
+        {
+            payMongoWebhookSecret = "whsec_rge_sandbox_webhook_mock_key_2026";
+            configuration["Secrets:PayMongoWebhookSecret"] = payMongoWebhookSecret;
+            configuration["Secrets__PayMongoWebhookSecret"] = payMongoWebhookSecret;
+            configuration["PAYMONGO_WEBHOOK_SECRET"] = payMongoWebhookSecret;
+            Environment.SetEnvironmentVariable("PAYMONGO_WEBHOOK_SECRET", payMongoWebhookSecret);
+        }
+
         // 2. Auto-derive missing or invalid FieldEncryptionKeyBase64 (Defense-in-Depth)
         string? encryptionKeyBase64 = ResolveSecretValue(
             configuration,

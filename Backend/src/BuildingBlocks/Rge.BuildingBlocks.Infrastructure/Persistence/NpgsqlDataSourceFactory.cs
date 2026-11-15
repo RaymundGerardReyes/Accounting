@@ -42,8 +42,13 @@ public sealed class NpgsqlDataSourceFactory : IAsyncDisposable, IDisposable
             {
                 kvBuilder.Host = "127.0.0.1";
             }
-            if (kvBuilder.SslMode == SslMode.Disable &&
-                !string.Equals(kvBuilder.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
+            bool isLocal = string.Equals(kvBuilder.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase);
+            bool envDisable = string.Equals(Environment.GetEnvironmentVariable("PGSSLMODE"), "disable", StringComparison.OrdinalIgnoreCase);
+            if (isLocal && (envDisable || cleaned.Contains("sslmode=disable", StringComparison.OrdinalIgnoreCase) || kvBuilder.SslMode == SslMode.Prefer))
+            {
+                kvBuilder.SslMode = SslMode.Disable;
+            }
+            else if (kvBuilder.SslMode == SslMode.Disable && !isLocal)
             {
                 kvBuilder.SslMode = SslMode.Require;
             }
@@ -66,6 +71,15 @@ public sealed class NpgsqlDataSourceFactory : IAsyncDisposable, IDisposable
                     ? "127.0.0.1"
                     : uri.Host;
 
+                bool isLocal = string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase);
+
+                bool sslExplicitlyDisabled = cleaned.Contains("sslmode=disable", StringComparison.OrdinalIgnoreCase) ||
+                                             cleaned.Contains("sslmode=allow", StringComparison.OrdinalIgnoreCase) ||
+                                             cleaned.Contains("sslmode=prefer", StringComparison.OrdinalIgnoreCase);
+
+                bool sslExplicitlyRequired = cleaned.Contains("sslmode=require", StringComparison.OrdinalIgnoreCase);
+
                 var csb = new NpgsqlConnectionStringBuilder
                 {
                     Host = host,
@@ -76,7 +90,9 @@ public sealed class NpgsqlDataSourceFactory : IAsyncDisposable, IDisposable
                     Pooling = true,
                     MinPoolSize = 5,
                     MaxPoolSize = 50,
-                    SslMode = SslMode.Require,
+                    SslMode = sslExplicitlyRequired
+                        ? SslMode.Require
+                        : (sslExplicitlyDisabled || isLocal ? SslMode.Disable : SslMode.Require),
 #pragma warning disable CS0618 // TrustServerCertificate is obsolete in Npgsql
                     TrustServerCertificate = true,
 #pragma warning restore CS0618

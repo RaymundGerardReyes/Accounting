@@ -18,7 +18,7 @@ import base64
 import hashlib
 import urllib.request
 import urllib.error
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, parse_qs
 import subprocess
 from pathlib import Path
 
@@ -41,7 +41,8 @@ def log(msg: str):
 def normalize_database_url(raw_url: str) -> str:
     """
     Converts Heroku/SQLAlchemy URIs (postgresql+psycopg2://, postgres://, postgresql://)
-    into Npgsql key-value connection strings with SSL Mode=Require and Trust Server Certificate=true.
+    into Npgsql key-value connection strings. Enables SSL Mode=Require for remote PaaS hosts,
+    and SSL Mode=Disable for localhost/127.0.0.1 or explicit sslmode=disable.
     """
     if not raw_url:
         return ""
@@ -63,10 +64,20 @@ def normalize_database_url(raw_url: str) -> str:
     username = unquote(parsed.username or "")
     password = unquote(parsed.password or "")
 
+    query = parse_qs(parsed.query)
+    sslmode_param = (query.get("sslmode", [""])[0] or "").lower()
+    is_local = host.lower() in ("localhost", "127.0.0.1", "::1")
+    is_explicit_disable = sslmode_param in ("disable", "allow", "prefer") or os.environ.get("PGSSLMODE", "").lower() == "disable"
+
+    if is_explicit_disable or (is_local and sslmode_param != "require"):
+        ssl_part = "SSL Mode=Disable"
+    else:
+        ssl_part = "SSL Mode=Require;Trust Server Certificate=true"
+
     return (
         f"Host={host};Port={port};Database={database};"
         f"Username={username};Password={password};"
-        f"SSL Mode=Require;Trust Server Certificate=true;"
+        f"{ssl_part};"
         f"Pooling=true;Minimum Pool Size=1;Maximum Pool Size=20;"
         f"No Reset On Close=true;Max Auto Prepare=0"
     )

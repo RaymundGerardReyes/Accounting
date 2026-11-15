@@ -4,7 +4,48 @@ using Rge.Accounting.Host.Configuration;
 using Rge.Accounting.Host.Pipeline;
 using Rge.Identity.Infrastructure;
 
+if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")) &&
+    string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DYNO")))
+{
+    Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
+}
+
 var builder = WebApplication.CreateBuilder(args);
+
+// Load root .env file if present
+var searchDir = new DirectoryInfo(builder.Environment.ContentRootPath);
+while (searchDir != null)
+{
+    var envFile = Path.Combine(searchDir.FullName, ".env");
+    if (File.Exists(envFile))
+    {
+        var lines = await File.ReadAllLinesAsync(envFile).ConfigureAwait(false);
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+            if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith('#') || !trimmed.Contains('=', StringComparison.Ordinal))
+            {
+                continue;
+            }
+            var parts = trimmed.Split('=', 2);
+            var key = parts[0].Trim();
+            var val = parts[1].Trim().Trim('"', '\'');
+            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(key)))
+            {
+                Environment.SetEnvironmentVariable(key, val);
+            }
+            builder.Configuration[key] = val;
+        }
+        break;
+    }
+    searchDir = searchDir.Parent;
+}
+
+var configuredUrls = builder.Configuration["Urls"] ?? builder.Configuration["ASPNETCORE_URLS"] ?? Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
+if (string.IsNullOrEmpty(configuredUrls))
+{
+    builder.WebHost.UseUrls("http://127.0.0.1:5080;http://127.0.0.1:5000");
+}
 
 // 1. Harden Kestrel transport & payload limits
 builder.ConfigureHardenedKestrel();
