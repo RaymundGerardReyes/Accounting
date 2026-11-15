@@ -14,6 +14,13 @@ public sealed class PaymentAttemptRepository : IPaymentAttemptRepository
     private static readonly ConcurrentDictionary<string, PaymentAttempt> MemoryByProviderId = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, PaymentAttempt> MemoryByIdempotency = new(StringComparer.OrdinalIgnoreCase);
 
+    public static void ResetToBaseline()
+    {
+        MemoryById.Clear();
+        MemoryByProviderId.Clear();
+        MemoryByIdempotency.Clear();
+    }
+
     private readonly ConnectionScope _connectionScope;
 
     public PaymentAttemptRepository(ConnectionScope connectionScope)
@@ -161,6 +168,14 @@ public sealed class PaymentAttemptRepository : IPaymentAttemptRepository
                 list.Add(attempt);
             }
 
+            if (list.Count == 0 && !MemoryById.IsEmpty)
+            {
+                return MemoryById.Values
+                    .Where(a => string.Equals(a.OrderId, orderId.Trim(), StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(a => a.CreatedAt)
+                    .ToList();
+            }
+
             return list;
         }
         catch (Exception ex) when (ex is DbException or InvalidOperationException)
@@ -253,6 +268,14 @@ public sealed class PaymentAttemptRepository : IPaymentAttemptRepository
                 PaymentAttempt attempt = await PaymentAttemptMaterializer.MaterializeAsync(reader, cancellationToken).ConfigureAwait(false);
                 IndexInMemory(attempt);
                 list.Add(attempt);
+            }
+
+            if (list.Count == 0 && !MemoryById.IsEmpty)
+            {
+                return MemoryById.Values
+                    .Where(a => a.Status is PaymentAttemptStatus.Pending or PaymentAttemptStatus.RequiresAction)
+                    .OrderBy(a => a.CreatedAt)
+                    .ToList();
             }
 
             return list;

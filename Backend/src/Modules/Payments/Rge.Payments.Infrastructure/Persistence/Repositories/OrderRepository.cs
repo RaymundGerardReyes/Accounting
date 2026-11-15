@@ -1,5 +1,8 @@
 using System.Collections.Concurrent;
 using System.Data.Common;
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Rge.BuildingBlocks.Infrastructure.Observability;
 using Rge.BuildingBlocks.Infrastructure.Persistence;
 using Rge.BuildingBlocks.SharedKernel.Money;
 using Rge.Payments.Application.Ports;
@@ -14,6 +17,9 @@ public sealed class OrderRepository : IOrderRepository
     private static long _fallbackSequence = 10;
     private static readonly ConcurrentDictionary<string, Order> MemoryById = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, Order> MemoryByNumber = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, (DateTimeOffset ExpiresAtUtc, IReadOnlyList<Order> Orders)> ListCache = new(StringComparer.Ordinal);
+    private static long _lastBridgeTicksUtc;
+    private static readonly long BridgeCooldownTicks = TimeSpan.FromSeconds(30).Ticks;
 
     static OrderRepository()
     {
@@ -21,11 +27,13 @@ public sealed class OrderRepository : IOrderRepository
     }
 
     private readonly ConnectionScope _connectionScope;
+    private readonly ILogger<OrderRepository>? _logger;
 
-    public OrderRepository(ConnectionScope connectionScope)
+    public OrderRepository(ConnectionScope connectionScope, ILogger<OrderRepository>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(connectionScope);
         _connectionScope = connectionScope;
+        _logger = logger;
     }
 
     public Task<IReadOnlyList<Order>> ListAsync(
@@ -45,8 +53,18 @@ public sealed class OrderRepository : IOrderRepository
     {
         MemoryById.Clear();
         MemoryByNumber.Clear();
+        ListCache.Clear();
+        Interlocked.Exchange(ref _lastBridgeTicksUtc, 0);
         Interlocked.Exchange(ref _fallbackSequence, 10);
         EnsureSeeded();
+    }
+
+    /// <summary>
+    /// Invalidates the 5-second L1 query cache for list orders.
+    /// </summary>
+    public static void InvalidateListCache()
+    {
+        ListCache.Clear();
     }
 
     private static void EnsureSeeded()
@@ -215,24 +233,58 @@ public sealed class OrderRepository : IOrderRepository
             ? null
             : status.Trim();
 
+        string cacheKey = $"{normalizedUserId}|{normalizedStatus}|{effectiveLimit}";
+        if (ListCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresAtUtc > DateTimeOffset.UtcNow)
+        {
+            return cached.Orders;
+        }
+
         try
         {
             DbConnection connection = await _connectionScope.GetOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
 
             // Ensure any unbridged rows in public.google_form_submissions are materialized into public.orders
-            try
+            // Cooldown: at most once every 30 seconds to avoid multi-hop sequential SQL on every list read
+            long nowTicks = DateTime.UtcNow.Ticks;
+            long lastTicks = Volatile.Read(ref _lastBridgeTicksUtc);
+            if (nowTicks - lastTicks > BridgeCooldownTicks &&
+                Interlocked.CompareExchange(ref _lastBridgeTicksUtc, nowTicks, lastTicks) == lastTicks)
             {
-                await using DbCommand bridgeCmd = connection.CreateCommand();
-                bridgeCmd.Transaction = _connectionScope.CurrentTransaction;
-                bridgeCmd.CommandText = OrderQueries.MaterializeUnbridgedGoogleFormSubmissions;
-                bridgeCmd.CommandTimeout = SqlTimeouts.FastReadSeconds;
-                await bridgeCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception)
-            {
-                // Non-fatal if running on a restricted read-only replica or pre-migration schema
+                try
+                {
+                    var swBridge = Stopwatch.StartNew();
+                    await using DbCommand bridgeCmd = connection.CreateCommand();
+                    bridgeCmd.Transaction = _connectionScope.CurrentTransaction;
+                    bridgeCmd.CommandText = OrderQueries.MaterializeUnbridgedGoogleFormSubmissions;
+                    bridgeCmd.CommandTimeout = SqlTimeouts.FastReadSeconds;
+                    var affected = await bridgeCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                    swBridge.Stop();
+
+                    var ctx = ExecutionContextAccessor.Instance.Current;
+                    RuntimeExecutionStore.RecordSql(new SqlTraceNode(
+                        ModuleName: ctx.ModuleName ?? "Payments",
+                        HandlerName: ctx.HandlerName ?? "ListOrdersHandler",
+                        RepositoryName: nameof(OrderRepository),
+                        OperationName: nameof(ListAsync),
+                        SqlVerb: "INSERT",
+                        CommandType: "Text",
+                        SqlText: "INSERT INTO public.orders (...) SELECT ... FROM public.google_form_submissions ...",
+                        ParameterNames: Array.Empty<string>(),
+                        BoundParametersJson: "{}",
+                        RowsReturned: null,
+                        RowsAffected: affected,
+                        Status: "SUCCESS",
+                        SqlState: null,
+                        ElapsedMs: Math.Round(swBridge.Elapsed.TotalMilliseconds, 2),
+                        ExecutedAtUtc: DateTimeOffset.UtcNow));
+                }
+                catch (Exception)
+                {
+                    // Non-fatal if running on a restricted read-only replica or pre-migration schema
+                }
             }
 
+            var swSelect = Stopwatch.StartNew();
             await using DbCommand cmd = connection.CreateCommand();
             cmd.Transaction = _connectionScope.CurrentTransaction;
             cmd.CommandText = OrderQueries.SelectListSql;
@@ -250,6 +302,31 @@ public sealed class OrderRepository : IOrderRepository
                 MemoryByNumber[order.OrderNumber] = order;
                 list.Add(order);
             }
+            swSelect.Stop();
+
+            var ctxSelect = ExecutionContextAccessor.Instance.Current;
+            var boundParams = new Dictionary<string, object?>
+            {
+                ["Status"] = normalizedStatus,
+                ["UserId"] = normalizedUserId,
+                ["Limit"] = effectiveLimit
+            };
+            RuntimeExecutionStore.RecordSql(new SqlTraceNode(
+                ModuleName: ctxSelect.ModuleName ?? "Payments",
+                HandlerName: ctxSelect.HandlerName ?? "ListOrdersHandler",
+                RepositoryName: nameof(OrderRepository),
+                OperationName: nameof(ListAsync),
+                SqlVerb: "SELECT",
+                CommandType: "Text",
+                SqlText: "SELECT id, user_id, order_number, title, category, reference_code, amount_minor ... FROM public.orders ...",
+                ParameterNames: ["@status", "@UserId", "@limit"],
+                BoundParametersJson: System.Text.Json.JsonSerializer.Serialize(boundParams),
+                RowsReturned: list.Count,
+                RowsAffected: null,
+                Status: "SUCCESS",
+                SqlState: null,
+                ElapsedMs: Math.Round(swSelect.Elapsed.TotalMilliseconds, 2),
+                ExecutedAtUtc: DateTimeOffset.UtcNow));
 
             if (list.Count == 0)
             {
@@ -263,9 +340,12 @@ public sealed class OrderRepository : IOrderRepository
                 {
                     fallback = fallback.Where(o => string.Equals(o.UserId, normalizedUserId, StringComparison.OrdinalIgnoreCase));
                 }
-                return fallback.OrderByDescending(o => o.CreatedAt).Take(effectiveLimit).ToList();
+                var fallbackList = fallback.OrderByDescending(o => o.CreatedAt).Take(effectiveLimit).ToList();
+                ListCache[cacheKey] = (DateTimeOffset.UtcNow.AddSeconds(5), fallbackList);
+                return fallbackList;
             }
 
+            ListCache[cacheKey] = (DateTimeOffset.UtcNow.AddSeconds(5), list);
             return list;
         }
         catch (Exception ex) when (ex is DbException or InvalidOperationException)
@@ -280,7 +360,9 @@ public sealed class OrderRepository : IOrderRepository
             {
                 memList = memList.Where(o => string.Equals(o.UserId, normalizedUserId, StringComparison.OrdinalIgnoreCase));
             }
-            return memList.OrderByDescending(o => o.CreatedAt).Take(effectiveLimit).ToList();
+            var memResult = memList.OrderByDescending(o => o.CreatedAt).Take(effectiveLimit).ToList();
+            ListCache[cacheKey] = (DateTimeOffset.UtcNow.AddSeconds(5), memResult);
+            return memResult;
         }
     }
 
@@ -329,6 +411,7 @@ public sealed class OrderRepository : IOrderRepository
 
         MemoryById[order.Id] = order;
         MemoryByNumber[order.OrderNumber] = order;
+        InvalidateListCache();
 
         try
         {
