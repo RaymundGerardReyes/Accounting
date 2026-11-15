@@ -175,6 +175,7 @@
       "rge.buildingblocks.infrastructure": {
         "type": "Project",
         "dependencies": {
+          "Dapper": "[2.1.35, )",
           "Npgsql": "[9.0.2, )",
           "Rge.BuildingBlocks.Application": "[1.0.0, )",
           "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
@@ -446,6 +447,12 @@
           "Rge.Receipts.Application": "[1.0.0, )",
           "Rge.Receipts.Domain": "[1.0.0, )"
         }
+      },
+      "Dapper": {
+        "type": "CentralTransitive",
+        "requested": "[2.1.35, )",
+        "resolved": "2.1.35",
+        "contentHash": "YKRwjVfrG7GYOovlGyQoMvr1/IJdn+7QzNXJxyMh0YfFF5yvDmTYaJOVYWsckreNjGsGSEtrMTpnzxTUq/tZQw=="
       },
       "Npgsql": {
         "type": "CentralTransitive",

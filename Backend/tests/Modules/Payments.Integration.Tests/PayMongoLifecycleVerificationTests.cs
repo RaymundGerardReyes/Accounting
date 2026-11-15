@@ -13,6 +13,7 @@ using Rge.Payments.Application.Ports;
 using Rge.Payments.Application.Webhooks.ReceivePayMongoWebhook;
 using Rge.Payments.Domain.Orders;
 using Rge.Payments.Domain.PaymentAttempts;
+using Rge.Payments.Infrastructure.Persistence.Repositories;
 using Rge.Payments.Infrastructure.Workers;
 using Rge.Receipts.Contracts;
 using Rge.Tests.Common;
@@ -139,6 +140,9 @@ public sealed class PayMongoLifecycleVerificationTests
     private static (ServiceProvider Sp, FakeClock Clock, FakePayMongoGateway Gateway, SpyPaymentStatusNotifier Notifier)
         BuildTestHarness()
     {
+        PaymentAttemptRepository.ResetToBaseline();
+        OrderRepository.ResetToBaseline();
+
         var clock = new FakeClock(new DateTimeOffset(2026, 11, 1, 10, 0, 0, TimeSpan.Zero));
         var gateway = new FakePayMongoGateway(clock);
         var notifier = new SpyPaymentStatusNotifier();
