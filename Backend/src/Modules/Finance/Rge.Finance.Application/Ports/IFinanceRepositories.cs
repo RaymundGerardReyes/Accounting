@@ -120,3 +120,88 @@ public interface ISettlementApplicationStore
     Task<IReadOnlyList<SettlementApplication>> GetByReportIdAsync(string reportId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SettlementApplication>> GetByAdvanceIdAsync(string advanceId, CancellationToken cancellationToken = default);
 }
+
+public sealed record GlChartOfAccountRecord(
+    string AccountCode,
+    string AccountName,
+    string AccountType,
+    string NormalBalance,
+    string DefaultTaxProfile,
+    long OpeningDebitCentavos,
+    long OpeningCreditCentavos,
+    bool IsActive,
+    string Description);
+
+public sealed record GlJournalLineRecord(
+    Guid LineId,
+    Guid JournalId,
+    int LineNumber,
+    string AccountCode,
+    string AccountName,
+    long DebitCentavos,
+    long CreditCentavos,
+    string DepartmentId,
+    string CostCenterId,
+    string? PurposeCode,
+    string TaxProfile,
+    string Description);
+
+public sealed record GlJournalBatchRecord(
+    Guid JournalId,
+    string JournalNumber,
+    string SourceModule,
+    string SourceDocumentId,
+    string SourceDocumentNumber,
+    string AccountingPeriod,
+    DateOnly AccountingDate,
+    string PostingStatus,
+    string PolicyVersionId,
+    string TaxRuleVersion,
+    long TotalDebitCentavos,
+    long TotalCreditCentavos,
+    string PreparedByActorId,
+    string PreparedByName,
+    string? VerifiedByActorId,
+    string? VerifiedByName,
+    string? PostedByActorId,
+    string? PostedByName,
+    string AuditHash,
+    string Memo,
+    IReadOnlyList<GlJournalLineRecord> Lines);
+
+public sealed record GlTrialBalanceRowRecord(
+    string AccountCode,
+    string AccountName,
+    string AccountType,
+    string NormalBalance,
+    long OpeningDebitCentavos,
+    long OpeningCreditCentavos,
+    long PeriodDebitCentavos,
+    long PeriodCreditCentavos,
+    long EndingDebitCentavos,
+    long EndingCreditCentavos);
+
+public interface IGeneralLedgerRepository
+{
+    Task<IReadOnlyList<GlChartOfAccountRecord>> GetActiveChartOfAccountsAsync(CancellationToken cancellationToken = default);
+    Task<string> NextJournalNumberAsync(int fiscalYear, CancellationToken cancellationToken = default);
+    Task InsertJournalBatchAsync(GlJournalBatchRecord batch, CancellationToken cancellationToken = default);
+    Task<GlJournalBatchRecord?> GetJournalByIdAsync(Guid journalId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<GlJournalBatchRecord>> ListJournalBatchesByPeriodAsync(
+        string accountingPeriod,
+        string? postingStatus = null,
+        string? sourceModule = null,
+        int limit = 100,
+        CancellationToken cancellationToken = default);
+    Task UpdateJournalDecisionAsync(
+        Guid journalId,
+        string newPostingStatus,
+        string actorId,
+        string actorDisplayName,
+        string auditHash,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<GlTrialBalanceRowRecord>> GetTrialBalanceAsync(
+        string accountingPeriod,
+        string? departmentId = null,
+        CancellationToken cancellationToken = default);
+}

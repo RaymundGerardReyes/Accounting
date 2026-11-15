@@ -3,6 +3,7 @@ using Rge.BuildingBlocks.SharedKernel.Money;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
 using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Finance.Application.ExpenseReports.Create;
+using Rge.Finance.Application.GeneralLedger;
 using Rge.Finance.Application.Ports;
 using Rge.Finance.Domain.CashAdvances;
 using Rge.Finance.Domain.CashAdvances.StateMachines;
@@ -27,13 +28,15 @@ public sealed class ReviewHandler : ICommandHandler<ReviewExpenseReportCommand, 
     private readonly IAdvanceLedgerStore _ledgerStore;
     private readonly ISettlementApplicationStore _settlementStore;
     private readonly IClock _clock;
+    private readonly ISubledgerGlPostingService _glPostingService;
 
     public ReviewHandler(
         IExpenseReportRepository reportRepository,
         ICashAdvanceRepository advanceRepository,
         IAdvanceLedgerStore ledgerStore,
         ISettlementApplicationStore settlementStore,
-        IClock clock)
+        IClock clock,
+        ISubledgerGlPostingService glPostingService)
     {
         ArgumentNullException.ThrowIfNull(reportRepository);
         ArgumentNullException.ThrowIfNull(advanceRepository);
@@ -46,6 +49,7 @@ public sealed class ReviewHandler : ICommandHandler<ReviewExpenseReportCommand, 
         _ledgerStore = ledgerStore;
         _settlementStore = settlementStore;
         _clock = clock;
+        _glPostingService = glPostingService;
     }
 
     public async Task<Result<ExpenseReportDto>> HandleAsync(
@@ -125,6 +129,7 @@ public sealed class ReviewHandler : ICommandHandler<ReviewExpenseReportCommand, 
         {
             Money totalApproved = report.CalculateTotalApproved();
             long unallocatedExpenseMinor = totalApproved.AmountMinor;
+            long appliedToAdvanceMinor = 0;
 
             IReadOnlyList<CashAdvance> advances = await _advanceRepository.ListAsync(report.DepartmentId, null, 100, cancellationToken).ConfigureAwait(false);
             var employeeAdvances = advances
@@ -178,6 +183,7 @@ public sealed class ReviewHandler : ICommandHandler<ReviewExpenseReportCommand, 
                     await _ledgerStore.SaveEntryAsync(ledgerEntry, cancellationToken).ConfigureAwait(false);
 
                     unallocatedExpenseMinor -= applyMinor;
+                    appliedToAdvanceMinor += applyMinor;
 
                     if (applyMinor == balance.AmountMinor)
                     {
@@ -203,6 +209,66 @@ public sealed class ReviewHandler : ICommandHandler<ReviewExpenseReportCommand, 
                     occurredAtUtc: nowUtc);
 
                 await _ledgerStore.SaveEntryAsync(reimbursementEntry, cancellationToken).ConfigureAwait(false);
+            }
+
+            var glLines = new List<GlJournalLineRecord>();
+            foreach (ExpenseLine line in report.Lines.Where(line =>
+                         line.LineStatus is ExpenseLineStatus.Approved or ExpenseLineStatus.PartiallyApproved))
+            {
+                long gross = line.ApprovedAmount?.AmountMinor ?? 0;
+                if (gross <= 0) continue;
+
+                long vat = line.VatAmount.AmountMinor > 0
+                    ? Math.Min(gross, line.VatAmount.AmountMinor)
+                    : 0;
+                glLines.Add(new GlJournalLineRecord(
+                    Guid.Empty, Guid.Empty, 0, "5110", "Field Operations & Travel Expense",
+                    gross - vat, 0, report.DepartmentId, report.CostCenterId,
+                    "EXPENSE_LIQUIDATION", vat > 0 ? "VAT_12_INCL" : "NONE",
+                    $"Approved expense line {line.Id}"));
+                if (vat > 0)
+                {
+                    glLines.Add(new GlJournalLineRecord(
+                        Guid.Empty, Guid.Empty, 0, "1160", "Creditable Input VAT (12%)",
+                        vat, 0, report.DepartmentId, report.CostCenterId,
+                        "EXPENSE_LIQUIDATION", "VAT_12_INCL",
+                        $"Input VAT on expense line {line.Id}"));
+                }
+            }
+
+            if (appliedToAdvanceMinor > 0)
+            {
+                glLines.Add(new GlJournalLineRecord(
+                    Guid.Empty, Guid.Empty, 0, "1140", "Employee Advances Receivable",
+                    0, appliedToAdvanceMinor, report.DepartmentId, report.CostCenterId,
+                    "EXPENSE_LIQUIDATION", "NONE", "FIFO advance liquidation"));
+            }
+            if (unallocatedExpenseMinor > 0)
+            {
+                glLines.Add(new GlJournalLineRecord(
+                    Guid.Empty, Guid.Empty, 0, "2020", "Employee Reimbursements Payable",
+                    0, unallocatedExpenseMinor, report.DepartmentId, report.CostCenterId,
+                    "EXPENSE_LIQUIDATION", "NONE", "Approved excess reimbursement"));
+            }
+
+            if (glLines.Count >= 2)
+            {
+                Result<GlJournalBatchRecord> glResult = await _glPostingService.PostAutomaticSubledgerBatchAsync(
+                    "ExpenseReport",
+                    report.Id,
+                    report.ReportNumber,
+                    DateOnly.TryParse(report.ReportingPeriod + "-01", out DateOnly accountingDate)
+                        ? accountingDate
+                        : DateOnly.FromDateTime(nowUtc.UtcDateTime),
+                    report.PolicyVersionId ?? "AUTO-GL-v1",
+                    "BIR-EOPT-RR7-2024",
+                    $"Approved FIFO expense liquidation {report.ReportNumber}",
+                    glLines,
+                    cancellationToken).ConfigureAwait(false);
+                if (glResult.IsFailure)
+                {
+                    return Result.Failure<ExpenseReportDto>(glResult.Error);
+                }
             }
         }
 

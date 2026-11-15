@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Data.Common;
+using Dapper;
 using Rge.BuildingBlocks.Infrastructure.Persistence;
 using Rge.Finance.Application.Ports;
 using Rge.Finance.Contracts;
@@ -591,6 +592,235 @@ public sealed class AdvanceBalanceQuery : IAdvanceBalanceQuery
         _advanceRepo = advanceRepo;
         _ledgerStore = ledgerStore;
     }
+
+#pragma warning disable CA1034, CA1812
+    public sealed class GeneralLedgerRepository(ConnectionScope connectionScope) : IGeneralLedgerRepository
+    {
+        private sealed record JournalHeader(
+            Guid JournalId,
+            string JournalNumber,
+            string SourceModule,
+            string SourceDocumentId,
+            string SourceDocumentNumber,
+            string AccountingPeriod,
+            DateOnly AccountingDate,
+            string PostingStatus,
+            string PolicyVersionId,
+            string TaxRuleVersion,
+            long TotalDebitCentavos,
+            long TotalCreditCentavos,
+            string PreparedByActorId,
+            string PreparedByName,
+            string? VerifiedByActorId,
+            string? VerifiedByName,
+            string? PostedByActorId,
+            string? PostedByName,
+            string AuditHash,
+            string Memo);
+
+        public async Task<IReadOnlyList<GlChartOfAccountRecord>> GetActiveChartOfAccountsAsync(CancellationToken cancellationToken = default)
+        {
+            const string sql = """
+                SELECT account_code AS AccountCode, account_name AS AccountName,
+                       account_type AS AccountType, normal_balance AS NormalBalance,
+                       default_tax_profile AS DefaultTaxProfile,
+                       opening_debit_centavos AS OpeningDebitCentavos,
+                       opening_credit_centavos AS OpeningCreditCentavos,
+                       is_active AS IsActive, description AS Description
+                FROM gl_chart_of_accounts
+                WHERE is_active = TRUE
+                ORDER BY account_code;
+                """;
+            var connection = await connectionScope.GetOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var command = new CommandDefinition(sql, transaction: connectionScope.CurrentTransaction,
+                commandTimeout: SqlTimeouts.StandardCommandSeconds, cancellationToken: cancellationToken);
+            return (await connection.QueryAsync<GlChartOfAccountRecord>(command).ConfigureAwait(false)).AsList();
+        }
+
+        public async Task<string> NextJournalNumberAsync(int fiscalYear, CancellationToken cancellationToken = default)
+        {
+            const string sql = "SELECT fn_next_sequence_number('JE', @FiscalYear);";
+            var connection = await connectionScope.GetOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var command = new CommandDefinition(sql, new { FiscalYear = fiscalYear },
+                transaction: connectionScope.CurrentTransaction,
+                commandTimeout: SqlTimeouts.FastReadSeconds, cancellationToken: cancellationToken);
+            string? next = await connection.ExecuteScalarAsync<string>(command).ConfigureAwait(false);
+            return string.IsNullOrWhiteSpace(next) ? $"JE-{fiscalYear}-{Guid.NewGuid():N}"[..15].ToUpperInvariant() : next;
+        }
+
+        public async Task InsertJournalBatchAsync(GlJournalBatchRecord batch, CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(batch);
+            const string headerSql = """
+                INSERT INTO gl_journal_batches (
+                    journal_id, journal_number, source_module, source_document_id,
+                    source_document_number, accounting_period, accounting_date,
+                    posting_status, policy_version_id, tax_rule_version,
+                    total_debit_centavos, total_credit_centavos, prepared_by_actor_id,
+                    prepared_by_name, verified_by_actor_id, verified_by_name,
+                    posted_by_actor_id, posted_by_name, audit_hash, memo,
+                    created_at_utc, updated_at_utc)
+                VALUES (
+                    @JournalId, @JournalNumber, @SourceModule, @SourceDocumentId,
+                    @SourceDocumentNumber, @AccountingPeriod, @AccountingDate,
+                    @PostingStatus, @PolicyVersionId, @TaxRuleVersion,
+                    @TotalDebitCentavos, @TotalCreditCentavos, @PreparedByActorId,
+                    @PreparedByName, @VerifiedByActorId, @VerifiedByName,
+                    @PostedByActorId, @PostedByName, @AuditHash, @Memo, NOW(), NOW());
+                """;
+            const string lineSql = """
+                INSERT INTO gl_journal_lines (
+                    line_id, journal_id, line_number, account_code, debit_centavos,
+                    credit_centavos, department_id, cost_center_id, purpose_code,
+                    tax_profile, description)
+                VALUES (
+                    @LineId, @JournalId, @LineNumber, @AccountCode, @DebitCentavos,
+                    @CreditCentavos, @DepartmentId, @CostCenterId, @PurposeCode,
+                    @TaxProfile, @Description);
+                """;
+            var connection = await connectionScope.GetOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var transaction = connectionScope.CurrentTransaction;
+            await connection.ExecuteAsync(new CommandDefinition(headerSql, batch, transaction,
+                SqlTimeouts.StandardCommandSeconds, cancellationToken: cancellationToken)).ConfigureAwait(false);
+            foreach (GlJournalLineRecord line in batch.Lines)
+            {
+                await connection.ExecuteAsync(new CommandDefinition(lineSql, line, transaction,
+                    SqlTimeouts.StandardCommandSeconds, cancellationToken: cancellationToken)).ConfigureAwait(false);
+            }
+
+            await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
+                "SELECT fn_gl_verify_journal_balance(@JournalId);",
+                new { batch.JournalId }, transaction, SqlTimeouts.StandardCommandSeconds,
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+        }
+
+        public async Task<GlJournalBatchRecord?> GetJournalByIdAsync(Guid journalId, CancellationToken cancellationToken = default)
+        {
+            const string headerSql = """
+                SELECT journal_id AS JournalId, journal_number AS JournalNumber,
+                       source_module AS SourceModule, source_document_id AS SourceDocumentId,
+                       source_document_number AS SourceDocumentNumber,
+                       accounting_period AS AccountingPeriod, accounting_date AS AccountingDate,
+                       posting_status AS PostingStatus, policy_version_id AS PolicyVersionId,
+                       tax_rule_version AS TaxRuleVersion, total_debit_centavos AS TotalDebitCentavos,
+                       total_credit_centavos AS TotalCreditCentavos,
+                       prepared_by_actor_id AS PreparedByActorId, prepared_by_name AS PreparedByName,
+                       verified_by_actor_id AS VerifiedByActorId, verified_by_name AS VerifiedByName,
+                       posted_by_actor_id AS PostedByActorId, posted_by_name AS PostedByName,
+                       audit_hash AS AuditHash, memo AS Memo
+                FROM gl_journal_batches WHERE journal_id = @JournalId;
+                """;
+            var connection = await connectionScope.GetOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            JournalHeader? header = await connection.QuerySingleOrDefaultAsync<JournalHeader>(
+                new CommandDefinition(headerSql, new { JournalId = journalId },
+                    connectionScope.CurrentTransaction, SqlTimeouts.FastReadSeconds, cancellationToken: cancellationToken)).ConfigureAwait(false);
+            return header is null ? null : await HydrateAsync(header, connection, cancellationToken).ConfigureAwait(false);
+        }
+
+        public async Task<IReadOnlyList<GlJournalBatchRecord>> ListJournalBatchesByPeriodAsync(
+            string accountingPeriod, string? postingStatus = null, string? sourceModule = null,
+            int limit = 100, CancellationToken cancellationToken = default)
+        {
+            const string sql = """
+                SELECT journal_id AS JournalId, journal_number AS JournalNumber,
+                       source_module AS SourceModule, source_document_id AS SourceDocumentId,
+                       source_document_number AS SourceDocumentNumber,
+                       accounting_period AS AccountingPeriod, accounting_date AS AccountingDate,
+                       posting_status AS PostingStatus, policy_version_id AS PolicyVersionId,
+                       tax_rule_version AS TaxRuleVersion, total_debit_centavos AS TotalDebitCentavos,
+                       total_credit_centavos AS TotalCreditCentavos,
+                       prepared_by_actor_id AS PreparedByActorId, prepared_by_name AS PreparedByName,
+                       verified_by_actor_id AS VerifiedByActorId, verified_by_name AS VerifiedByName,
+                       posted_by_actor_id AS PostedByActorId, posted_by_name AS PostedByName,
+                       audit_hash AS AuditHash, memo AS Memo
+                FROM gl_journal_batches
+                WHERE accounting_period = @AccountingPeriod
+                  AND (@PostingStatus IS NULL OR @PostingStatus = 'ALL' OR posting_status = @PostingStatus)
+                  AND (@SourceModule IS NULL OR @SourceModule = 'ALL' OR source_module = @SourceModule)
+                ORDER BY accounting_date DESC, journal_number DESC
+                LIMIT @Limit;
+                """;
+            var connection = await connectionScope.GetOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var headers = (await connection.QueryAsync<JournalHeader>(new CommandDefinition(sql,
+                new { AccountingPeriod = accountingPeriod, PostingStatus = postingStatus, SourceModule = sourceModule, Limit = Math.Clamp(limit, 1, 500) },
+                connectionScope.CurrentTransaction, SqlTimeouts.FastReadSeconds,
+                cancellationToken: cancellationToken)).ConfigureAwait(false)).AsList();
+            var result = new List<GlJournalBatchRecord>(headers.Count);
+            foreach (JournalHeader header in headers)
+                result.Add(await HydrateAsync(header, connection, cancellationToken).ConfigureAwait(false));
+            return result;
+        }
+
+        public async Task UpdateJournalDecisionAsync(
+            Guid journalId, string newPostingStatus, string actorId, string actorDisplayName,
+            string auditHash, CancellationToken cancellationToken = default)
+        {
+            const string sql = """
+                UPDATE gl_journal_batches
+                SET posting_status = @NewPostingStatus,
+                    verified_by_actor_id = COALESCE(verified_by_actor_id, @ActorId),
+                    verified_by_name = COALESCE(verified_by_name, @ActorDisplayName),
+                    posted_by_actor_id = CASE WHEN @NewPostingStatus = 'Posted' THEN @ActorId ELSE posted_by_actor_id END,
+                    posted_by_name = CASE WHEN @NewPostingStatus = 'Posted' THEN @ActorDisplayName ELSE posted_by_name END,
+                    audit_hash = @AuditHash, updated_at_utc = NOW()
+                WHERE journal_id = @JournalId AND posting_status <> 'Posted';
+                """;
+            var connection = await connectionScope.GetOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            await connection.ExecuteAsync(new CommandDefinition(sql, new
+            {
+                JournalId = journalId, NewPostingStatus = newPostingStatus, ActorId = actorId,
+                ActorDisplayName = actorDisplayName, AuditHash = auditHash
+            }, connectionScope.CurrentTransaction, SqlTimeouts.StandardCommandSeconds,
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+        }
+
+        public async Task<IReadOnlyList<GlTrialBalanceRowRecord>> GetTrialBalanceAsync(
+            string accountingPeriod, string? departmentId = null, CancellationToken cancellationToken = default)
+        {
+            const string sql = """
+                SELECT account_code AS AccountCode, account_name AS AccountName,
+                       account_type AS AccountType, normal_balance AS NormalBalance,
+                       opening_debit_centavos AS OpeningDebitCentavos,
+                       opening_credit_centavos AS OpeningCreditCentavos,
+                       period_debit_centavos AS PeriodDebitCentavos,
+                       period_credit_centavos AS PeriodCreditCentavos,
+                       ending_debit_centavos AS EndingDebitCentavos,
+                       ending_credit_centavos AS EndingCreditCentavos
+                FROM fn_gl_compute_trial_balance(@AccountingPeriod, @DepartmentId);
+                """;
+            var connection = await connectionScope.GetOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            return (await connection.QueryAsync<GlTrialBalanceRowRecord>(new CommandDefinition(sql,
+                new { AccountingPeriod = accountingPeriod, DepartmentId = departmentId },
+                connectionScope.CurrentTransaction, SqlTimeouts.FastReadSeconds,
+                cancellationToken: cancellationToken)).ConfigureAwait(false)).AsList();
+        }
+
+        private async Task<GlJournalBatchRecord> HydrateAsync(JournalHeader header, DbConnection connection, CancellationToken cancellationToken)
+        {
+            const string sql = """
+                SELECT l.line_id AS LineId, l.journal_id AS JournalId, l.line_number AS LineNumber,
+                       l.account_code AS AccountCode, c.account_name AS AccountName,
+                       l.debit_centavos AS DebitCentavos, l.credit_centavos AS CreditCentavos,
+                       l.department_id AS DepartmentId, l.cost_center_id AS CostCenterId,
+                       l.purpose_code AS PurposeCode, l.tax_profile AS TaxProfile,
+                       l.description AS Description
+                FROM gl_journal_lines l
+                INNER JOIN gl_chart_of_accounts c ON c.account_code = l.account_code
+                WHERE l.journal_id = @JournalId ORDER BY l.line_number;
+                """;
+            var lines = (await connection.QueryAsync<GlJournalLineRecord>(new CommandDefinition(sql,
+                new { header.JournalId }, connectionScope.CurrentTransaction,
+                SqlTimeouts.FastReadSeconds, cancellationToken: cancellationToken)).ConfigureAwait(false)).AsList();
+            return new GlJournalBatchRecord(
+                header.JournalId, header.JournalNumber, header.SourceModule, header.SourceDocumentId,
+                header.SourceDocumentNumber, header.AccountingPeriod, header.AccountingDate,
+                header.PostingStatus, header.PolicyVersionId, header.TaxRuleVersion,
+                header.TotalDebitCentavos, header.TotalCreditCentavos, header.PreparedByActorId,
+                header.PreparedByName, header.VerifiedByActorId, header.VerifiedByName,
+                header.PostedByActorId, header.PostedByName, header.AuditHash, header.Memo, lines);
+        }
+    }
+#pragma warning restore CA1034, CA1812
 
     public async Task<AdvanceBalanceDto> GetOutstandingBalanceAsync(string employeeId, CancellationToken cancellationToken = default)
     {

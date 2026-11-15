@@ -22,23 +22,19 @@ public sealed class VerifyEvidenceHandler : ICommandHandler<VerifyEvidenceComman
 {
     private readonly IDisbursementRepository _disbursementRepository;
     private readonly ICashAdvanceRepository _advanceRepository;
-    private readonly IAdvanceLedgerStore _ledgerStore;
     private readonly IClock _clock;
 
     public VerifyEvidenceHandler(
         IDisbursementRepository disbursementRepository,
         ICashAdvanceRepository advanceRepository,
-        IAdvanceLedgerStore ledgerStore,
         IClock clock)
     {
         ArgumentNullException.ThrowIfNull(disbursementRepository);
         ArgumentNullException.ThrowIfNull(advanceRepository);
-        ArgumentNullException.ThrowIfNull(ledgerStore);
         ArgumentNullException.ThrowIfNull(clock);
 
         _disbursementRepository = disbursementRepository;
         _advanceRepository = advanceRepository;
-        _ledgerStore = ledgerStore;
         _clock = clock;
     }
 
@@ -61,23 +57,17 @@ public sealed class VerifyEvidenceHandler : ICommandHandler<VerifyEvidenceComman
             return Result.Failure<DisbursementDto>(verifyResult.Error);
         }
 
-        // Post ledger entry to linked CashAdvance and transition its payment status to evidence_verified
+        // Evidence verification clears the compliance requirement only; the cash disbursement
+        // ledger entry is recognized once, at bank execution (see ExecuteHandler).
         CashAdvance? advance = await _advanceRepository.GetByIdAsync(disbursement.AdvanceId, cancellationToken).ConfigureAwait(false);
         if (advance is not null)
         {
-            var ledgerEntry = new AdvanceLedgerEntry(
-                id: Guid.NewGuid().ToString("D"),
-                advanceId: advance.Id,
-                employeeId: advance.EmployeeId,
-                entryType: LedgerEntryType.DisbursementRelease,
-                amount: disbursement.PaymentAmount,
-                signedAmountMinor: disbursement.PaymentAmount.AmountMinor,
-                createdByActorId: command.EvidenceVerifierId,
-                occurredAtUtc: nowUtc);
+            Result paymentTransition = advance.TransitionPaymentStatus(PaymentStatus.EvidenceVerified, nowUtc);
+            if (paymentTransition.IsFailure)
+            {
+                return Result.Failure<DisbursementDto>(paymentTransition.Error);
+            }
 
-            await _ledgerStore.SaveEntryAsync(ledgerEntry, cancellationToken).ConfigureAwait(false);
-
-            advance.TransitionPaymentStatus(PaymentStatus.EvidenceVerified, nowUtc);
             await _advanceRepository.SaveAsync(advance, cancellationToken).ConfigureAwait(false);
         }
 

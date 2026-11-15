@@ -100,11 +100,12 @@ import {
   fetchAuditEvents,
   uploadDocumentJson,
 } from "@/lib/finance-api"
+import { OfficialGeneralLedgerTab } from "@/components/official-general-ledger-tab"
 
 export function FinanceOperationsHub() {
   // Navigation tabs
   const [activeTab, setActiveTab] = useState<
-    "overview" | "advances" | "expenses" | "p2p" | "policies" | "tracker"
+    "overview" | "advances" | "expenses" | "p2p" | "policies" | "tracker" | "general-ledger"
   >("overview")
 
   // Authentication & Actor Context (persisted in dev mode to survive fast-refresh)
@@ -969,6 +970,15 @@ export function FinanceOperationsHub() {
             <FileSpreadsheet className="w-3.5 h-3.5" />
             Centralized Tracker & Audit
           </Button>
+          <Button
+            variant={activeTab === "general-ledger" ? "default" : "ghost"}
+            size="sm"
+            className="h-8 text-xs gap-1.5"
+            onClick={() => setActiveTab("general-ledger")}
+          >
+            <Landmark className="w-3.5 h-3.5" />
+            General Ledger
+          </Button>
         </div>
 
         <div className="flex items-center gap-2">
@@ -983,6 +993,25 @@ export function FinanceOperationsHub() {
           </Button>
         </div>
       </div>
+
+      {activeTab === "general-ledger" && (
+        <OfficialGeneralLedgerTab
+          currentActor={{
+            actorId: currentActorId,
+            displayName: actorProfile?.full_name || actorProfile?.display_name || currentActorId,
+          }}
+          onNavigateToSourceDocument={(sourceModule, documentNumber) => {
+            const tabBySource = {
+              CashAdvance: "advances",
+              ExpenseReport: "expenses",
+              AccountPayable: "p2p",
+              ManualAdjustment: "general-ledger",
+            } as const
+            setActiveTab(tabBySource[sourceModule])
+            setFeedback({ type: "info", message: `Opened ${sourceModule} source document ${documentNumber}.` })
+          }}
+        />
+      )}
 
       {/* TAB 1: OVERVIEW & KPIS */}
       {activeTab === "overview" && (

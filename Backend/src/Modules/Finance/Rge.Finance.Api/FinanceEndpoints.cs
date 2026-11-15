@@ -8,6 +8,7 @@ using Rge.Finance.Api.Payables;
 using Rge.Finance.Api.Policies;
 using Rge.Finance.Api.Procurement;
 using Rge.Finance.Api.Reporting;
+using Rge.Finance.Api.GeneralLedger;
 using Rge.Finance.Api.Vendors;
 
 namespace Rge.Finance.Api;
@@ -26,6 +27,7 @@ public sealed class FinanceEndpoints : IEndpointModule
     private readonly ExceptionEndpoints _exceptions = new();
     private readonly VendorEndpoints _vendors = new();
     private readonly ReportingEndpoints _reporting = new();
+    private readonly GeneralLedgerEndpoints _generalLedger = new();
 
     public void MapEndpoints(IEndpointRouteBuilder app)
     {
@@ -40,5 +42,6 @@ public sealed class FinanceEndpoints : IEndpointModule
         _exceptions.MapEndpoints(app);
         _vendors.MapEndpoints(app);
         _reporting.MapEndpoints(app);
+        _generalLedger.MapEndpoints(app);
     }
 }

@@ -96,3 +96,8 @@ The Finance Operations frontend interface provides a unified, auditable workspac
 - Filter by workflow, status, and free text search.
 - One-click button to download formula-safe, Excel-compatible UTF-8 BOM CSV.
 
+#### 8. Official General Ledger Tab
+- Mounted from [`Frontend/components/official-general-ledger-tab.tsx`](file:///e:/Accounting/Frontend/components/official-general-ledger-tab.tsx) as the **General Ledger** hub tab.
+- Provides centavo-exact trial-balance aggregation, journal register filtering, four-eyes approval/posting guards, VAT-inclusive 12% input-tax preview, subledger auto-journal preview, and period-close checks.
+- The current module is intentionally a UI/workbench integration over the existing Finance actor context. It does not invent a backend posting route; production persistence should be wired to a dedicated Finance ledger contract when that API is introduced.
+

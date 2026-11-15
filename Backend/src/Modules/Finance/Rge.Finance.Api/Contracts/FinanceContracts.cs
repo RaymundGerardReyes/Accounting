@@ -243,3 +243,88 @@ public sealed record RegisterTaxCodeApiRequest(
     [property: JsonPropertyName("rate_bps")] long RateBps,
     [property: JsonPropertyName("requires_bir2307")] bool RequiresBir2307 = false,
     [property: JsonPropertyName("cpa_approved")] bool CpaApproved = false);
+
+// Official General Ledger
+public sealed record ChartOfAccountResponse(
+    string AccountCode,
+    string AccountName,
+    string AccountType,
+    string NormalBalance,
+    string DefaultTaxProfile,
+    bool IsActive,
+    string Description);
+
+public sealed record GlJournalLineDto(
+    int LineNumber,
+    string AccountCode,
+    string AccountName,
+    long DebitCentavos,
+    long CreditCentavos,
+    string DepartmentId,
+    string CostCenterId,
+    string? PurposeCode,
+    string TaxProfile,
+    string Description);
+
+public sealed record GlJournalEntryResponse(
+    Guid JournalId,
+    string JournalNumber,
+    string SourceModule,
+    string SourceDocumentId,
+    string SourceDocumentNumber,
+    string AccountingPeriod,
+    DateOnly AccountingDate,
+    string PostingStatus,
+    string PolicyVersionId,
+    string TaxRuleVersion,
+    long TotalDebitCentavos,
+    long TotalCreditCentavos,
+    string PreparedByActorId,
+    string PreparedByName,
+    string? VerifiedByActorId,
+    string? VerifiedByName,
+    string? PostedByActorId,
+    string? PostedByName,
+    string AuditHash,
+    string Memo,
+    IReadOnlyList<GlJournalLineDto> Lines);
+
+public sealed record CreateManualJournalLineRequest(
+    string AccountCode,
+    long DebitCentavos,
+    long CreditCentavos,
+    string DepartmentId,
+    string CostCenterId,
+    string? PurposeCode,
+    string TaxProfile,
+    string Description);
+
+public sealed record CreateManualJournalRequest(
+    DateOnly AccountingDate,
+    string Memo,
+    IReadOnlyList<CreateManualJournalLineRequest> Lines);
+
+public sealed record DecideJournalApprovalRequest(
+    string Decision,
+    string? Reason = null);
+
+public sealed record TrialBalanceRowResponse(
+    string AccountCode,
+    string AccountName,
+    string AccountType,
+    string NormalBalance,
+    long OpeningDebitCentavos,
+    long OpeningCreditCentavos,
+    long PeriodDebitCentavos,
+    long PeriodCreditCentavos,
+    long EndingDebitCentavos,
+    long EndingCreditCentavos);
+
+public sealed record TrialBalanceSummaryResponse(
+    string AccountingPeriod,
+    bool IsBalanced,
+    long TotalPeriodDebitCentavos,
+    long TotalPeriodCreditCentavos,
+    long TotalEndingDebitCentavos,
+    long TotalEndingCreditCentavos,
+    IReadOnlyList<TrialBalanceRowResponse> Rows);

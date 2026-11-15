@@ -2,6 +2,7 @@ using Rge.BuildingBlocks.Application.Abstractions;
 using Rge.BuildingBlocks.SharedKernel.Money;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
 using Rge.BuildingBlocks.SharedKernel.Results;
+using Rge.Finance.Application.GeneralLedger;
 using Rge.Finance.Application.Ports;
 using Rge.Finance.Domain.CashAdvances;
 using Rge.Finance.Domain.CashAdvances.StateMachines;
@@ -29,11 +30,13 @@ public sealed class CashReturnHandler : ICommandHandler<RecordCashReturnCommand,
     private readonly ICashAdvanceRepository _repository;
     private readonly IAdvanceLedgerStore _ledgerStore;
     private readonly IClock _clock;
+    private readonly ISubledgerGlPostingService _glPostingService;
 
     public CashReturnHandler(
         ICashAdvanceRepository repository,
         IAdvanceLedgerStore ledgerStore,
-        IClock clock)
+        IClock clock,
+        ISubledgerGlPostingService glPostingService)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(ledgerStore);
@@ -42,6 +45,7 @@ public sealed class CashReturnHandler : ICommandHandler<RecordCashReturnCommand,
         _repository = repository;
         _ledgerStore = ledgerStore;
         _clock = clock;
+        _glPostingService = glPostingService;
     }
 
     public async Task<Result<CashReturnResultDto>> HandleAsync(
@@ -107,6 +111,30 @@ public sealed class CashReturnHandler : ICommandHandler<RecordCashReturnCommand,
             occurredAtUtc: nowUtc);
 
         await _ledgerStore.SaveEntryAsync(entry, cancellationToken).ConfigureAwait(false);
+
+        Result<GlJournalBatchRecord> glResult = await _glPostingService.PostAutomaticSubledgerBatchAsync(
+            "CashAdvance",
+            advance.Id,
+            command.BankReference,
+            DateOnly.FromDateTime(nowUtc.UtcDateTime),
+            "AUTO-GL-v1",
+            "BIR-EOPT-RR7-2024",
+            $"Unused cash return for advance {advance.AdvanceNumber}",
+            [
+                new GlJournalLineRecord(
+                    Guid.Empty, Guid.Empty, 1, "1010", "Cash in Bank - Operating PHP",
+                    command.ReturnedAmountMinor, 0, "DEPT-TREASURY", "CC-CORP-00",
+                    "CASH_RETURN", "NONE", "Unused advance deposit"),
+                new GlJournalLineRecord(
+                    Guid.Empty, Guid.Empty, 2, "1140", "Employee Advances Receivable",
+                    0, command.ReturnedAmountMinor, advance.DepartmentId, advance.CostCenterId,
+                    "CASH_RETURN", "NONE", "Advance balance recovery")
+            ],
+            cancellationToken).ConfigureAwait(false);
+        if (glResult.IsFailure)
+        {
+            return Result.Failure<CashReturnResultDto>(glResult.Error);
+        }
 
         long newBalance = currentBalance.AmountMinor - command.ReturnedAmountMinor;
         if (newBalance == 0)

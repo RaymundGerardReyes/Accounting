@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Rge.Finance.Application.Ports;
+using Rge.Finance.Application.GeneralLedger;
 using Rge.Finance.Application.SecurityGuards;
 using Rge.Finance.Contracts;
 using Rge.Finance.Infrastructure.Calendar;
@@ -39,6 +40,8 @@ public static class DependencyInjection
         services.AddScoped<IAdvanceLedgerStore, AdvanceLedgerStore>();
         services.AddScoped<ISettlementApplicationStore, SettlementApplicationStore>();
         services.AddScoped<IAdvanceBalanceQuery, AdvanceBalanceQuery>();
+        services.AddScoped<IGeneralLedgerRepository, AdvanceBalanceQuery.GeneralLedgerRepository>();
+        services.AddScoped<ISubledgerGlPostingService, SubledgerGlPostingService>();
 
         // Cash Advance handlers
         services.AddTransient<Application.CashAdvances.Create.CreateCashAdvanceHandler>();
@@ -115,6 +118,10 @@ public static class DependencyInjection
         services.AddTransient<Application.Reporting.Tracker.TrackerHandler>();
         services.AddTransient<Application.Reporting.TrackerCsvExport.TrackerCsvExportHandler>();
         services.AddTransient<Application.Reporting.AgingBuckets.AgingBucketsHandler>();
+        services.AddTransient<CreateManualJournalHandler>();
+        services.AddTransient<DecideJournalApprovalHandler>();
+        services.AddTransient<GetGeneralLedgerJournalsHandler>();
+        services.AddTransient<GetGeneralLedgerTrialBalanceHandler>();
         services.AddTransient<DashboardReadService>();
         services.AddTransient<TrackerReadService>();
 
