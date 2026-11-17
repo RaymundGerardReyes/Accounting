@@ -50,6 +50,23 @@ public sealed class OfficialGlLifecycleTests
     }
 
     [Fact]
+    public async Task PayMongoSettlementWithNoMerchantFeeRemainsBalanced()
+    {
+        var repository = new InMemoryGlRepository();
+        var handler = new ReconcilePayMongoSettlementHandler(
+            new SubledgerGlPostingService(repository, new TestActor("payment-worker"), new TestClock()));
+
+        Result<Guid> result = await handler.HandleAsync(new ReconcilePayMongoBankSettlementCommand(
+            Guid.NewGuid(), "pay-102", "BANK-102", 1_000_000, 0, 1_000_000,
+            new DateOnly(2026, 11, 16), "DEPT-OPS", "CC-SALES", "POL-1"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(2, repository.Batches.Single().Lines.Count);
+        Assert.Equal(1_000_000, repository.Batches.Single().TotalDebitCentavos);
+        Assert.Equal(1_000_000, repository.Batches.Single().TotalCreditCentavos);
+    }
+
+    [Fact]
     public async Task OfficialPayableEnforcesVatEwtAndBankSnapshotControls()
     {
         var repository = new InMemoryGlRepository();

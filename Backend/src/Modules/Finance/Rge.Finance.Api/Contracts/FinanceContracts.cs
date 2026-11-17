@@ -50,7 +50,8 @@ public sealed record ExecuteDisbursementApiRequest(
     [property: JsonPropertyName("execution_date")] string ExecutionDate,
     [property: JsonPropertyName("bank_reference")] string BankReference,
     [property: JsonPropertyName("remittance_doc_id")] string? RemittanceDocId = null,
-    [property: JsonPropertyName("executed_amount_minor")] long? ExecutedAmountMinor = null);
+    [property: JsonPropertyName("executed_amount_minor")] long? ExecutedAmountMinor = null,
+    [property: JsonPropertyName("is_settled_immediately_by_bank")] bool IsSettledImmediatelyByBank = true);
 
 public sealed record VerifyEvidenceDisbursementApiRequest(
     [property: JsonPropertyName("evidence_document_id")] string? EvidenceDocumentId = null,

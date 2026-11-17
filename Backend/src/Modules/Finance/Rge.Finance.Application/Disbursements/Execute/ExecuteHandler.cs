@@ -18,7 +18,8 @@ public sealed record ExecuteDisbursementCommand(
     string ExecutorId,
     string BankReference,
     string? RemittanceDocumentId = null,
-    long? ExecutedAmountMinor = null) : ICommand<DisbursementDto>;
+    long? ExecutedAmountMinor = null,
+    bool IsSettledImmediatelyByBank = true) : ICommand<DisbursementDto>;
 
 public sealed class ExecuteHandler : ICommandHandler<ExecuteDisbursementCommand, DisbursementDto>
 {
@@ -65,7 +66,12 @@ public sealed class ExecuteHandler : ICommandHandler<ExecuteDisbursementCommand,
             : null;
 
         DateTimeOffset nowUtc = _clock.UtcNow;
-        Result execResult = disbursement.Execute(command.ExecutorId, bankRef, executedMoney, nowUtc);
+        Result execResult = disbursement.Execute(
+            command.ExecutorId,
+            bankRef,
+            executedMoney,
+            nowUtc,
+            command.IsSettledImmediatelyByBank);
         if (execResult.IsFailure)
         {
             return Result.Failure<DisbursementDto>(execResult.Error);
@@ -107,9 +113,16 @@ public sealed class ExecuteHandler : ICommandHandler<ExecuteDisbursementCommand,
                         recognizedAmount.AmountMinor, 0, advance.DepartmentId, advance.CostCenterId,
                         "CASH_ADVANCE", "NONE", "Advance receivable recognized at bank execution"),
                     new GlJournalLineRecord(
-                        Guid.Empty, Guid.Empty, 2, "1010", "Cash in Bank - Operating PHP",
+                        Guid.Empty, Guid.Empty, 2,
+                        command.IsSettledImmediatelyByBank ? "1010" : "1015",
+                        command.IsSettledImmediatelyByBank
+                            ? "Cash in Bank - Operating PHP"
+                            : "Payment in Transit Clearing",
                         0, recognizedAmount.AmountMinor, "DEPT-TREASURY", "CC-CORP-00",
-                        "CASH_ADVANCE", "NONE", "Operating cash disbursement")
+                        "CASH_ADVANCE", "NONE",
+                        command.IsSettledImmediatelyByBank
+                            ? "Operating cash disbursement"
+                            : "Disbursement awaiting bank settlement")
                 ],
                 cancellationToken).ConfigureAwait(false);
             if (glResult.IsFailure)

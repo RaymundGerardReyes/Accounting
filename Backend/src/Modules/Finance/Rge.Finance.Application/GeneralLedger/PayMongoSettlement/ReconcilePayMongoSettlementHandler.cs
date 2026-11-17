@@ -102,13 +102,16 @@ public sealed class ReconcilePayMongoSettlementHandler(
             Line("1010", "Cash in Bank - Operating PHP", command.NetBankSettlementCentavos, 0,
                 "DEPT-TREASURY", "CC-CORP-00", "NONE",
                 $"PayMongo net bank settlement Ref {command.BankSettlementReference}"),
-            Line("5310", "Merchant Processing Fee Expense", command.MerchantFeeCentavos, 0,
-                command.DepartmentId, command.CostCenterId, "NONE",
-                $"PayMongo merchant fee deducted on {command.PayMongoPaymentId}"),
             Line("1050", "Payment Gateway Clearing - PayMongo", 0, command.GrossPaymentCentavos,
                 command.DepartmentId, command.CostCenterId, "NONE",
                 $"Gateway clearing settled for {command.PayMongoPaymentId}")
         };
+        if (command.MerchantFeeCentavos > 0)
+        {
+            lines.Insert(1, Line("5310", "Merchant Processing Fee Expense", command.MerchantFeeCentavos, 0,
+                command.DepartmentId, command.CostCenterId, "NONE",
+                $"PayMongo merchant fee deducted on {command.PayMongoPaymentId}"));
+        }
 
         return await PostAsync(
             command.SettlementBatchId, command.BankSettlementReference, command.SettlementDate,

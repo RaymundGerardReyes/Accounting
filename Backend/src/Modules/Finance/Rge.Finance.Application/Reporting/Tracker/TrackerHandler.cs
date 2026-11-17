@@ -121,6 +121,18 @@ public sealed class TrackerHandler : IQueryHandler<GetCentralizedTrackerQuery, I
                 CreatedAtUtc: ap.CreatedAtUtc)));
         }
 
-        return Result.Success<IReadOnlyList<TrackerItemDto>>(items.OrderByDescending(i => i.CreatedAtUtc).Take(query.Limit).ToList());
+        IEnumerable<TrackerItemDto> filtered = items;
+        if (!string.IsNullOrWhiteSpace(query.Search))
+        {
+            string search = query.Search.Trim();
+            filtered = filtered.Where(item =>
+                item.RecordNumber.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                item.DepartmentId.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                (item.EmployeeId?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.VendorName?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+
+        return Result.Success<IReadOnlyList<TrackerItemDto>>(
+            filtered.OrderByDescending(i => i.CreatedAtUtc).Take(Math.Clamp(query.Limit, 1, 500)).ToList());
     }
 }

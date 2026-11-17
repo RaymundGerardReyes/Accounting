@@ -34,6 +34,7 @@ public sealed class Disbursement : AggregateRoot<string>
     public string? ExecutedById { get; private set; }
     public DateTimeOffset? ExecutedAtUtc { get; private set; }
     public BankReference? BankReference { get; private set; }
+    public bool WasInitiallyInTransit { get; private set; }
 
     public string? EvidenceDocumentId { get; private set; }
     public string? EvidenceVerifierId { get; private set; }
@@ -145,7 +146,12 @@ public sealed class Disbursement : AggregateRoot<string>
         return Result.Success();
     }
 
-    public Result Execute(string executedById, BankReference bankRef, Money? executedAmount, DateTimeOffset nowUtc)
+    public Result Execute(
+        string executedById,
+        BankReference bankRef,
+        Money? executedAmount,
+        DateTimeOffset nowUtc,
+        bool isSettledImmediatelyByBank = true)
     {
         if (Status != DisbursementStage.BankApproved)
         {
@@ -156,6 +162,7 @@ public sealed class Disbursement : AggregateRoot<string>
         BankReference = bankRef ?? throw new ArgumentNullException(nameof(bankRef));
         ExecutedAmount = executedAmount ?? PaymentAmount;
         ExecutedAtUtc = nowUtc;
+        WasInitiallyInTransit = !isSettledImmediatelyByBank;
         Status = DisbursementStage.ExecutedUnverified;
         UpdatedAtUtc = nowUtc;
 

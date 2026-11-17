@@ -186,6 +186,7 @@ INSERT INTO gl_chart_of_accounts (
     opening_debit_centavos, opening_credit_centavos, description)
 VALUES
 ('1010', 'Cash in Bank - Operating PHP', 'Asset', 'Debit', 'NONE', 500000000, 0, 'Primary operating bank account'),
+('1015', 'Payment in Transit Clearing', 'Asset', 'Debit', 'NONE', 0, 0, 'Bank disbursements awaiting settlement confirmation'),
 ('1140', 'Employee Advances Receivable', 'Asset', 'Debit', 'NONE', 0, 0, 'Open employee advance control account'),
 ('1160', 'Creditable Input VAT (12%)', 'Asset', 'Debit', 'VAT_12_INCL', 0, 0, 'Substantiated input VAT'),
 ('2010', 'Accounts Payable - Trade', 'Liability', 'Credit', 'NONE', 0, 0, 'Verified trade payables'),

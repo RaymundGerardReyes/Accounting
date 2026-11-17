@@ -3,6 +3,7 @@ using Rge.BuildingBlocks.SharedKernel.Money;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
 using Rge.BuildingBlocks.SharedKernel.Results;
 using Rge.Finance.Application.Disbursements.Prepare;
+using Rge.Finance.Application.GeneralLedger;
 using Rge.Finance.Application.Ports;
 using Rge.Finance.Domain.CashAdvances;
 using Rge.Finance.Domain.CashAdvances.StateMachines;
@@ -22,19 +23,23 @@ public sealed class VerifyEvidenceHandler : ICommandHandler<VerifyEvidenceComman
 {
     private readonly IDisbursementRepository _disbursementRepository;
     private readonly ICashAdvanceRepository _advanceRepository;
+    private readonly ISubledgerGlPostingService _glPostingService;
     private readonly IClock _clock;
 
     public VerifyEvidenceHandler(
         IDisbursementRepository disbursementRepository,
         ICashAdvanceRepository advanceRepository,
+        ISubledgerGlPostingService glPostingService,
         IClock clock)
     {
         ArgumentNullException.ThrowIfNull(disbursementRepository);
         ArgumentNullException.ThrowIfNull(advanceRepository);
+        ArgumentNullException.ThrowIfNull(glPostingService);
         ArgumentNullException.ThrowIfNull(clock);
 
         _disbursementRepository = disbursementRepository;
         _advanceRepository = advanceRepository;
+        _glPostingService = glPostingService;
         _clock = clock;
     }
 
@@ -66,6 +71,35 @@ public sealed class VerifyEvidenceHandler : ICommandHandler<VerifyEvidenceComman
             if (paymentTransition.IsFailure)
             {
                 return Result.Failure<DisbursementDto>(paymentTransition.Error);
+            }
+
+            if (disbursement.WasInitiallyInTransit)
+            {
+                Money settledAmount = disbursement.ExecutedAmount ?? disbursement.PaymentAmount;
+                Result<GlJournalBatchRecord> clearingResult =
+                    await _glPostingService.PostAutomaticSubledgerBatchAsync(
+                        "CashAdvance",
+                        advance.Id,
+                        disbursement.DisbursementNumber,
+                        DateOnly.FromDateTime(nowUtc.UtcDateTime),
+                        "AUTO-GL-v1",
+                        "BIR-EOPT-RR7-2024",
+                        $"Bank settlement confirmed for {disbursement.DisbursementNumber}",
+                        [
+                            new GlJournalLineRecord(
+                                Guid.Empty, Guid.Empty, 1, "1015", "Payment in Transit Clearing",
+                                settledAmount.AmountMinor, 0, "DEPT-TREASURY", "CC-CORP-00",
+                                "CASH_ADVANCE", "NONE", "Clear disbursement in transit"),
+                            new GlJournalLineRecord(
+                                Guid.Empty, Guid.Empty, 2, "1010", "Cash in Bank - Operating PHP",
+                                0, settledAmount.AmountMinor, "DEPT-TREASURY", "CC-CORP-00",
+                                "CASH_ADVANCE", "NONE", "Bank settlement received")
+                        ],
+                        cancellationToken).ConfigureAwait(false);
+                if (clearingResult.IsFailure)
+                {
+                    return Result.Failure<DisbursementDto>(clearingResult.Error);
+                }
             }
 
             await _advanceRepository.SaveAsync(advance, cancellationToken).ConfigureAwait(false);

@@ -76,7 +76,8 @@ public sealed class DisbursementEndpoints : IEndpointModule
                 ExecutorId: actor.ActorId,
                 BankReference: request.BankReference,
                 RemittanceDocumentId: request.RemittanceDocId,
-                ExecutedAmountMinor: request.ExecutedAmountMinor);
+                ExecutedAmountMinor: request.ExecutedAmountMinor,
+                IsSettledImmediatelyByBank: request.IsSettledImmediatelyByBank);
 
             var result = await handler.HandleAsync(cmd, ct).ConfigureAwait(false);
             return result.ToHttpResult(httpContext);

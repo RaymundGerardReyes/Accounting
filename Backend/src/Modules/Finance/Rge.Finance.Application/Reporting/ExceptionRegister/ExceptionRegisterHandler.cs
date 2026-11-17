@@ -78,7 +78,11 @@ public sealed class ExceptionRegisterHandler :
         }
 
         DateTimeOffset nowUtc = _clock.UtcNow;
-        item.Resolve(command.ResolverId, command.ResolutionNotes, nowUtc);
+        Result resolveResult = item.Resolve(command.ResolverId, command.ResolutionNotes, nowUtc);
+        if (resolveResult.IsFailure)
+        {
+            return Result.Failure<ExceptionRegisterItemDto>(resolveResult.Error);
+        }
 
         await _repository.SaveAsync(item, cancellationToken).ConfigureAwait(false);
 

@@ -1,6 +1,7 @@
 using Rge.BuildingBlocks.SharedKernel.Guards;
 using Rge.BuildingBlocks.SharedKernel.Money;
 using Rge.BuildingBlocks.SharedKernel.Primitives;
+using Rge.BuildingBlocks.SharedKernel.Results;
 
 namespace Rge.Finance.Domain.Exceptions;
 
@@ -23,6 +24,7 @@ public sealed class ExceptionRegisterItem : Entity<string>
     public string ExceptionCategory { get; private set; }
     public string Severity { get; private set; }
     public string? OwnerId { get; private set; }
+    public string? RaisedByActorId { get; private set; }
     public string? DepartmentId { get; private set; }
     public Money Amount { get; private set; }
     public string Reason { get; private set; }
@@ -45,7 +47,8 @@ public sealed class ExceptionRegisterItem : Entity<string>
         Money amount,
         string reason,
         string? evidenceDocId,
-        DateTimeOffset nowUtc) : base(Guard.AgainstNullOrWhiteSpace(id))
+        DateTimeOffset nowUtc,
+        string? raisedByActorId = null) : base(Guard.AgainstNullOrWhiteSpace(id))
     {
         RegisterNumber = Guard.AgainstNullOrWhiteSpace(registerNumber);
         EntityType = Guard.AgainstNullOrWhiteSpace(entityType);
@@ -53,6 +56,7 @@ public sealed class ExceptionRegisterItem : Entity<string>
         ExceptionCategory = Guard.AgainstNullOrWhiteSpace(exceptionCategory);
         Severity = Guard.AgainstNullOrWhiteSpace(severity);
         OwnerId = ownerId;
+        RaisedByActorId = raisedByActorId;
         DepartmentId = departmentId;
         Amount = amount;
         Reason = Guard.AgainstNullOrWhiteSpace(reason);
@@ -61,12 +65,21 @@ public sealed class ExceptionRegisterItem : Entity<string>
         DetectedAtUtc = nowUtc;
     }
 
-    public void Resolve(string reviewerId, string resolutionNotes, DateTimeOffset nowUtc)
+    public Result Resolve(string reviewerId, string resolutionNotes, DateTimeOffset nowUtc)
     {
+        if (!string.IsNullOrWhiteSpace(RaisedByActorId) &&
+            string.Equals(RaisedByActorId, reviewerId, StringComparison.OrdinalIgnoreCase))
+        {
+            return Result.Failure(Error.SodViolation(
+                "Finance.ExceptionRegister.SelfResolution",
+                "The actor who raised an exception cannot resolve it."));
+        }
+
         ReviewerId = Guard.AgainstNullOrWhiteSpace(reviewerId);
         ResolutionNotes = Guard.AgainstNullOrWhiteSpace(resolutionNotes);
         Status = ExceptionRegisterStatus.Resolved;
         ResolvedAtUtc = nowUtc;
+        return Result.Success();
     }
 
     public void Reopen(string reviewerId, string reason)
