@@ -5,7 +5,9 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { CurrencyDisplay, FinancialStatusBadge } from "@/components/ui/financial-primitives"
+import { CurrencyDisplay, FinancialStatusBadge, CopyableHash } from "@/components/ui/financial-primitives"
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import {
   Landmark,
   Plus,
@@ -41,19 +43,25 @@ import {
   formatPhpMinor,
   FinanceUser,
   CashAdvanceRecord,
+  DisbursementRecord,
   ExpenseReportRecord,
   PolicyVersionRecord,
   FinancialPolicyRecord,
   ExceptionRequestRecord,
   VendorRecord,
+  VendorBankChangeRecord,
   TaxCodeRecord,
   PurchaseRequestRecord,
   AccountPayableRecord,
+  PayablePaymentRecord,
+  ApprovalMatrixRule,
   CentralizedTrackerRow,
   fetchFinanceMe,
   fetchFinanceUsers,
   switchDevActor,
   fetchFinanceDashboard,
+  fetchApprovalMatrix,
+  fetchKpiDefinitions,
   fetchPolicies,
   createPolicyVersion,
   submitPolicyVersion,
@@ -66,6 +74,7 @@ import {
   submitCashAdvance,
   decideCashAdvance,
   recordCashReturn,
+  settleCashAdvanceReimbursement,
   closeCashAdvance,
   createDisbursement,
   verifyDisbursement,
@@ -81,7 +90,10 @@ import {
   fetchVendors,
   createVendor,
   verifyVendor,
+  requestVendorBankChange,
+  decideVendorBankChange,
   fetchTaxCodes,
+  createTaxCode,
   fetchPurchaseRequests,
   createPurchaseRequest,
   submitPurchaseRequest,
@@ -100,7 +112,10 @@ import {
   fetchAuditEvents,
   uploadDocumentJson,
 } from "@/lib/finance-api"
-import { OfficialGeneralLedgerTab } from "@/components/official-general-ledger-tab"
+import {
+  calculateVatInclusiveSplitCentavos,
+  OfficialGeneralLedgerTab,
+} from "@/components/official-general-ledger-tab"
 
 export function FinanceOperationsHub() {
   // Navigation tabs
@@ -122,12 +137,17 @@ export function FinanceOperationsHub() {
 
   // Data states
   const [dashboardData, setDashboardData] = useState<any>(null)
+  const [approvalMatrix, setApprovalMatrix] = useState<ApprovalMatrixRule[]>([])
+  const [kpiDefinitions, setKpiDefinitions] = useState<any>(null)
   const [advances, setAdvances] = useState<CashAdvanceRecord[]>([])
+  const [disbursementsByAdvance, setDisbursementsByAdvance] = useState<Record<string, DisbursementRecord[]>>({})
   const [expenses, setExpenses] = useState<ExpenseReportRecord[]>([])
   const [vendors, setVendors] = useState<VendorRecord[]>([])
+  const [vendorBankChanges, setVendorBankChanges] = useState<VendorBankChangeRecord[]>([])
   const [taxCodes, setTaxCodes] = useState<TaxCodeRecord[]>([])
   const [purchaseRequests, setPurchaseRequests] = useState<PurchaseRequestRecord[]>([])
   const [payables, setPayables] = useState<AccountPayableRecord[]>([])
+  const [paymentsByPayable, setPaymentsByPayable] = useState<Record<string, PayablePaymentRecord[]>>({})
   const [policies, setPolicies] = useState<FinancialPolicyRecord[]>([])
   const [exceptions, setExceptions] = useState<ExceptionRequestRecord[]>([])
   const [trackerRows, setTrackerRows] = useState<CentralizedTrackerRow[]>([])
@@ -140,6 +160,7 @@ export function FinanceOperationsHub() {
   const [feedback, setFeedback] = useState<{ type: "success" | "error" | "info"; message: string } | null>(null)
   const [trackerSearch, setTrackerSearch] = useState<string>("")
   const [trackerWorkflowFilter, setTrackerWorkflowFilter] = useState<string>("all")
+  const [auditEntityFilter, setAuditEntityFilter] = useState<string>("all")
 
   // Modals & Drawers
   const [showAdvanceModal, setShowAdvanceModal] = useState<boolean>(false)
@@ -147,6 +168,8 @@ export function FinanceOperationsHub() {
   const [selectedAdvanceForDisburse, setSelectedAdvanceForDisburse] = useState<CashAdvanceRecord | null>(null)
   const [showCashReturnModal, setShowCashReturnModal] = useState<boolean>(false)
   const [selectedAdvanceForReturn, setSelectedAdvanceForReturn] = useState<CashAdvanceRecord | null>(null)
+  const [showReimbursementModal, setShowReimbursementModal] = useState<boolean>(false)
+  const [selectedAdvanceForReimburse, setSelectedAdvanceForReimburse] = useState<CashAdvanceRecord | null>(null)
 
   const [showExpenseModal, setShowExpenseModal] = useState<boolean>(false)
   const [selectedExpenseReport, setSelectedExpenseReport] = useState<ExpenseReportRecord | null>(null)
@@ -155,8 +178,13 @@ export function FinanceOperationsHub() {
   const [evaluatingReportId, setEvaluatingReportId] = useState<string | null>(null)
 
   const [showVendorModal, setShowVendorModal] = useState<boolean>(false)
+  const [showBankChangeModal, setShowBankChangeModal] = useState<boolean>(false)
+  const [selectedVendorForBankChange, setSelectedVendorForBankChange] = useState<VendorRecord | null>(null)
+  const [showTaxCodeModal, setShowTaxCodeModal] = useState<boolean>(false)
   const [showPrModal, setShowPrModal] = useState<boolean>(false)
   const [showPayableModal, setShowPayableModal] = useState<boolean>(false)
+  const [showApPaymentModal, setShowApPaymentModal] = useState<boolean>(false)
+  const [selectedPayableForPayment, setSelectedPayableForPayment] = useState<AccountPayableRecord | null>(null)
   const [showPolicyModal, setShowPolicyModal] = useState<boolean>(false)
   const [showExceptionModal, setShowExceptionModal] = useState<boolean>(false)
 
@@ -166,14 +194,18 @@ export function FinanceOperationsHub() {
   const [advDateNeeded, setAdvDateNeeded] = useState<string>("2026-05-10")
   const [advSite, setAdvSite] = useState<string>("Laguna Industrial Zone")
 
-  // Form states: Disbursement maker
+  // Form states: Disbursement maker & 1010/1015 transit execution
   const [disbAmountPhp, setDisbAmountPhp] = useState<string>("")
   const [disbAccountRef, setDisbAccountRef] = useState<string>("BDO-SA-0089211029")
   const [disbBankRef, setDisbBankRef] = useState<string>("TXN-BNK-990214")
+  const [disbExecutionDate, setDisbExecutionDate] = useState<string>("2026-11-18")
+  const [disbIsSettledImmediately, setDisbIsSettledImmediately] = useState<boolean>(true)
 
-  // Form states: Cash Return
+  // Form states: Cash Return & Reimbursement
   const [returnAmountPhp, setReturnAmountPhp] = useState<string>("1500")
   const [returnBankRef, setReturnBankRef] = useState<string>("RET-DEP-77881")
+  const [reimbAmountPhp, setReimbAmountPhp] = useState<string>("1000")
+  const [reimbBankRef, setReimbBankRef] = useState<string>("REIMB-BNK-55102")
 
   // Form states: New Expense Report
   const [expPeriod, setExpPeriod] = useState<string>("2026-05")
@@ -188,11 +220,22 @@ export function FinanceOperationsHub() {
   const [lineAmountPhp, setLineAmountPhp] = useState<string>("3500")
   const [lineReceiptNo, setLineReceiptNo] = useState<string>("OR-88219")
   const [lineLocation, setLineLocation] = useState<string>("Laguna Plant Site")
+  const [lineTaxCode, setLineTaxCode] = useState<string>("VAT_12_INCL")
 
-  // Form states: Vendor
+  // Form states: Vendor & Bank Change & Tax Code
   const [vendorName, setVendorName] = useState<string>("")
   const [vendorType, setVendorType] = useState<string>("supplier")
   const [vendorTin, setVendorTin] = useState<string>("009-123-456-000")
+  const [vbNewBankName, setVbNewBankName] = useState<string>("BPI Corporate")
+  const [vbAccountNo, setVbAccountNo] = useState<string>("009811223344")
+  const [vbAccountRef, setVbAccountRef] = useState<string>("BPI-SA-0098112233")
+  const [vbReason, setVbReason] = useState<string>("Updated vendor settlement treasury account")
+  const [tcCode, setTcCode] = useState<string>("VAT12_SRV")
+  const [tcDesc, setTcDesc] = useState<string>("12% Creditable VAT - Services")
+  const [tcType, setTcType] = useState<string>("VAT")
+  const [tcRatePct, setTcRatePct] = useState<string>("12")
+  const [tcRequires2307, setTcRequires2307] = useState<boolean>(false)
+  const [tcCpaApproved, setTcCpaApproved] = useState<boolean>(true)
 
   // Form states: PR
   const [prVendorId, setPrVendorId] = useState<string>("")
@@ -200,7 +243,7 @@ export function FinanceOperationsHub() {
   const [prPurpose, setPrPurpose] = useState<string>("Industrial maintenance supplies and safety equipment")
   const [prAmountPhp, setPrAmountPhp] = useState<string>("25000")
 
-  // Form states: Payable
+  // Form states: Payable & 5-step AP Payment
   const [apPrId, setApPrId] = useState<string>("")
   const [apInvoiceNo, setApInvoiceNo] = useState<string>("INV-2026-9011")
   const [apInvoiceDate, setApInvoiceDate] = useState<string>("2026-05-15")
@@ -208,6 +251,10 @@ export function FinanceOperationsHub() {
   const [apOriginalPhp, setApOriginalPhp] = useState<string>("25000")
   const [apVatCode, setApVatCode] = useState<string>("VAT12")
   const [apEwtCode, setApEwtCode] = useState<string>("EWT1")
+  const [apPayAmountPhp, setApPayAmountPhp] = useState<string>("")
+  const [apPayMethod, setApPayMethod] = useState<string>("bank_transfer")
+  const [apPayBankRef, setApPayBankRef] = useState<string>("AP-BNK-44019")
+  const [apPayExecDate, setApPayExecDate] = useState<string>("2026-11-18")
 
   // Form states: Policy version
   const [polEffectiveFrom, setPolEffectiveFrom] = useState<string>("2026-06-01")
@@ -220,6 +267,32 @@ export function FinanceOperationsHub() {
   const [excPeriod, setExcPeriod] = useState<string>("2026-05")
   const [excJustification, setExcJustification] = useState<string>("Emergency provincial travel exceeding monthly baseline threshold")
 
+  // Close open modals cleanly on Esc key
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return
+      setShowAdvanceModal(false)
+      setShowDisburseModal(false)
+      setShowCashReturnModal(false)
+      setShowReimbursementModal(false)
+      setShowExpenseModal(false)
+      setShowAddLineModal(false)
+      setShowVendorModal(false)
+      setShowBankChangeModal(false)
+      setShowTaxCodeModal(false)
+      setShowPrModal(false)
+      setShowPayableModal(false)
+      setShowApPaymentModal(false)
+      setShowPolicyModal(false)
+      setShowExceptionModal(false)
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("keydown", onKeyDown)
+      return () => window.removeEventListener("keydown", onKeyDown)
+    }
+    return undefined
+  }, [])
+
   // Load All Primary Data
   const loadData = async (actorId = currentActorId) => {
     setLoading(true)
@@ -228,6 +301,8 @@ export function FinanceOperationsHub() {
         meRes,
         usersRes,
         dashRes,
+        matrixRes,
+        kpiDefRes,
         advRes,
         expRes,
         venRes,
@@ -243,6 +318,8 @@ export function FinanceOperationsHub() {
         fetchFinanceMe(actorId).catch(() => null),
         fetchFinanceUsers(actorId).catch(() => []),
         fetchFinanceDashboard(actorId).catch(() => null),
+        fetchApprovalMatrix(actorId).catch(() => []),
+        fetchKpiDefinitions(actorId).catch(() => null),
         fetchCashAdvances(actorId).catch(() => []),
         fetchExpenseReports(actorId).catch(() => []),
         fetchVendors(actorId).catch(() => []),
@@ -265,6 +342,8 @@ export function FinanceOperationsHub() {
         setAvailableUsers(meRes.users)
       }
       setDashboardData(dashRes)
+      setApprovalMatrix(matrixRes)
+      setKpiDefinitions(kpiDefRes)
       setAdvances(advRes)
       setExpenses(expRes)
       setVendors(venRes)
@@ -312,7 +391,7 @@ export function FinanceOperationsHub() {
     }
   }
 
-  // Upload Fake Base64 Document Evidence Helper
+  // Upload Evidence Document Helper
   const createMockDocument = async (docType: string, filename: string): Promise<string> => {
     const raw = `%PDF-1.4\n% CPA Evidence: ${filename} for ${currentActorId}\n1 0 obj <<>> endobj\n%%EOF\n`
     const b64 = typeof window !== "undefined" ? btoa(raw) : ""
@@ -324,6 +403,24 @@ export function FinanceOperationsHub() {
     return doc.id
   }
 
+  const upsertDisbursementState = (advanceId: string, disb: DisbursementRecord) => {
+    setDisbursementsByAdvance((prev) => {
+      const existing = prev[advanceId] ?? []
+      const idx = existing.findIndex((d) => d.id === disb.id)
+      const next = idx >= 0 ? existing.map((d) => (d.id === disb.id ? disb : d)) : [disb, ...existing]
+      return { ...prev, [advanceId]: next }
+    })
+  }
+
+  const upsertPayablePaymentState = (payableId: string, payment: PayablePaymentRecord) => {
+    setPaymentsByPayable((prev) => {
+      const existing = prev[payableId] ?? []
+      const idx = existing.findIndex((p) => p.id === payment.id)
+      const next = idx >= 0 ? existing.map((p) => (p.id === payment.id ? payment : p)) : [payment, ...existing]
+      return { ...prev, [payableId]: next }
+    })
+  }
+
   // Cash Advance Handlers
   const handleCreateAdvance = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -331,10 +428,16 @@ export function FinanceOperationsHub() {
       setActionLoading(true)
       const minor = Math.round(parseFloat(advAmountPhp) * 100)
       const created = await createCashAdvance(currentActorId, {
+        employee_id: currentActorId,
+        department_id: actorProfile?.department_id || "manufacturing",
+        cost_center_id: actorProfile?.cost_center_id || "CC-001",
         purpose_code: "field_travel_operations",
+        purpose_category: "field_travel_operations",
+        business_purpose: advPurpose,
         business_justification: advPurpose,
         requested_amount_minor: minor,
         date_needed: advDateNeeded,
+        requested_disbursement_date: advDateNeeded,
         destination_or_site: advSite,
         submit_now: false,
       })
@@ -389,8 +492,8 @@ export function FinanceOperationsHub() {
         payment_method: "bank_transfer",
         recipient_account_ref: disbAccountRef,
       })
+      upsertDisbursementState(selectedAdvanceForDisburse.id, disb)
       setFeedback({ type: "success", message: `Disbursement ${disb.disbursement_number} prepared by maker.` })
-      setShowDisburseModal(false)
       await loadData()
     } catch (err: any) {
       setFeedback({ type: "error", message: err.message })
@@ -399,10 +502,11 @@ export function FinanceOperationsHub() {
     }
   }
 
-  const handleVerifyDisbursement = async (disbId: string) => {
+  const handleVerifyDisbursement = async (advId: string, disbId: string) => {
     try {
       setActionLoading(true)
       const res = await verifyDisbursement(currentActorId, disbId, "Bank details & payee verified independently")
+      upsertDisbursementState(advId, res)
       setFeedback({ type: "success", message: `Disbursement ${res.disbursement_number} verified.` })
       await loadData()
     } catch (err: any) {
@@ -412,10 +516,11 @@ export function FinanceOperationsHub() {
     }
   }
 
-  const handleBankApproveDisbursement = async (disbId: string) => {
+  const handleBankApproveDisbursement = async (advId: string, disbId: string) => {
     try {
       setActionLoading(true)
       const res = await approveDisbursementBankRelease(currentActorId, disbId, "Bank release authorized")
+      upsertDisbursementState(advId, res)
       setFeedback({ type: "success", message: `Disbursement ${res.disbursement_number} bank-approved.` })
       await loadData()
     } catch (err: any) {
@@ -425,7 +530,7 @@ export function FinanceOperationsHub() {
     }
   }
 
-  const handleExecuteDisbursement = async (disbId: string, amountMinor: number) => {
+  const handleExecuteDisbursement = async (advId: string, disbId: string, amountMinor: number) => {
     try {
       setActionLoading(true)
       const evidenceDocId = await createMockDocument("bank_remittance_advice", "bank_remittance.pdf")
@@ -433,8 +538,14 @@ export function FinanceOperationsHub() {
         bank_reference: disbBankRef || "REF-BNK-771120",
         executed_amount_minor: amountMinor,
         evidence_document_id: evidenceDocId,
+        execution_date: disbExecutionDate,
+        is_settled_immediately_by_bank: disbIsSettledImmediately,
       })
-      setFeedback({ type: "success", message: `Disbursement ${res.disbursement_number} executed via bank transfer.` })
+      upsertDisbursementState(advId, { ...res, is_settled_immediately_by_bank: disbIsSettledImmediately })
+      setFeedback({
+        type: "success",
+        message: `Disbursement ${res.disbursement_number} executed (${disbIsSettledImmediately ? "1010 Cash in Bank" : "1015 Payment in Transit"}).`,
+      })
       await loadData()
     } catch (err: any) {
       setFeedback({ type: "error", message: err.message })
@@ -443,11 +554,18 @@ export function FinanceOperationsHub() {
     }
   }
 
-  const handleVerifyEvidenceDisbursement = async (disbId: string) => {
+  const handleVerifyEvidenceDisbursement = async (advId: string, disbId: string) => {
     try {
       setActionLoading(true)
-      const res = await verifyDisbursementEvidence(currentActorId, disbId, "Remittance PDF validated by 6th actor")
-      setFeedback({ type: "success", message: `Disbursement evidence verified! Cash advance released.` })
+      const evidenceDocId = await createMockDocument("bank_settlement_confirmation", "settlement_confirmation.pdf")
+      const res = await verifyDisbursementEvidence(
+        currentActorId,
+        disbId,
+        "Remittance PDF validated by 6th actor",
+        evidenceDocId,
+      )
+      upsertDisbursementState(advId, res)
+      setFeedback({ type: "success", message: `Disbursement evidence verified! Compliance cleared and cash advance released.` })
       await loadData()
     } catch (err: any) {
       setFeedback({ type: "error", message: err.message })
@@ -471,6 +589,29 @@ export function FinanceOperationsHub() {
       })
       setFeedback({ type: "success", message: `Recorded cash return for ${res.advance_number}.` })
       setShowCashReturnModal(false)
+      await loadData()
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err.message })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleReimburseAdvance = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedAdvanceForReimburse) return
+    try {
+      setActionLoading(true)
+      const docId = await createMockDocument("reimbursement_remittance", "employee_reimbursement.pdf")
+      const minor = Math.round(parseFloat(reimbAmountPhp) * 100)
+      const res = await settleCashAdvanceReimbursement(currentActorId, selectedAdvanceForReimburse.id, {
+        amount_minor: minor,
+        settlement_method: "bank_transfer",
+        bank_reference: reimbBankRef,
+        remittance_doc_id: docId,
+      })
+      setFeedback({ type: "success", message: `Reimbursement settlement recorded for ${res.advance_number}.` })
+      setShowReimbursementModal(false)
       await loadData()
     } catch (err: any) {
       setFeedback({ type: "error", message: err.message })
@@ -505,6 +646,9 @@ export function FinanceOperationsHub() {
         : undefined
 
       const rep = await createExpenseReport(currentActorId, {
+        employee_id: currentActorId,
+        department_id: actorProfile?.department_id || "manufacturing",
+        cost_center_id: actorProfile?.cost_center_id || "CC-001",
         reporting_period: expPeriod,
         business_purpose_summary: expTitle,
         out_of_base_activity: expOutOfBase,
@@ -528,7 +672,11 @@ export function FinanceOperationsHub() {
     try {
       setActionLoading(true)
       const minor = Math.round(parseFloat(lineAmountPhp) * 100)
-      const updated = await addExpenseLine(currentActorId, selectedExpenseReport.id, {
+      const vatSplit =
+        lineTaxCode === "VAT_12_INCL"
+          ? calculateVatInclusiveSplitCentavos(minor, 1200)
+          : { netBaseCentavos: minor, vatCentavos: 0, grossCentavos: minor }
+      const lineItem = {
         transaction_date: `${expPeriod}-05`,
         expense_category: lineCategory,
         business_purpose: linePurpose,
@@ -537,10 +685,131 @@ export function FinanceOperationsHub() {
         receipt_or_invoice_no: lineReceiptNo,
         school_or_destination: lineLocation,
         out_of_base: true,
-      })
-      setFeedback({ type: "success", message: `Expense line added to ${updated.report_number}.` })
+        tax_code: lineTaxCode,
+        vat_amount_minor: vatSplit.vatCentavos,
+      }
+      const updated = await addExpenseLine(currentActorId, selectedExpenseReport.id, { lines: [lineItem] })
+      setFeedback({ type: "success", message: `Expense line added to ${updated.report_number} (${lineTaxCode}).` })
       setSelectedExpenseReport(updated)
       setShowAddLineModal(false)
+      await loadData()
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err.message })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // Vendor Bank Change, BIR Tax Codes & AP 5-Step Payment Handlers
+  const handleRequestBankChange = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedVendorForBankChange) return
+    try {
+      setActionLoading(true)
+      const docId = await createMockDocument("vendor_bank_change_proof", "vendor_bank_letter.pdf")
+      const change = await requestVendorBankChange(currentActorId, selectedVendorForBankChange.id, {
+        new_bank_name: vbNewBankName,
+        raw_new_account_number: vbAccountNo,
+        new_bank_account_ref: vbAccountRef,
+        reason: vbReason,
+        supporting_doc_id: docId,
+      })
+      setVendorBankChanges((prev) => [change, ...prev])
+      setFeedback({ type: "success", message: `Bank change request submitted for ${selectedVendorForBankChange.registered_name}. Distinct approver required.` })
+      setShowBankChangeModal(false)
+      await loadData()
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err.message })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleDecideBankChange = async (changeId: string, decision: "approved" | "rejected") => {
+    try {
+      setActionLoading(true)
+      const updated = await decideVendorBankChange(currentActorId, changeId, {
+        decision,
+        reason: decision === "approved" ? "Independent treasury verification completed" : "Insufficient bank proof",
+      })
+      setVendorBankChanges((prev) => prev.map((c) => (c.id === changeId ? updated : c)))
+      setFeedback({ type: "success", message: `Vendor bank change ${decision}.` })
+      await loadData()
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err.message })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleCreateTaxCode = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      setActionLoading(true)
+      const rateBps = Math.round(parseFloat(tcRatePct || "0") * 100)
+      const created = await createTaxCode(currentActorId, {
+        code: tcCode,
+        description: tcDesc,
+        tax_type: tcType,
+        rate_bps: rateBps,
+        requires_bir2307: tcRequires2307,
+        cpa_approved: tcCpaApproved,
+      })
+      setFeedback({ type: "success", message: `Tax code ${created.code} registered.` })
+      setShowTaxCodeModal(false)
+      await loadData()
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err.message })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleMakerPrepareApPayment = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedPayableForPayment) return
+    try {
+      setActionLoading(true)
+      const minor = Math.round(parseFloat(apPayAmountPhp || "0") * 100)
+      const payment = await preparePayablePayment(currentActorId, selectedPayableForPayment.id, {
+        payment_amount_minor: minor,
+        payment_method: apPayMethod,
+      })
+      upsertPayablePaymentState(selectedPayableForPayment.id, payment)
+      setFeedback({ type: "success", message: `AP Payment ${payment.payment_number} prepared by maker.` })
+      await loadData()
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err.message })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleAdvanceApPaymentStep = async (
+    payableId: string,
+    payment: PayablePaymentRecord,
+    step: "verify" | "bank_approve" | "execute" | "reconcile",
+  ) => {
+    try {
+      setActionLoading(true)
+      let updated: PayablePaymentRecord
+      if (step === "verify") {
+        updated = await verifyPayablePayment(currentActorId, payment.id, "Vendor invoice & beneficiary verified")
+      } else if (step === "bank_approve") {
+        updated = await approvePayablePaymentBank(currentActorId, payment.id, "Bank release approved within limit")
+      } else if (step === "execute") {
+        const docId = await createMockDocument("ap_remittance", "ap_bank_remittance.pdf")
+        updated = await executePayablePayment(currentActorId, payment.id, {
+          bank_reference: apPayBankRef || "AP-BNK-44019",
+          executed_amount_minor: payment.payment_amount_minor,
+          execution_date: apPayExecDate,
+          remittance_doc_id: docId,
+        })
+      } else {
+        updated = await reconcilePayablePayment(currentActorId, payment.id, "Reconciled against bank statement and AP GL")
+      }
+      upsertPayablePaymentState(payableId, updated)
+      setFeedback({ type: "success", message: `AP Payment ${updated.payment_number} transitioned to ${updated.status}.` })
       await loadData()
     } catch (err: any) {
       setFeedback({ type: "error", message: err.message })
@@ -652,15 +921,32 @@ export function FinanceOperationsHub() {
       setActionLoading(true)
       const minor = Math.round(parseFloat(prAmountPhp) * 100)
       const pr = await createPurchaseRequest(currentActorId, {
+        requestor_id: currentActorId,
         vendor_id: prVendorId,
+        department_id: actorProfile?.department_id || "manufacturing",
+        cost_center_id: actorProfile?.cost_center_id || "CC-001",
         payment_category: prCategory,
+        is_restricted_category: false,
         business_purpose: prPurpose,
         requested_amount_minor: minor,
         requested_payment_date: "2026-05-25",
         submit_now: true,
       })
-      setFeedback({ type: "success", message: `Purchase Request ${pr.request_number} created and submitted.` })
+      setFeedback({ type: "success", message: `Purchase Request ${pr.request_number} created.` })
       setShowPrModal(false)
+      await loadData()
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err.message })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleSubmitPr = async (prId: string) => {
+    try {
+      setActionLoading(true)
+      const res = await submitPurchaseRequest(currentActorId, prId)
+      setFeedback({ type: "success", message: `Purchase Request ${res.request_number} submitted for approval.` })
       await loadData()
     } catch (err: any) {
       setFeedback({ type: "error", message: err.message })
@@ -682,13 +968,29 @@ export function FinanceOperationsHub() {
     }
   }
 
+  const handleRejectPr = async (prId: string) => {
+    try {
+      setActionLoading(true)
+      const res = await decidePurchaseRequest(currentActorId, prId, "rejected", "Returned or rejected by approver")
+      setFeedback({ type: "success", message: `Purchase Request ${res.request_number} rejected.` })
+      await loadData()
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err.message })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   const handleValidatePayable = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
       setActionLoading(true)
       const minor = Math.round(parseFloat(apOriginalPhp) * 100)
+      const matchedPr = purchaseRequests.find((p) => p.id === apPrId)
+      const resolvedVendorId = matchedPr?.vendor_id || prVendorId || vendors[0]?.id || ""
       const ap = await validateAccountPayable(currentActorId, {
         purchase_request_id: apPrId,
+        vendor_id: resolvedVendorId,
         invoice_number: apInvoiceNo,
         invoice_date: apInvoiceDate,
         due_date: apDueDate,
@@ -753,7 +1055,12 @@ export function FinanceOperationsHub() {
     try {
       setActionLoading(true)
       const minor = Math.round(parseFloat(excAmountPhp) * 100)
+      const activePolVerId =
+        policies.flatMap((p) => p.versions || []).find((v) => v.status === "active")?.id ?? "POL-VER-DEFAULT"
       const exc = await createExceptionRequest(currentActorId, {
+        employee_id: currentActorId,
+        target_entity_type: "expense_report",
+        policy_version_id: activePolVerId,
         reporting_period: excPeriod,
         violated_rule_code: excRuleCode,
         exception_type: "amount_cap_override",
@@ -787,18 +1094,69 @@ export function FinanceOperationsHub() {
     }
   }
 
+  // Computed KPI totals combining dashboard API & live collections
+  const totalOpenAdvancesMinor = useMemo(() => {
+    const dashVal = dashboardData?.kpis?.open_advances?.aggregate_balance_minor
+    if (typeof dashVal === "number" && dashVal > 0) return dashVal
+    return advances.reduce(
+      (sum, adv) => sum + (adv.reconciliation?.outstanding_balance_minor ?? adv.requested_amount_minor ?? 0),
+      0,
+    )
+  }, [dashboardData, advances])
+
+  const totalOpenPayablesMinor = useMemo(() => {
+    const dashVal = dashboardData?.kpis?.accounts_payable?.total_net_payable_minor
+    if (typeof dashVal === "number" && dashVal > 0) return dashVal
+    return payables.reduce(
+      (sum, ap) =>
+        sum +
+        (ap.remaining_balance_minor ??
+          ap.balance_minor ??
+          Math.max(0, (ap.net_payable_minor ?? 0) - (ap.paid_amount_minor ?? 0))),
+      0,
+    )
+  }, [dashboardData, payables])
+
+  const workflowExposureChartData = useMemo(() => {
+    const releasedAdvMinor =
+      dashboardData?.kpis?.open_advances?.released_total_minor ??
+      advances.reduce((sum, adv) => sum + (adv.approved_amount_minor ?? adv.requested_amount_minor ?? 0), 0)
+    const claimedExpMinor = expenses.reduce((sum, e) => sum + (e.total_reported_minor ?? 0), 0)
+    const approvedExpMinor =
+      dashboardData?.kpis?.liquidations?.total_liquidated_expense_minor ??
+      expenses.reduce((sum, e) => sum + (e.total_approved_minor ?? 0), 0)
+
+    return [
+      { workflow: "Advances Released", amountPhp: Math.round(releasedAdvMinor / 100), exposurePhp: Math.round(totalOpenAdvancesMinor / 100) },
+      { workflow: "Expense Liquidations", amountPhp: Math.round(claimedExpMinor / 100), exposurePhp: Math.round(approvedExpMinor / 100) },
+      { workflow: "Accounts Payable", amountPhp: Math.round(payables.reduce((s, p) => s + (p.gross_amount_minor ?? 0), 0) / 100), exposurePhp: Math.round(totalOpenPayablesMinor / 100) },
+    ]
+  }, [dashboardData, advances, expenses, payables, totalOpenAdvancesMinor, totalOpenPayablesMinor])
+
+  const workflowChartConfig: ChartConfig = {
+    amountPhp: { label: "Gross Authorized (PHP)", color: "oklch(0.2 0 0)" },
+    exposurePhp: { label: "Active Balance / Approved (PHP)", color: "oklch(0.55 0.2 25)" },
+  }
+
   // Filtered Centralized Tracker Rows
   const filteredTrackerRows = useMemo(() => {
+    const q = trackerSearch.toLowerCase()
     return trackerRows.filter((r) => {
       const matchWf = trackerWorkflowFilter === "all" || r.entity_type === trackerWorkflowFilter
       const matchSearch =
-        !trackerSearch ||
-        r.reference_number.toLowerCase().includes(trackerSearch.toLowerCase()) ||
-        r.employee_or_vendor.toLowerCase().includes(trackerSearch.toLowerCase()) ||
-        r.category.toLowerCase().includes(trackerSearch.toLowerCase())
+        !q ||
+        (r.reference_number || "").toLowerCase().includes(q) ||
+        (r.employee_or_vendor || "").toLowerCase().includes(q) ||
+        (r.category || "").toLowerCase().includes(q)
       return matchWf && matchSearch
     })
   }, [trackerRows, trackerWorkflowFilter, trackerSearch])
+
+  const filteredAuditEvents = useMemo(() => {
+    const evts = Array.isArray(auditEventsData?.events) ? auditEventsData.events : []
+    if (auditEntityFilter === "all") return evts
+    return evts.filter((e: any) => (e.entity_type || "").toLowerCase() === auditEntityFilter.toLowerCase())
+  }, [auditEventsData, auditEntityFilter])
 
   return (
     <div className="flex-1 space-y-6 p-8 pt-6 min-h-screen bg-background text-foreground">
@@ -1022,7 +1380,7 @@ export function FinanceOperationsHub() {
               <CardHeader className="pb-2">
                 <CardDescription className="text-xs uppercase font-medium">Open Advances Balance</CardDescription>
                 <CardTitle className="text-2xl font-bold tracking-tight">
-                  {formatPhpMinor(dashboardData?.kpis?.open_advances?.aggregate_balance_minor || 0)}
+                  {formatPhpMinor(totalOpenAdvancesMinor)}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -1054,14 +1412,14 @@ export function FinanceOperationsHub() {
               <CardHeader className="pb-2">
                 <CardDescription className="text-xs uppercase font-medium">Accounts Payable Due</CardDescription>
                 <CardTitle className="text-2xl font-bold tracking-tight">
-                  {formatPhpMinor(dashboardData?.kpis?.accounts_payable?.total_net_payable_minor || 0)}
+                  {formatPhpMinor(totalOpenPayablesMinor)}
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="text-xs text-muted-foreground flex items-center justify-between">
                   <span>Open Payables: {dashboardData?.kpis?.accounts_payable?.open_payables_count || payables.length}</span>
                   <Badge variant="secondary" className="text-[10px]">
-                    Tax Review: {dashboardData?.kpis?.accounts_payable?.tax_review_required_count || 0}
+                    On-time Rate: {dashboardData?.kpis?.liquidations?.on_time_liquidation_rate_pct ?? 100}%
                   </Badge>
                 </div>
               </CardContent>
@@ -1080,6 +1438,81 @@ export function FinanceOperationsHub() {
                   <span>Events logged: {auditEventsData?.chain_integrity?.checked_count || auditEventsData?.events?.length || 0}</span>
                   <span className="text-[10px] font-mono text-muted-foreground">Append-Only</span>
                 </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Workflow Analytics & CPA Approval Matrix */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card className="shadow-xs">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold">Subledger Financial Exposure by Workflow (PHP)</CardTitle>
+                <CardDescription className="text-xs">
+                  Gross authorized obligations vs. active exposure or approved liquidations across operational modules.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ChartContainer config={workflowChartConfig} className="h-[240px] w-full">
+                  <BarChart data={workflowExposureChartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+                    <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                    <XAxis dataKey="workflow" tickLine={false} axisLine={false} fontSize={11} />
+                    <YAxis tickLine={false} axisLine={false} fontSize={11} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Bar dataKey="amountPhp" fill="var(--color-amountPhp)" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="exposurePhp" fill="var(--color-exposurePhp)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ChartContainer>
+              </CardContent>
+            </Card>
+
+            <Card className="shadow-xs">
+              <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle className="text-sm font-semibold">CPA Approval Authority Matrix</CardTitle>
+                  <CardDescription className="text-xs">
+                    Server-enforced monetary thresholds and mandatory SoD tiers ({kpiDefinitions ? "KPI Contract Synced" : "Default Policy"}).
+                  </CardDescription>
+                </div>
+                <Badge variant="outline" className="text-xs font-mono">
+                  {approvalMatrix.length} Rules
+                </Badge>
+              </CardHeader>
+              <CardContent>
+                {approvalMatrix.length === 0 ? (
+                  <div className="text-xs text-muted-foreground py-8 text-center">
+                    No approval matrix rules returned from server.
+                  </div>
+                ) : (
+                  <div tabIndex={0} role="region" aria-label="Approval Authority Matrix" className="overflow-x-auto max-h-[240px]">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-border text-muted-foreground">
+                          <th scope="col" className="py-1.5 font-medium">Workflow / Stage</th>
+                          <th scope="col" className="py-1.5 font-medium">Role</th>
+                          <th scope="col" className="py-1.5 font-medium text-right">Threshold Range</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {approvalMatrix.map((rule) => (
+                          <tr key={rule.id} className="hover:bg-muted/30">
+                            <td className="py-1.5">
+                              <span className="font-mono font-medium text-primary">{rule.workflow}</span>
+                              <span className="block text-[10px] text-muted-foreground">{rule.stage}</span>
+                            </td>
+                            <td className="py-1.5">
+                              <Badge variant="secondary" className="text-[10px] font-mono">
+                                {rule.role}
+                              </Badge>
+                            </td>
+                            <td className="py-1.5 text-right font-mono tabular-nums">
+                              {formatPhpMinor(rule.min_amount_minor)} – {formatPhpMinor(rule.max_amount_minor)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -1106,16 +1539,16 @@ export function FinanceOperationsHub() {
                   No active exceptions in the register. All operations within policy boundaries.
                 </div>
               ) : (
-                <div className="overflow-x-auto">
+                <div tabIndex={0} role="region" aria-label="Operational Exception Register" className="overflow-x-auto">
                   <table className="w-full text-left text-xs">
                     <thead>
                       <tr className="border-b border-border text-muted-foreground">
-                        <th className="py-2 font-medium">Category</th>
-                        <th className="py-2 font-medium">Entity Reference</th>
-                        <th className="py-2 font-medium">Amount</th>
-                        <th className="py-2 font-medium">Reason / Disallowance</th>
-                        <th className="py-2 font-medium">Status</th>
-                        <th className="py-2 font-medium text-right">Action</th>
+                        <th scope="col" className="py-2 font-medium">Category</th>
+                        <th scope="col" className="py-2 font-medium">Entity Reference</th>
+                        <th scope="col" className="py-2 font-medium">Amount</th>
+                        <th scope="col" className="py-2 font-medium">Reason / Disallowance</th>
+                        <th scope="col" className="py-2 font-medium">Status</th>
+                        <th scope="col" className="py-2 font-medium text-right">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
@@ -1171,7 +1604,7 @@ export function FinanceOperationsHub() {
             <div>
               <h2 className="text-base font-semibold">Cash Advances & Controlled Disbursement</h2>
               <p className="text-xs text-muted-foreground">
-                Multi-tier approval with 6 distinct actors: Maker → Verifier → Bank Approver → Evidence Verifier.
+                Multi-tier approval with 6 distinct actors: Maker → Verifier → Bank Approver → Execution (1010/1015 Cut-Off) → Evidence Verifier.
               </p>
             </div>
             <Button
@@ -1186,20 +1619,20 @@ export function FinanceOperationsHub() {
 
           <Card className="shadow-xs">
             <CardContent className="p-0">
-              <div className="overflow-x-auto">
+              <div tabIndex={0} role="region" aria-label="Cash Advances Table" className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead>
                     <tr className="border-b border-border bg-muted/40 text-muted-foreground">
-                      <th className="py-3 px-4 font-medium">Advance #</th>
-                      <th className="py-3 px-4 font-medium">Employee</th>
-                      <th className="py-3 px-4 font-medium">Purpose</th>
-                      <th className="py-3 px-4 font-medium">Requested</th>
-                      <th className="py-3 px-4 font-medium">Date Needed</th>
-                      <th className="py-3 px-4 font-medium">Approval</th>
-                      <th className="py-3 px-4 font-medium">Payment State</th>
-                      <th className="py-3 px-4 font-medium">Settlement Status</th>
-                      <th className="py-3 px-4 font-medium">Balance</th>
-                      <th className="py-3 px-4 font-medium text-right">Actions</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Advance #</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Employee</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Purpose</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Requested</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Date Needed</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Approval</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Payment State</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Settlement Status</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Balance</th>
+                      <th scope="col" className="py-3 px-4 font-medium text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -1210,79 +1643,93 @@ export function FinanceOperationsHub() {
                         </td>
                       </tr>
                     ) : (
-                      advances.map((adv) => (
-                        <tr key={adv.id} className="hover:bg-muted/30">
-                          <td className="py-3 px-4 font-mono font-medium text-primary">
-                            {adv.advance_number}
-                          </td>
-                          <td className="py-3 px-4">{adv.employee_user_id || "Field Staff"}</td>
-                          <td className="py-3 px-4 max-w-xs truncate">{adv.purpose}</td>
-                          <td className="py-3 px-4">
-                            <CurrencyDisplay amountMinor={adv.requested_amount_minor} currency="PHP" size="sm" className="font-semibold" />
-                          </td>
-                          <td className="py-3 px-4 text-muted-foreground">{adv.needed_by_date}</td>
-                          <td className="py-3 px-4">
-                            <FinancialStatusBadge status={adv.approval_status} />
-                          </td>
-                          <td className="py-3 px-4">
-                            <FinancialStatusBadge status={adv.payment_status} />
-                          </td>
-                          <td className="py-3 px-4">
-                            <FinancialStatusBadge status={adv.settlement_status} />
-                          </td>
-                          <td className="py-3 px-4 font-bold text-secondary">
-                            <CurrencyDisplay
-                              amountMinor={adv.reconciliation?.outstanding_balance_minor ?? adv.requested_amount_minor}
-                              currency="PHP"
-                              size="sm"
-                              className="font-bold text-secondary"
-                            />
-                          </td>
-                          <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
-                            {/* Submit */}
-                            {adv.approval_status === "draft" && (
-                              <Button
+                      advances.map((adv) => {
+                        const isReleasedOrExecuted = ["released", "executed_unverified", "evidence_verified"].includes(
+                          adv.payment_status,
+                        )
+                        return (
+                          <tr key={adv.id} className="hover:bg-muted/30">
+                            <td className="py-3 px-4 font-mono font-medium text-primary">
+                              {adv.advance_number}
+                            </td>
+                            <td className="py-3 px-4">{adv.employee_user_id || "Field Staff"}</td>
+                            <td className="py-3 px-4 max-w-xs truncate">{adv.purpose}</td>
+                            <td className="py-3 px-4">
+                              <CurrencyDisplay amountMinor={adv.requested_amount_minor} currency="PHP" size="sm" className="font-semibold" />
+                            </td>
+                            <td className="py-3 px-4 text-muted-foreground">{adv.needed_by_date}</td>
+                            <td className="py-3 px-4">
+                              <FinancialStatusBadge status={adv.approval_status} />
+                            </td>
+                            <td className="py-3 px-4">
+                              <FinancialStatusBadge status={adv.payment_status} />
+                            </td>
+                            <td className="py-3 px-4">
+                              <FinancialStatusBadge status={adv.settlement_status} />
+                            </td>
+                            <td className="py-3 px-4 font-bold text-secondary">
+                              <CurrencyDisplay
+                                amountMinor={adv.reconciliation?.outstanding_balance_minor ?? adv.requested_amount_minor}
+                                currency="PHP"
                                 size="sm"
-                                variant="outline"
-                                className="h-7 text-xs"
-                                onClick={() => handleSubmitAdvance(adv.id)}
-                                disabled={actionLoading}
-                              >
-                                Submit
-                              </Button>
-                            )}
+                                className="font-bold text-secondary"
+                              />
+                            </td>
+                            <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
+                              {/* Submit */}
+                              {adv.approval_status === "draft" && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs"
+                                  onClick={() => handleSubmitAdvance(adv.id)}
+                                  disabled={actionLoading}
+                                >
+                                  Submit
+                                </Button>
+                              )}
 
-                            {/* Approve */}
-                            {adv.approval_status === "submitted" && (
-                              <Button
-                                size="sm"
-                                className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
-                                onClick={() => handleDecideAdvance(adv.id, "approved")}
-                                disabled={actionLoading}
-                              >
-                                Approve
-                              </Button>
-                            )}
+                              {/* Approve / Reject */}
+                              {adv.approval_status === "submitted" && (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                                    onClick={() => handleDecideAdvance(adv.id, "approved")}
+                                    disabled={actionLoading}
+                                  >
+                                    Approve
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    className="h-7 text-xs"
+                                    onClick={() => handleDecideAdvance(adv.id, "rejected")}
+                                    disabled={actionLoading}
+                                  >
+                                    Reject
+                                  </Button>
+                                </>
+                              )}
 
-                            {/* Prepare / View Disbursement */}
-                            {adv.approval_status === "approved" && adv.payment_status !== "released" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-xs"
-                                onClick={() => {
-                                  setSelectedAdvanceForDisburse(adv)
-                                  setDisbAmountPhp((adv.requested_amount_minor / 100).toString())
-                                  setShowDisburseModal(true)
-                                }}
-                              >
-                                Disburse (SoD)
-                              </Button>
-                            )}
+                              {/* Prepare / View Disbursement */}
+                              {adv.approval_status === "approved" && adv.payment_status !== "evidence_verified" && adv.payment_status !== "released" && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs"
+                                  onClick={() => {
+                                    setSelectedAdvanceForDisburse(adv)
+                                    setDisbAmountPhp(((adv.approved_amount_minor ?? adv.requested_amount_minor) / 100).toString())
+                                    setShowDisburseModal(true)
+                                  }}
+                                >
+                                  Disburse (SoD)
+                                </Button>
+                              )}
 
-                            {/* Record Cash Return */}
-                            {adv.payment_status === "released" &&
-                              adv.settlement_status !== "settled_zero" && (
+                              {/* Record Cash Return */}
+                              {isReleasedOrExecuted && adv.settlement_status !== "settled_zero" && (
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -1296,20 +1743,39 @@ export function FinanceOperationsHub() {
                                 </Button>
                               )}
 
-                            {/* Close Advance (Controller only) */}
-                            {adv.settlement_status === "settled_zero" && adv.approval_status !== "closed" && (
-                              <Button
-                                size="sm"
-                                className="h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white"
-                                onClick={() => handleCloseAdvance(adv.id)}
-                                disabled={actionLoading}
-                              >
-                                Close Advance
-                              </Button>
-                            )}
-                          </td>
-                        </tr>
-                      ))
+                              {/* Settle Excess Employee Reimbursement */}
+                              {isReleasedOrExecuted && adv.settlement_status !== "settled_zero" && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs"
+                                  onClick={() => {
+                                    setSelectedAdvanceForReimburse(adv)
+                                    setReimbAmountPhp(
+                                      ((adv.reconciliation?.excess_reimbursable_minor ?? 100000) / 100).toString(),
+                                    )
+                                    setShowReimbursementModal(true)
+                                  }}
+                                >
+                                  Reimburse
+                                </Button>
+                              )}
+
+                              {/* Close Advance (Controller only) */}
+                              {adv.settlement_status === "settled_zero" && adv.approval_status !== "closed" && (
+                                <Button
+                                  size="sm"
+                                  className="h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white"
+                                  onClick={() => handleCloseAdvance(adv.id)}
+                                  disabled={actionLoading}
+                                >
+                                  Close Advance
+                                </Button>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })
                     )}
                   </tbody>
                 </table>
@@ -1341,20 +1807,20 @@ export function FinanceOperationsHub() {
 
           <Card className="shadow-xs">
             <CardContent className="p-0">
-              <div className="overflow-x-auto">
+              <div tabIndex={0} role="region" aria-label="Expense Reports Table" className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead>
                     <tr className="border-b border-border bg-muted/40 text-muted-foreground">
-                      <th className="py-3 px-4 font-medium">Report #</th>
-                      <th className="py-3 px-4 font-medium">Employee</th>
-                      <th className="py-3 px-4 font-medium">Period</th>
-                      <th className="py-3 px-4 font-medium">Title / Purpose</th>
-                      <th className="py-3 px-4 font-medium">Total Reported</th>
-                      <th className="py-3 px-4 font-medium">Approved</th>
-                      <th className="py-3 px-4 font-medium">Lines</th>
-                      <th className="py-3 px-4 font-medium">Review Status</th>
-                      <th className="py-3 px-4 font-medium">Settlement Status</th>
-                      <th className="py-3 px-4 font-medium text-right">Actions</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Report #</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Employee</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Period</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Title / Purpose</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Total Reported</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Approved</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Lines</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Review Status</th>
+                      <th scope="col" className="py-3 px-4 font-medium">Settlement Status</th>
+                      <th scope="col" className="py-3 px-4 font-medium text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -1365,83 +1831,100 @@ export function FinanceOperationsHub() {
                         </td>
                       </tr>
                     ) : (
-                      expenses.map((exp) => (
-                        <tr key={exp.id} className="hover:bg-muted/30">
-                          <td className="py-3 px-4 font-mono font-medium text-primary">
-                            {exp.report_number}
-                          </td>
-                          <td className="py-3 px-4">{exp.employee_user_id || "Field Staff"}</td>
-                          <td className="py-3 px-4 font-mono">{exp.period_key}</td>
-                          <td className="py-3 px-4 max-w-xs truncate">{exp.title}</td>
-                          <td className="py-3 px-4">
-                            <CurrencyDisplay amountMinor={exp.total_reported_minor} currency="PHP" size="sm" className="font-semibold" />
-                          </td>
-                          <td className="py-3 px-4 font-semibold text-emerald-600">
-                            <CurrencyDisplay amountMinor={exp.total_approved_minor} currency="PHP" size="sm" className="font-semibold text-emerald-600" />
-                          </td>
-                          <td className="py-3 px-4">{exp.lines?.length || 0}</td>
-                          <td className="py-3 px-4">
-                            <FinancialStatusBadge status={exp.review_status} />
-                          </td>
-                          <td className="py-3 px-4">
-                            <FinancialStatusBadge status={exp.settlement_status} />
-                          </td>
-                          <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
-                            {/* Manage Lines */}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs"
-                              onClick={() => {
-                                setSelectedExpenseReport(exp)
-                                setShowAddLineModal(true)
-                              }}
-                            >
-                              Lines ({exp.lines?.length || 0})
-                            </Button>
-
-                            {/* Dry-run Policy Preview */}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs"
-                              onClick={() => handleEvaluatePolicyPreview(exp.id)}
-                              disabled={evaluatingReportId === exp.id}
-                            >
-                              {evaluatingReportId === exp.id ? (
-                                <Loader2 className="w-3 h-3 animate-spin" />
-                              ) : (
-                                "Evaluate Policy"
-                              )}
-                            </Button>
-
-                            {/* Submit */}
-                            {exp.submission_status === "draft" && (
+                      expenses.map((exp) => {
+                        const isSubmittedForReview =
+                          exp.submission_status === "submitted" ||
+                          exp.review_status === "submitted" ||
+                          exp.review_status === "under_review"
+                        return (
+                          <tr key={exp.id} className="hover:bg-muted/30">
+                            <td className="py-3 px-4 font-mono font-medium text-primary">
+                              {exp.report_number}
+                            </td>
+                            <td className="py-3 px-4">{exp.employee_user_id || "Field Staff"}</td>
+                            <td className="py-3 px-4 font-mono">{exp.period_key}</td>
+                            <td className="py-3 px-4 max-w-xs truncate">{exp.title}</td>
+                            <td className="py-3 px-4">
+                              <CurrencyDisplay amountMinor={exp.total_reported_minor} currency="PHP" size="sm" className="font-semibold" />
+                            </td>
+                            <td className="py-3 px-4 font-semibold text-emerald-600">
+                              <CurrencyDisplay amountMinor={exp.total_approved_minor} currency="PHP" size="sm" className="font-semibold text-emerald-600" />
+                            </td>
+                            <td className="py-3 px-4">{exp.lines?.length || 0}</td>
+                            <td className="py-3 px-4">
+                              <FinancialStatusBadge status={exp.review_status} />
+                            </td>
+                            <td className="py-3 px-4">
+                              <FinancialStatusBadge status={exp.settlement_status} />
+                            </td>
+                            <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
+                              {/* Manage Lines */}
                               <Button
                                 size="sm"
                                 variant="outline"
                                 className="h-7 text-xs"
-                                onClick={() => handleSubmitExpenseReport(exp.id)}
-                                disabled={actionLoading}
+                                onClick={() => {
+                                  setSelectedExpenseReport(exp)
+                                  setShowAddLineModal(true)
+                                }}
                               >
-                                Submit
+                                Lines ({exp.lines?.length || 0})
                               </Button>
-                            )}
 
-                            {/* Review (Finance Reviewer) */}
-                            {exp.submission_status === "submitted" && exp.review_status === "under_review" && (
+                              {/* Dry-run Policy Preview */}
                               <Button
                                 size="sm"
-                                className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
-                                onClick={() => handleReviewReport(exp, "approved")}
-                                disabled={actionLoading}
+                                variant="outline"
+                                className="h-7 text-xs"
+                                onClick={() => handleEvaluatePolicyPreview(exp.id)}
+                                disabled={evaluatingReportId === exp.id}
                               >
-                                Approve Lines
+                                {evaluatingReportId === exp.id ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  "Evaluate Policy"
+                                )}
                               </Button>
-                            )}
-                          </td>
-                        </tr>
-                      ))
+
+                              {/* Submit */}
+                              {exp.submission_status === "draft" && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs"
+                                  onClick={() => handleSubmitExpenseReport(exp.id)}
+                                  disabled={actionLoading}
+                                >
+                                  Submit
+                                </Button>
+                              )}
+
+                              {/* Review (Finance Reviewer) */}
+                              {isSubmittedForReview && (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                                    onClick={() => handleReviewReport(exp, "approved")}
+                                    disabled={actionLoading}
+                                  >
+                                    Approve All
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs"
+                                    onClick={() => handleReviewReport(exp, "partially_approved")}
+                                    disabled={actionLoading}
+                                  >
+                                    Partial Approve
+                                  </Button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })
                     )}
                   </tbody>
                 </table>
@@ -1526,14 +2009,14 @@ export function FinanceOperationsHub() {
       {/* TAB 4: PURCHASE-TO-PAY (P2P) */}
       {activeTab === "p2p" && (
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-base font-semibold">Purchase-to-Pay (P2P) & Vendor Verification</h2>
+              <h2 className="text-base font-semibold">Purchase-to-Pay (P2P), Vendors & BIR Tax Controls</h2>
               <p className="text-xs text-muted-foreground">
-                Independent vendor verification, purchase request approval matrix, and accounts payable invoice checks.
+                Independent KYC & Bank Change SoD, BIR Tax Codes, Purchase Request approvals, and 5-Step AP Disbursement.
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 size="sm"
                 variant="outline"
@@ -1542,6 +2025,15 @@ export function FinanceOperationsHub() {
               >
                 <Plus className="w-3.5 h-3.5" />
                 Add Vendor
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowTaxCodeModal(true)}
+                className="h-8 text-xs gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add BIR Tax Code
               </Button>
               <Button
                 size="sm"
@@ -1563,160 +2055,155 @@ export function FinanceOperationsHub() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Vendor Registry */}
-            <Card className="shadow-xs lg:col-span-1">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Vendor Registry & Bank Change SoD */}
+            <Card className="shadow-xs">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold flex items-center justify-between">
-                  <span>Vendors Registry</span>
+                  <span>Vendors & Bank Snapshot Registry</span>
                   <Badge variant="outline" className="text-xs font-mono">
                     {vendors.length}
                   </Badge>
                 </CardTitle>
                 <CardDescription className="text-xs">
-                  Creator != Verifier enforcement. Pending verification blocks payables.
+                  Creator != Verifier enforcement. Payout destination changes require separate SoD approval.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-2 p-3">
-                {vendors.map((v) => (
-                  <div key={v.id} className="p-2.5 rounded-lg border bg-background text-xs space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-primary">{v.registered_name || v.legal_name}</span>
-                      <Badge
-                        variant={v.verification_status === "verified" ? "default" : "outline"}
-                        className="text-[10px] uppercase font-mono"
-                      >
-                        {v.verification_status}
-                      </Badge>
-                    </div>
-                    <div className="text-muted-foreground flex items-center justify-between text-[11px]">
-                      <span>TIN: {v.tin || "N/A"}</span>
-                      <span>{v.payee_type || "supplier"}</span>
-                    </div>
-                    {v.verification_status !== "verified" && (() => {
-                      const roles: string[] = actorProfile?.roles || []
-                      const isVerifier = roles.some((r) =>
-                        ["verifier", "finance_reviewer", "finance_controller"].includes(r)
-                      )
-                      const isCreator = currentActorId === v.created_by_id
-                      const canVerify = isVerifier && !isCreator
-
-                      return (
-                        <div className="space-y-1 mt-1">
-                          <Button
-                            size="sm"
-                            variant={canVerify ? "default" : "outline"}
-                            className="w-full h-6 text-[10px]"
-                            onClick={() => handleVerifyVendor(v.id)}
-                            disabled={actionLoading || !canVerify}
-                          >
-                            {canVerify
-                              ? "Verify Vendor (Distinct CPA)"
-                              : isCreator
-                              ? "SoD: Created by You"
-                              : "Requires Verifier Role"}
-                          </Button>
-                          {!canVerify && (
-                            <p className="text-[9px] text-muted-foreground text-center">
-                              {isCreator
-                                ? "Separate CPA reviewer required"
-                                : "Switch to Diana Lim (Verifier) or Victoria Sy (Controller)"}
-                            </p>
-                          )}
-                        </div>
-                      )
-                    })()}
+              <CardContent className="space-y-2 p-3 max-h-[340px] overflow-y-auto">
+                {vendors.length === 0 ? (
+                  <div className="text-xs text-muted-foreground text-center py-6">
+                    No vendors registered yet. Click &quot;Add Vendor&quot; to onboard a supplier.
                   </div>
-                ))}
+                ) : (
+                  vendors.map((v) => {
+                    const pendingChanges = vendorBankChanges.filter((c) => c.vendor_id === v.id)
+                    return (
+                      <div key={v.id} className="p-2.5 rounded-lg border bg-background text-xs space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-primary">{v.registered_name || v.legal_name}</span>
+                          <div className="flex items-center gap-1.5">
+                            <FinancialStatusBadge status={v.verification_status} />
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 px-2 text-[10px]"
+                              onClick={() => {
+                                setSelectedVendorForBankChange(v)
+                                setShowBankChangeModal(true)
+                              }}
+                            >
+                              Bank Change (SoD)
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="text-muted-foreground flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                          <span>TIN: {v.tin || "N/A"} • {v.payee_type || "supplier"}</span>
+                          <span className="font-mono">
+                            {v.bank_name ? `${v.bank_name} (${v.bank_account_masked || "****"})` : "No bank snapshot"}
+                          </span>
+                        </div>
+                        {v.verification_status !== "verified" && (() => {
+                          const roles: string[] = actorProfile?.roles || []
+                          const isVerifier = roles.some((r) =>
+                            ["verifier", "finance_reviewer", "finance_controller"].includes(r)
+                          )
+                          const isCreator = currentActorId === (v.created_by_id || v.created_by_user_id)
+                          const canVerify = isVerifier && !isCreator
+
+                          return (
+                            <div className="space-y-1 mt-1">
+                              <Button
+                                size="sm"
+                                variant={canVerify ? "default" : "outline"}
+                                className="w-full h-6 text-[10px]"
+                                onClick={() => handleVerifyVendor(v.id)}
+                                disabled={actionLoading || !canVerify}
+                              >
+                                {canVerify
+                                  ? "Verify Vendor (Distinct CPA)"
+                                  : isCreator
+                                  ? "SoD: Created by You"
+                                  : "Requires Verifier Role"}
+                              </Button>
+                              {!canVerify && (
+                                <p className="text-[9px] text-muted-foreground text-center">
+                                  {isCreator
+                                    ? "Separate CPA reviewer required"
+                                    : "Switch to Verifier or Finance Controller"}
+                                </p>
+                              )}
+                            </div>
+                          )
+                        })()}
+                        {pendingChanges.map((chg) => (
+                          <div key={chg.id} className="mt-1 p-2 rounded border bg-muted/30 flex items-center justify-between gap-2 text-[11px]">
+                            <div>
+                              <span className="font-medium">Bank Change: {chg.new_bank_name} ({chg.masked_account_number})</span>
+                              <span className="ml-2 font-mono uppercase text-[10px]">[{chg.status}]</span>
+                            </div>
+                            {chg.status === "pending" && chg.requested_by_id !== currentActorId && (
+                              <div className="flex gap-1">
+                                <Button size="sm" className="h-6 text-[10px]" onClick={() => handleDecideBankChange(chg.id, "approved")}>
+                                  Approve
+                                </Button>
+                                <Button size="sm" variant="destructive" className="h-6 text-[10px]" onClick={() => handleDecideBankChange(chg.id, "rejected")}>
+                                  Reject
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })
+                )}
               </CardContent>
             </Card>
 
-            {/* Accounts Payable Registry */}
-            <Card className="shadow-xs lg:col-span-2">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold flex items-center justify-between">
-                  <span>Accounts Payable (AP)</span>
-                  <Badge variant="outline" className="text-xs font-mono">
-                    {payables.length}
-                  </Badge>
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Validated invoices with BIR tax codes (12% VAT, 1% / 2% EWT) and normalized duplicate checks.
-                </CardDescription>
+            {/* BIR Tax Codes Registry */}
+            <Card className="shadow-xs">
+              <CardHeader className="pb-3 flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle className="text-sm font-semibold">Philippine BIR Tax Codes Registry</CardTitle>
+                  <CardDescription className="text-xs">
+                    Effective-dated VAT & EWT profiles (RA 11976 EOPT / Form 2307). Never hardcoded globally.
+                  </CardDescription>
+                </div>
+                <Badge variant="outline" className="text-xs font-mono">
+                  {taxCodes.length} Codes
+                </Badge>
               </CardHeader>
               <CardContent className="p-0">
-                <div className="overflow-x-auto">
+                <div tabIndex={0} role="region" aria-label="BIR Tax Codes Table" className="overflow-x-auto max-h-[340px]">
                   <table className="w-full text-left text-xs">
                     <thead>
                       <tr className="border-b border-border bg-muted/40 text-muted-foreground">
-                        <th className="py-2.5 px-3 font-medium">AP #</th>
-                        <th className="py-2.5 px-3 font-medium">Invoice #</th>
-                        <th className="py-2.5 px-3 font-medium">Due Date</th>
-                        <th className="py-2.5 px-3 font-medium">Gross</th>
-                        <th className="py-2.5 px-3 font-medium">Net Payable</th>
-                        <th className="py-2.5 px-3 font-medium">Paid</th>
-                        <th className="py-2.5 px-3 font-medium">Status</th>
-                        <th className="py-2.5 px-3 font-medium text-right">Action</th>
+                        <th scope="col" className="py-2 px-3 font-medium">Code</th>
+                        <th scope="col" className="py-2 px-3 font-medium">Type</th>
+                        <th scope="col" className="py-2 px-3 font-medium text-right">Rate</th>
+                        <th scope="col" className="py-2 px-3 font-medium">2307</th>
+                        <th scope="col" className="py-2 px-3 font-medium">Status</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {payables.length === 0 ? (
+                      {taxCodes.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="py-6 text-center text-muted-foreground">
-                            No accounts payable records found.
+                          <td colSpan={5} className="py-6 text-center text-muted-foreground">
+                            No BIR tax codes registered. Click &quot;Add BIR Tax Code&quot; to register one.
                           </td>
                         </tr>
                       ) : (
-                        payables.map((ap) => (
-                          <tr key={ap.id} className="hover:bg-muted/30">
-                            <td className="py-2.5 px-3 font-mono font-medium text-primary">{ap.ap_number}</td>
-                            <td className="py-2.5 px-3 font-mono">{ap.invoice_number}</td>
-                            <td className="py-2.5 px-3 text-muted-foreground">{ap.due_date}</td>
-                            <td className="py-2.5 px-3">
-                              <CurrencyDisplay amountMinor={ap.gross_amount_minor} currency="PHP" size="sm" />
+                        taxCodes.map((tc, idx) => (
+                          <tr key={tc.id || tc.code || idx} className="hover:bg-muted/30">
+                            <td className="py-2 px-3">
+                              <span className="font-mono font-semibold text-primary block">{tc.code || tc.tax_code}</span>
+                              <span className="text-[10px] text-muted-foreground">{tc.description}</span>
                             </td>
-                            <td className="py-2.5 px-3 font-semibold text-secondary">
-                              <CurrencyDisplay amountMinor={ap.net_payable_minor} currency="PHP" size="sm" className="font-semibold text-secondary" />
-                            </td>
-                            <td className="py-2.5 px-3">
-                              <CurrencyDisplay amountMinor={ap.paid_amount_minor} currency="PHP" size="sm" className="text-emerald-600" />
-                            </td>
-                            <td className="py-2.5 px-3">
-                              <FinancialStatusBadge status={ap.payment_status || "open"} />
-                            </td>
-                            <td className="py-2.5 px-3 text-right">
-                              {(() => {
-                                const apRemainingBalance =
-                                  ap.remaining_balance_minor ??
-                                  ap.balance_minor ??
-                                  Math.max(0, (ap.net_payable_minor ?? 0) - (ap.paid_amount_minor ?? 0))
-                                return (
-                                  apRemainingBalance > 0 && (
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="h-6 text-[10px]"
-                                      onClick={async () => {
-                                        try {
-                                          const p = await preparePayablePayment(currentActorId, ap.id, {
-                                            payment_amount_minor: apRemainingBalance,
-                                            payment_method: "bank_transfer",
-                                          })
-                                          setFeedback({
-                                            type: "success",
-                                            message: `Prepared payment ${p.payment_number} for AP ${ap.ap_number}.`,
-                                          })
-                                          await loadData()
-                                        } catch (e: any) {
-                                          setFeedback({ type: "error", message: e.message })
-                                        }
-                                      }}
-                                    >
-                                      Disburse AP
-                                    </Button>
-                                  )
-                                )
-                              })()}
+                            <td className="py-2 px-3 font-mono uppercase">{tc.tax_type}</td>
+                            <td className="py-2 px-3 text-right font-mono">{(Number(tc.rate_bps || 0) / 100).toFixed(2)}%</td>
+                            <td className="py-2 px-3">{tc.requires_bir_2307 ? "BIR 2307" : "—"}</td>
+                            <td className="py-2 px-3">
+                              <FinancialStatusBadge status={tc.cpa_approved ? "approved" : "pending"} label={tc.cpa_approved ? "CPA Approved" : "Draft"} />
                             </td>
                           </tr>
                         ))
@@ -1727,6 +2214,171 @@ export function FinanceOperationsHub() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Purchase Requests Registry */}
+          <Card className="shadow-xs">
+            <CardHeader className="pb-3 flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-sm font-semibold">Purchase Requests (PR) Registry</CardTitle>
+                <CardDescription className="text-xs">
+                  Procurement authorization matrix prior to 3-way AP invoice matching.
+                </CardDescription>
+              </div>
+              <Badge variant="outline" className="text-xs font-mono">
+                {purchaseRequests.length} Requests
+              </Badge>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div tabIndex={0} role="region" aria-label="Purchase Requests Table" className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/40 text-muted-foreground">
+                      <th scope="col" className="py-2.5 px-3 font-medium">PR #</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Vendor</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Purpose</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Pay Date</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium text-right">Amount</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Approval</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {purchaseRequests.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-6 text-center text-muted-foreground">
+                          No purchase requests found. Click &quot;New Purchase Request&quot; to initiate procurement.
+                        </td>
+                      </tr>
+                    ) : (
+                      purchaseRequests.map((pr) => {
+                        const vendorNameLabel =
+                          vendors.find((v) => v.id === pr.vendor_id)?.registered_name || pr.vendor_id || "—"
+                        return (
+                          <tr key={pr.id} className="hover:bg-muted/30">
+                            <td className="py-2.5 px-3 font-mono font-medium text-primary">{pr.request_number || pr.pr_number}</td>
+                            <td className="py-2.5 px-3">{vendorNameLabel}</td>
+                            <td className="py-2.5 px-3 max-w-xs truncate">{pr.business_purpose || pr.purpose}</td>
+                            <td className="py-2.5 px-3 text-muted-foreground">{pr.requested_payment_date || "—"}</td>
+                            <td className="py-2.5 px-3 text-right">
+                              <CurrencyDisplay amountMinor={pr.requested_amount_minor ?? pr.total_estimated_minor} currency="PHP" size="sm" />
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <FinancialStatusBadge status={pr.approval_status} />
+                            </td>
+                            <td className="py-2.5 px-3 text-right space-x-1.5 whitespace-nowrap">
+                              {pr.approval_status === "draft" && (
+                                <Button size="sm" variant="outline" className="h-6 text-[10px]" onClick={() => handleSubmitPr(pr.id)} disabled={actionLoading}>
+                                  Submit PR
+                                </Button>
+                              )}
+                              {pr.approval_status === "submitted" && (
+                                <>
+                                  <Button size="sm" className="h-6 text-[10px] bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => handleApprovePr(pr.id)} disabled={actionLoading}>
+                                    Approve
+                                  </Button>
+                                  <Button size="sm" variant="destructive" className="h-6 text-[10px]" onClick={() => handleRejectPr(pr.id)} disabled={actionLoading}>
+                                    Reject
+                                  </Button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Accounts Payable Registry with 5-Step Payment SoD Drawer Trigger */}
+          <Card className="shadow-xs">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-semibold flex items-center justify-between">
+                <span>Accounts Payable (AP) &amp; 5-Step Payment SoD</span>
+                <Badge variant="outline" className="text-xs font-mono">
+                  {payables.length}
+                </Badge>
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Validated invoices with BIR tax codes (VAT / EWT), duplicate checks, and multi-actor payment settlement.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div tabIndex={0} role="region" aria-label="Accounts Payable Table" className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/40 text-muted-foreground">
+                      <th scope="col" className="py-2.5 px-3 font-medium">AP #</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Invoice #</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Tax Profile</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Due Date</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Gross</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Net Payable</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Paid</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Status</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {payables.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="py-6 text-center text-muted-foreground">
+                          No accounts payable records found.
+                        </td>
+                      </tr>
+                    ) : (
+                      payables.map((ap) => (
+                        <tr key={ap.id} className="hover:bg-muted/30">
+                          <td className="py-2.5 px-3 font-mono font-medium text-primary">{ap.payable_number || ap.ap_number}</td>
+                          <td className="py-2.5 px-3 font-mono">{ap.invoice_number}</td>
+                          <td className="py-2.5 px-3 text-[11px] font-mono">
+                            {[ap.vat_code, ap.ewt_code].filter(Boolean).join(" / ") || "Standard"}
+                          </td>
+                          <td className="py-2.5 px-3 text-muted-foreground">{ap.due_date}</td>
+                          <td className="py-2.5 px-3">
+                            <CurrencyDisplay amountMinor={ap.gross_amount_minor} currency="PHP" size="sm" />
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-secondary">
+                            <CurrencyDisplay amountMinor={ap.net_payable_minor} currency="PHP" size="sm" className="font-semibold text-secondary" />
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <CurrencyDisplay amountMinor={ap.paid_amount_minor} currency="PHP" size="sm" className="text-emerald-600" />
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <FinancialStatusBadge status={ap.payment_status || "open"} />
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            {(() => {
+                              const apRemainingBalance =
+                                ap.remaining_balance_minor ??
+                                ap.balance_minor ??
+                                Math.max(0, (ap.net_payable_minor ?? 0) - (ap.paid_amount_minor ?? 0))
+                              return (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-6 text-[10px]"
+                                  onClick={() => {
+                                    setSelectedPayableForPayment(ap)
+                                    setApPayAmountPhp(((apRemainingBalance > 0 ? apRemainingBalance : ap.net_payable_minor) / 100).toFixed(2))
+                                    setShowApPaymentModal(true)
+                                  }}
+                                >
+                                  5-Step Payment (SoD)
+                                </Button>
+                              )
+                            })()}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       )}
 
@@ -1925,9 +2577,9 @@ export function FinanceOperationsHub() {
         <div className="space-y-6">
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
             <div>
-              <h2 className="text-base font-semibold">Centralized Finance Record Tracker & Audit Chain</h2>
+              <h2 className="text-base font-semibold">Centralized Finance Record Tracker &amp; Audit Chain</h2>
               <p className="text-xs text-muted-foreground">
-                Read-model consolidating Advances, Reports, PRs, and Payables with formula-safe CSV export.
+                Read-model consolidating Advances, Reports, PRs, and Payables with formula-safe CSV export and tamper-evident SHA-256 verification.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -1956,19 +2608,19 @@ export function FinanceOperationsHub() {
 
           <Card className="shadow-xs">
             <CardContent className="p-0">
-              <div className="overflow-x-auto">
+              <div tabIndex={0} role="region" aria-label="Centralized Finance Tracker Table" className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead>
                     <tr className="border-b border-border bg-muted/40 text-muted-foreground">
-                      <th className="py-2.5 px-3 font-medium">Type</th>
-                      <th className="py-2.5 px-3 font-medium">Ref #</th>
-                      <th className="py-2.5 px-3 font-medium">Date</th>
-                      <th className="py-2.5 px-3 font-medium">Payee / Employee</th>
-                      <th className="py-2.5 px-3 font-medium">Category</th>
-                      <th className="py-2.5 px-3 font-medium">Gross</th>
-                      <th className="py-2.5 px-3 font-medium">Net / Balance</th>
-                      <th className="py-2.5 px-3 font-medium">Approval</th>
-                      <th className="py-2.5 px-3 font-medium">Payment State</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Type</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Ref #</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Date</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Payee / Employee</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Category</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Gross</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Net / Balance</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Approval</th>
+                      <th scope="col" className="py-2.5 px-3 font-medium">Payment State</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -2003,6 +2655,90 @@ export function FinanceOperationsHub() {
                           </td>
                           <td className="py-2.5 px-3">
                             <FinancialStatusBadge status={r.payment_status} />
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* SHA-256 Tamper-Evident Audit Chain Explorer */}
+          <Card className="shadow-xs">
+            <CardHeader className="pb-3 flex flex-wrap flex-row items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  Tamper-Evident SHA-256 Audit Chain Explorer
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Append-only cryptographic hash chain across financial transitions ({auditEventsData?.chain_integrity?.checked_count ?? filteredAuditEvents.length} verified events).
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <FinancialStatusBadge
+                  status={auditEventsData?.chain_integrity?.is_valid !== false ? "approved" : "rejected"}
+                  label={auditEventsData?.chain_integrity?.is_valid !== false ? "SHA-256 Valid" : "Tamper Alert"}
+                />
+                <select
+                  aria-label="Filter Audit Entity Type"
+                  value={auditEntityFilter}
+                  onChange={(e) => setAuditEntityFilter(e.target.value)}
+                  className="h-8 text-xs rounded-md border border-input bg-background px-2.5 py-1"
+                >
+                  <option value="all">All Entities</option>
+                  <option value="cash_advance">Cash Advance</option>
+                  <option value="disbursement">Disbursement</option>
+                  <option value="expense_report">Expense Report</option>
+                  <option value="vendor">Vendor</option>
+                  <option value="purchase_request">Purchase Request</option>
+                  <option value="account_payable">Account Payable</option>
+                  <option value="policy_version">Policy Version</option>
+                </select>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div tabIndex={0} role="region" aria-label="Audit Chain Events Table" className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/40 text-muted-foreground">
+                      <th scope="col" className="py-2 px-3 font-medium">Seq #</th>
+                      <th scope="col" className="py-2 px-3 font-medium">Timestamp</th>
+                      <th scope="col" className="py-2 px-3 font-medium">Actor</th>
+                      <th scope="col" className="py-2 px-3 font-medium">Action</th>
+                      <th scope="col" className="py-2 px-3 font-medium">Entity</th>
+                      <th scope="col" className="py-2 px-3 font-medium">Reason</th>
+                      <th scope="col" className="py-2 px-3 font-medium text-right">Record Hash</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {filteredAuditEvents.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-6 text-center text-muted-foreground">
+                          No audit chain events matching filter.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredAuditEvents.map((evt: any, idx: number) => (
+                        <tr key={evt.id || evt.sequence_no || idx} className="hover:bg-muted/30">
+                          <td className="py-2 px-3 font-mono text-primary">#{evt.sequence_no ?? idx + 1}</td>
+                          <td className="py-2 px-3 text-muted-foreground font-mono text-[11px]">
+                            {evt.occurred_at ? new Date(evt.occurred_at).toLocaleString("en-PH") : "—"}
+                          </td>
+                          <td className="py-2 px-3 font-mono">{evt.actor_id || evt.actor_role || "system"}</td>
+                          <td className="py-2 px-3 font-semibold">{evt.action}</td>
+                          <td className="py-2 px-3 text-muted-foreground">
+                            {evt.entity_type} {evt.entity_id ? `(${String(evt.entity_id).slice(0, 8)})` : ""}
+                          </td>
+                          <td className="py-2 px-3 max-w-xs truncate text-muted-foreground">{evt.reason || "—"}</td>
+                          <td className="py-2 px-3 text-right">
+                            <CopyableHash
+                              value={evt.record_hash || evt.hash || "0".repeat(64)}
+                              label="Audit Chain Hash"
+                              truncateLength={6}
+                            />
                           </td>
                         </tr>
                       ))
@@ -2088,13 +2824,18 @@ export function FinanceOperationsHub() {
         </div>
       )}
 
-      {/* MODAL 2: 6-PERSON SOD DISBURSEMENT DRAWER */}
+      {/* MODAL 2: 6-PERSON SOD DISBURSEMENT DRAWER (1010 vs 1015 Cut-Off) */}
       {showDisburseModal && selectedAdvanceForDisburse && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <Card className="w-full max-w-lg shadow-xl border-border animate-in fade-in zoom-in-95 duration-150">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="disburse-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+        >
+          <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl border-border animate-in fade-in zoom-in-95 duration-150">
             <CardHeader className="pb-3 flex flex-row items-center justify-between">
               <div>
-                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <CardTitle id="disburse-modal-title" className="text-sm font-semibold flex items-center gap-2">
                   <Landmark className="w-4 h-4 text-primary" />
                   Controlled Bank Disbursement (6-Person SoD)
                 </CardTitle>
@@ -2103,32 +2844,83 @@ export function FinanceOperationsHub() {
                   {(selectedAdvanceForDisburse.requested_amount_minor / 100).toFixed(2)}
                 </CardDescription>
               </div>
-              <button onClick={() => setShowDisburseModal(false)} className="text-muted-foreground hover:text-foreground">
+              <button
+                type="button"
+                aria-label="Close disbursement dialog"
+                onClick={() => setShowDisburseModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
                 <X className="w-4 h-4" />
               </button>
             </CardHeader>
             <CardContent className="space-y-4 text-xs">
               {/* SoD Pipeline Step Indicators */}
-              <div className="grid grid-cols-4 gap-1 text-center font-mono text-[10px]">
+              <div className="grid grid-cols-5 gap-1 text-center font-mono text-[10px]">
                 <div className="p-1.5 rounded bg-muted/50 border font-medium">1. Maker</div>
                 <div className="p-1.5 rounded bg-muted/50 border font-medium">2. Verifier</div>
                 <div className="p-1.5 rounded bg-muted/50 border font-medium">3. Bank Appr</div>
-                <div className="p-1.5 rounded bg-muted/50 border font-medium">4. Evidence</div>
+                <div className="p-1.5 rounded bg-muted/50 border font-medium">4. Execute</div>
+                <div className="p-1.5 rounded bg-muted/50 border font-medium">5. Evidence</div>
+              </div>
+
+              {/* 1010 vs 1015 Settlement Cut-Off Controls */}
+              <div className="p-2.5 rounded-lg border bg-muted/20 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-primary">Bank Settlement &amp; GL Cut-Off Mode</span>
+                  <FinancialStatusBadge
+                    status={disbIsSettledImmediately ? "approved" : "pending"}
+                    label={disbIsSettledImmediately ? "1010 Cash in Bank" : "1015 In Transit"}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={disbIsSettledImmediately}
+                      onChange={(e) => setDisbIsSettledImmediately(e.target.checked)}
+                      className="rounded border-input"
+                    />
+                    <span>Settled Immediately by Bank</span>
+                  </label>
+                  <Input
+                    type="date"
+                    aria-label="Bank Execution Date"
+                    value={disbExecutionDate}
+                    onChange={(e) => setDisbExecutionDate(e.target.value)}
+                    className="h-7 text-xs"
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  {disbIsSettledImmediately
+                    ? "At Execution: Dr 1140 Employee Advances / Cr 1010 Cash in Bank. Evidence Verification clears compliance only (non-posting)."
+                    : "At Execution: Dr 1140 / Cr 1015 Payment in Transit. Confirm Evidence posts clearing Dr 1015 / Cr 1010."}
+                </p>
               </div>
 
               {/* Step 1: Maker Form */}
               <form onSubmit={handleMakerPrepareDisbursement} className="space-y-3 border-t pt-3">
                 <span className="font-semibold text-primary block">Step 1: Maker Prepares Disbursement</span>
-                <div>
-                  <label className="block font-medium mb-1">Disbursement Amount (PHP)</label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={disbAmountPhp}
-                    onChange={(e) => setDisbAmountPhp(e.target.value)}
-                    required
-                    className="h-8 text-xs"
-                  />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-medium mb-1">Disbursement Amount (PHP)</label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={disbAmountPhp}
+                      onChange={(e) => setDisbAmountPhp(e.target.value)}
+                      required
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-medium mb-1">Bank Reference (for Execution)</label>
+                    <Input
+                      value={disbBankRef}
+                      onChange={(e) => setDisbBankRef(e.target.value)}
+                      required
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className="block font-medium mb-1">Recipient Account Reference</label>
@@ -2145,66 +2937,83 @@ export function FinanceOperationsHub() {
                 </Button>
               </form>
 
-              {/* Step 2-4: If disbursements already exist on advance */}
-              {selectedAdvanceForDisburse.disbursements?.map((d) => (
-                <div key={d.id} className="p-2.5 rounded border bg-muted/20 space-y-2">
-                  <div className="flex items-center justify-between font-mono">
-                    <span className="font-semibold">{d.disbursement_number}</span>
-                    <Badge variant="outline" className="text-[10px] uppercase">
-                      {d.status}
-                    </Badge>
+              {/* Step 2-5: Active Disbursements on Advance */}
+              {(() => {
+                const combinedDisb = [
+                  ...(selectedAdvanceForDisburse.disbursements ?? []),
+                  ...(disbursementsByAdvance[selectedAdvanceForDisburse.id] ?? []),
+                ]
+                const uniqueDisb = Array.from(new Map(combinedDisb.map((item) => [item.id, item])).values())
+                return uniqueDisb.map((d) => (
+                  <div key={d.id} className="p-2.5 rounded border bg-muted/20 space-y-2">
+                    <div className="flex items-center justify-between font-mono">
+                      <span className="font-semibold">{d.disbursement_number}</span>
+                      <FinancialStatusBadge status={d.status} />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1 text-[11px] text-muted-foreground">
+                      <span>Maker: {d.maker_user_id || d.maker_id}</span>
+                      <span>Verifier: {d.verifier_user_id || d.verifier_id || "Pending"}</span>
+                      <span>Bank Approver: {d.bank_approver_user_id || d.bank_approver_id || "Pending"}</span>
+                      <span>Executor: {d.executed_by_user_id || d.executed_by_id || "Pending"}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1">
+                      {d.status === "prepared" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full h-7 text-xs"
+                          disabled={actionLoading}
+                          onClick={() => handleVerifyDisbursement(selectedAdvanceForDisburse.id, d.id)}
+                        >
+                          Verify (Distinct Verifier)
+                        </Button>
+                      )}
+
+                      {d.status === "verified" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full h-7 text-xs bg-emerald-50 text-emerald-800 border-emerald-300"
+                          disabled={actionLoading}
+                          onClick={() => handleBankApproveDisbursement(selectedAdvanceForDisburse.id, d.id)}
+                        >
+                          Bank Approve (Bank Approver)
+                        </Button>
+                      )}
+
+                      {d.status === "bank_approved" && (
+                        <Button
+                          size="sm"
+                          className="w-full h-7 text-xs"
+                          disabled={actionLoading}
+                          onClick={() =>
+                            handleExecuteDisbursement(
+                              selectedAdvanceForDisburse.id,
+                              d.id,
+                              d.payment_amount_minor || d.amount_minor || 0,
+                            )
+                          }
+                        >
+                          Record Bank Execution ({disbIsSettledImmediately ? "1010 Cash" : "1015 Transit"})
+                        </Button>
+                      )}
+
+                      {d.status === "executed_unverified" && (
+                        <Button
+                          size="sm"
+                          className="w-full h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white"
+                          disabled={actionLoading}
+                          onClick={() => handleVerifyEvidenceDisbursement(selectedAdvanceForDisburse.id, d.id)}
+                        >
+                          Confirm Evidence (6th Actor)
+                        </Button>
+                      )}
+                    </div>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-1 text-[11px] text-muted-foreground">
-                    <span>Maker: {d.maker_user_id}</span>
-                    <span>Verifier: {d.verifier_user_id || "Pending"}</span>
-                  </div>
-
-                  <div className="flex items-center gap-2 pt-1">
-                    {d.status === "prepared" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="w-full h-7 text-xs"
-                        onClick={() => handleVerifyDisbursement(d.id)}
-                      >
-                        Verify (Distinct Verifier)
-                      </Button>
-                    )}
-
-                    {d.status === "verified" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="w-full h-7 text-xs bg-emerald-50 text-emerald-800 border-emerald-300"
-                        onClick={() => handleBankApproveDisbursement(d.id)}
-                      >
-                        Bank Approve (Bank Approver)
-                      </Button>
-                    )}
-
-                    {d.status === "bank_approved" && (
-                      <Button
-                        size="sm"
-                        className="w-full h-7 text-xs"
-                        onClick={() => handleExecuteDisbursement(d.id, d.payment_amount_minor || d.amount_minor || 0)}
-                      >
-                        Record Bank Execution & Evidence
-                      </Button>
-                    )}
-
-                    {d.status === "executed_unverified" && (
-                      <Button
-                        size="sm"
-                        className="w-full h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white"
-                        onClick={() => handleVerifyEvidenceDisbursement(d.id)}
-                      >
-                        Confirm Evidence (6th Actor)
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
+                ))
+              })()}
             </CardContent>
           </Card>
         </div>
@@ -2286,39 +3095,74 @@ export function FinanceOperationsHub() {
         </div>
       )}
 
-      {/* MODAL 4: ADD EXPENSE LINE */}
+      {/* MODAL 4: ADD EXPENSE LINE WITH TAX PROFILE */}
       {showAddLineModal && selectedExpenseReport && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <Card className="w-full max-w-md shadow-xl border-border animate-in fade-in zoom-in-95 duration-150">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="add-line-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+        >
+          <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl border-border animate-in fade-in zoom-in-95 duration-150">
             <CardHeader className="pb-3 flex flex-row items-center justify-between">
               <div>
-                <CardTitle className="text-sm font-semibold">Add Expense Line</CardTitle>
+                <CardTitle id="add-line-modal-title" className="text-sm font-semibold">Expense Lines &amp; Tax Breakdown</CardTitle>
                 <CardDescription className="text-xs font-mono">
-                  Report #{selectedExpenseReport.report_number}
+                  Report #{selectedExpenseReport.report_number} ({selectedExpenseReport.lines?.length || 0} existing lines)
                 </CardDescription>
               </div>
-              <button onClick={() => setShowAddLineModal(false)} className="text-muted-foreground hover:text-foreground">
+              <button
+                type="button"
+                aria-label="Close expense line dialog"
+                onClick={() => setShowAddLineModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
                 <X className="w-4 h-4" />
               </button>
             </CardHeader>
             <form onSubmit={handleAddExpenseLine}>
               <CardContent className="space-y-3 text-xs">
-                <div>
-                  <label className="block font-medium mb-1">Expense Category</label>
-                  <select
-                    value={lineCategory}
-                    onChange={(e) => setLineCategory(e.target.value)}
-                    className="w-full h-8 text-xs rounded-md border border-input bg-background px-2.5 py-1"
-                  >
-                    <option value="transportation">Transportation</option>
-                    <option value="fuel">Fuel & Toll</option>
-                    <option value="accommodation">Accommodation</option>
-                    <option value="meals">Meals</option>
-                    <option value="school_visit_materials">School Visit Materials</option>
-                    <option value="communication">Communication</option>
-                    <option value="representation">Representation</option>
-                    <option value="other">Other Operational</option>
-                  </select>
+                {selectedExpenseReport.lines && selectedExpenseReport.lines.length > 0 && (
+                  <div className="p-2 rounded border bg-muted/20 max-h-28 overflow-y-auto space-y-1">
+                    <span className="text-[10px] font-semibold uppercase text-muted-foreground block">Existing Lines</span>
+                    {selectedExpenseReport.lines.map((l) => (
+                      <div key={l.id} className="flex items-center justify-between text-[11px]">
+                        <span className="truncate">{l.category} — {l.merchant_name}</span>
+                        <span className="font-mono font-semibold">{formatPhpMinor(l.amount_minor)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-medium mb-1">Expense Category</label>
+                    <select
+                      value={lineCategory}
+                      onChange={(e) => setLineCategory(e.target.value)}
+                      className="w-full h-8 text-xs rounded-md border border-input bg-background px-2.5 py-1"
+                    >
+                      <option value="transportation">Transportation</option>
+                      <option value="fuel">Fuel &amp; Toll</option>
+                      <option value="accommodation">Accommodation</option>
+                      <option value="meals">Meals</option>
+                      <option value="school_visit_materials">School Visit Materials</option>
+                      <option value="communication">Communication</option>
+                      <option value="representation">Representation</option>
+                      <option value="other">Other Operational</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-medium mb-1">BIR Tax Profile</label>
+                    <select
+                      value={lineTaxCode}
+                      onChange={(e) => setLineTaxCode(e.target.value)}
+                      className="w-full h-8 text-xs rounded-md border border-input bg-background px-2.5 py-1"
+                    >
+                      <option value="VAT_12_INCL">VAT_12_INCL (12% Substantiated)</option>
+                      <option value="NON_VAT">NON_VAT (No Input VAT)</option>
+                      <option value="VAT_EXEMPT">VAT_EXEMPT</option>
+                    </select>
+                  </div>
                 </div>
                 <div>
                   <label className="block font-medium mb-1">Merchant / Payee</label>
@@ -2338,27 +3182,42 @@ export function FinanceOperationsHub() {
                     className="h-8 text-xs"
                   />
                 </div>
-                <div>
-                  <label className="block font-medium mb-1">Claimed Amount (PHP)</label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={lineAmountPhp}
-                    onChange={(e) => setLineAmountPhp(e.target.value)}
-                    required
-                    className="h-8 text-xs"
-                  />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-medium mb-1">Claimed Amount (PHP)</label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={lineAmountPhp}
+                      onChange={(e) => setLineAmountPhp(e.target.value)}
+                      required
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-medium mb-1">Receipt / OR Number</label>
+                    <Input
+                      value={lineReceiptNo}
+                      onChange={(e) => setLineReceiptNo(e.target.value)}
+                      placeholder="OR-99881"
+                      required
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block font-medium mb-1">Receipt / OR Number</label>
-                  <Input
-                    value={lineReceiptNo}
-                    onChange={(e) => setLineReceiptNo(e.target.value)}
-                    placeholder="OR-99881"
-                    required
-                    className="h-8 text-xs font-mono"
-                  />
-                </div>
+                {(() => {
+                  const grossMinor = Math.round(parseFloat(lineAmountPhp || "0") * 100) || 0
+                  const split =
+                    lineTaxCode === "VAT_12_INCL"
+                      ? calculateVatInclusiveSplitCentavos(grossMinor, 1200)
+                      : { netBaseCentavos: grossMinor, vatCentavos: 0, grossCentavos: grossMinor }
+                  return (
+                    <div className="grid grid-cols-2 gap-2 p-2 rounded border bg-muted/20 text-[11px] font-mono">
+                      <span>Net Expense Base: <strong>{formatPhpMinor(split.netBaseCentavos)}</strong></span>
+                      <span>Input VAT (1160): <strong>{formatPhpMinor(split.vatCentavos)}</strong></span>
+                    </div>
+                  )
+                })()}
                 <div>
                   <label className="block font-medium mb-1">Site / Destination</label>
                   <Input
@@ -2499,16 +3358,26 @@ export function FinanceOperationsHub() {
 
       {/* MODAL 7: NEW PURCHASE REQUEST */}
       {showPrModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pr-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+        >
           <Card className="w-full max-w-md shadow-xl border-border animate-in fade-in zoom-in-95 duration-150">
             <CardHeader className="pb-3 flex flex-row items-center justify-between">
               <div>
-                <CardTitle className="text-sm font-semibold">New Purchase Request</CardTitle>
+                <CardTitle id="pr-modal-title" className="text-sm font-semibold">New Purchase Request</CardTitle>
                 <CardDescription className="text-xs">
                   Initiate vendor procurement subject to matrix limits.
                 </CardDescription>
               </div>
-              <button onClick={() => setShowPrModal(false)} className="text-muted-foreground hover:text-foreground">
+              <button
+                type="button"
+                aria-label="Close purchase request dialog"
+                onClick={() => setShowPrModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
                 <X className="w-4 h-4" />
               </button>
             </CardHeader>
@@ -2523,9 +3392,21 @@ export function FinanceOperationsHub() {
                   >
                     {vendors.map((v) => (
                       <option key={v.id} value={v.id}>
-                        {v.legal_name} ({v.verification_status})
+                        {v.registered_name || v.legal_name} ({v.verification_status})
                       </option>
                     ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-medium mb-1">Payment Category</label>
+                  <select
+                    value={prCategory}
+                    onChange={(e) => setPrCategory(e.target.value)}
+                    className="w-full h-8 text-xs rounded-md border border-input bg-background px-2.5 py-1"
+                  >
+                    <option value="supplier_invoice">Supplier Invoice (Goods)</option>
+                    <option value="services">Professional / Service Contract</option>
+                    <option value="utility">Utility Billing</option>
                   </select>
                 </div>
                 <div>
@@ -2554,7 +3435,7 @@ export function FinanceOperationsHub() {
                   Cancel
                 </Button>
                 <Button type="submit" size="sm" disabled={actionLoading}>
-                  Create & Submit PR
+                  Create PR
                 </Button>
               </CardFooter>
             </form>
@@ -2564,16 +3445,26 @@ export function FinanceOperationsHub() {
 
       {/* MODAL 8: VALIDATE ACCOUNT PAYABLE */}
       {showPayableModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="payable-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+        >
           <Card className="w-full max-w-md shadow-xl border-border animate-in fade-in zoom-in-95 duration-150">
             <CardHeader className="pb-3 flex flex-row items-center justify-between">
               <div>
-                <CardTitle className="text-sm font-semibold">Validate Account Payable</CardTitle>
+                <CardTitle id="payable-modal-title" className="text-sm font-semibold">Validate Account Payable</CardTitle>
                 <CardDescription className="text-xs">
-                  3-way match against approved PR with automated tax code calculation.
+                  3-way match against approved PR with automated BIR tax code calculation.
                 </CardDescription>
               </div>
-              <button onClick={() => setShowPayableModal(false)} className="text-muted-foreground hover:text-foreground">
+              <button
+                type="button"
+                aria-label="Close validate payable dialog"
+                onClick={() => setShowPayableModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
                 <X className="w-4 h-4" />
               </button>
             </CardHeader>
@@ -2588,7 +3479,7 @@ export function FinanceOperationsHub() {
                   >
                     {purchaseRequests.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.pr_number} — PHP {p.total_estimated?.toFixed(2)} ({p.approval_status})
+                        {p.request_number || p.pr_number} — PHP {(Number(p.requested_amount_minor ?? p.total_estimated_minor ?? 0) / 100).toFixed(2)} ({p.approval_status})
                       </option>
                     ))}
                   </select>
@@ -2622,6 +3513,32 @@ export function FinanceOperationsHub() {
                       required
                       className="h-8 text-xs"
                     />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-medium mb-1">VAT Code</label>
+                    <select
+                      value={apVatCode}
+                      onChange={(e) => setApVatCode(e.target.value)}
+                      className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 py-1"
+                    >
+                      <option value="VAT12">VAT12 (12% VAT)</option>
+                      <option value="NONVAT">NONVAT (Exempt)</option>
+                      <option value="ZERO">ZERO (0% Rated)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-medium mb-1">EWT Code</label>
+                    <select
+                      value={apEwtCode}
+                      onChange={(e) => setApEwtCode(e.target.value)}
+                      className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 py-1"
+                    >
+                      <option value="EWT1">EWT1 (1% Goods)</option>
+                      <option value="EWT2">EWT2 (2% Services)</option>
+                      <option value="NONE">NONE</option>
+                    </select>
                   </div>
                 </div>
                 <div>
@@ -2776,6 +3693,319 @@ export function FinanceOperationsHub() {
                 </Button>
               </CardFooter>
             </form>
+          </Card>
+        </div>
+      )}
+
+      {/* MODAL 11: SETTLE EMPLOYEE REIMBURSEMENT */}
+      {showReimbursementModal && selectedAdvanceForReimburse && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reimburse-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+        >
+          <Card className="w-full max-w-md shadow-xl border-border animate-in fade-in zoom-in-95 duration-150">
+            <CardHeader className="pb-3 flex flex-row items-center justify-between">
+              <div>
+                <CardTitle id="reimburse-modal-title" className="text-sm font-semibold">
+                  Settle Employee Reimbursement (2020)
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Advance {selectedAdvanceForReimburse.advance_number} — Excess approved expenses payable to employee.
+                </CardDescription>
+              </div>
+              <button
+                type="button"
+                aria-label="Close reimbursement dialog"
+                onClick={() => setShowReimbursementModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </CardHeader>
+            <form onSubmit={handleReimburseAdvance}>
+              <CardContent className="space-y-3 text-xs">
+                <div>
+                  <label className="block font-medium mb-1">Reimbursement Settlement Amount (PHP)</label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={reimbAmountPhp}
+                    onChange={(e) => setReimbAmountPhp(e.target.value)}
+                    required
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium mb-1">Bank Transfer Reference</label>
+                  <Input
+                    value={reimbBankRef}
+                    onChange={(e) => setReimbBankRef(e.target.value)}
+                    required
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+              </CardContent>
+              <CardFooter className="flex justify-end gap-2 pt-2 border-t">
+                <Button type="button" variant="outline" size="sm" onClick={() => setShowReimbursementModal(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" size="sm" disabled={actionLoading}>
+                  Confirm Reimbursement Settlement
+                </Button>
+              </CardFooter>
+            </form>
+          </Card>
+        </div>
+      )}
+
+      {/* MODAL 12: VENDOR BANK CHANGE REQUEST (SOD) */}
+      {showBankChangeModal && selectedVendorForBankChange && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bank-change-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+        >
+          <Card className="w-full max-w-md shadow-xl border-border animate-in fade-in zoom-in-95 duration-150">
+            <CardHeader className="pb-3 flex flex-row items-center justify-between">
+              <div>
+                <CardTitle id="bank-change-modal-title" className="text-sm font-semibold">
+                  Request Vendor Bank Change (SoD)
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  {selectedVendorForBankChange.registered_name} — Requires independent treasury approver.
+                </CardDescription>
+              </div>
+              <button
+                type="button"
+                aria-label="Close bank change dialog"
+                onClick={() => setShowBankChangeModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </CardHeader>
+            <form onSubmit={handleRequestBankChange}>
+              <CardContent className="space-y-3 text-xs">
+                <div>
+                  <label className="block font-medium mb-1">New Bank Name</label>
+                  <Input value={vbNewBankName} onChange={(e) => setVbNewBankName(e.target.value)} required className="h-8 text-xs" />
+                </div>
+                <div>
+                  <label className="block font-medium mb-1">New Bank Account Number</label>
+                  <Input value={vbAccountNo} onChange={(e) => setVbAccountNo(e.target.value)} required className="h-8 text-xs font-mono" />
+                </div>
+                <div>
+                  <label className="block font-medium mb-1">New Bank Account Reference</label>
+                  <Input value={vbAccountRef} onChange={(e) => setVbAccountRef(e.target.value)} required className="h-8 text-xs font-mono" />
+                </div>
+                <div>
+                  <label className="block font-medium mb-1">Change Reason</label>
+                  <Input value={vbReason} onChange={(e) => setVbReason(e.target.value)} required className="h-8 text-xs" />
+                </div>
+              </CardContent>
+              <CardFooter className="flex justify-end gap-2 pt-2 border-t">
+                <Button type="button" variant="outline" size="sm" onClick={() => setShowBankChangeModal(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" size="sm" disabled={actionLoading}>
+                  Submit Bank Change
+                </Button>
+              </CardFooter>
+            </form>
+          </Card>
+        </div>
+      )}
+
+      {/* MODAL 13: REGISTER BIR TAX CODE */}
+      {showTaxCodeModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="tax-code-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+        >
+          <Card className="w-full max-w-md shadow-xl border-border animate-in fade-in zoom-in-95 duration-150">
+            <CardHeader className="pb-3 flex flex-row items-center justify-between">
+              <div>
+                <CardTitle id="tax-code-modal-title" className="text-sm font-semibold">
+                  Register BIR Tax Code Profile
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Effective-dated VAT / EWT / Percentage Tax profile under RA 11976 EOPT.
+                </CardDescription>
+              </div>
+              <button
+                type="button"
+                aria-label="Close tax code dialog"
+                onClick={() => setShowTaxCodeModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </CardHeader>
+            <form onSubmit={handleCreateTaxCode}>
+              <CardContent className="space-y-3 text-xs">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-medium mb-1">Tax Code</label>
+                    <Input value={tcCode} onChange={(e) => setTcCode(e.target.value)} required className="h-8 text-xs font-mono" />
+                  </div>
+                  <div>
+                    <label className="block font-medium mb-1">Tax Type</label>
+                    <select
+                      value={tcType}
+                      onChange={(e) => setTcType(e.target.value)}
+                      className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 py-1"
+                    >
+                      <option value="VAT">VAT</option>
+                      <option value="EWT">EWT</option>
+                      <option value="PERCENTAGE">PERCENTAGE</option>
+                      <option value="EXEMPT">EXEMPT</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block font-medium mb-1">Description</label>
+                  <Input value={tcDesc} onChange={(e) => setTcDesc(e.target.value)} required className="h-8 text-xs" />
+                </div>
+                <div>
+                  <label className="block font-medium mb-1">Tax Rate (%)</label>
+                  <Input type="number" step="0.01" value={tcRatePct} onChange={(e) => setTcRatePct(e.target.value)} required className="h-8 text-xs font-mono" />
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={tcRequires2307} onChange={(e) => setTcRequires2307(e.target.checked)} />
+                  <span>Requires BIR Form 2307 Certificate</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={tcCpaApproved} onChange={(e) => setTcCpaApproved(e.target.checked)} />
+                  <span>CPA Sign-Off Verified</span>
+                </label>
+              </CardContent>
+              <CardFooter className="flex justify-end gap-2 pt-2 border-t">
+                <Button type="button" variant="outline" size="sm" onClick={() => setShowTaxCodeModal(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" size="sm" disabled={actionLoading}>
+                  Save Tax Code
+                </Button>
+              </CardFooter>
+            </form>
+          </Card>
+        </div>
+      )}
+
+      {/* MODAL 14: 5-STEP ACCOUNTS PAYABLE PAYMENT SOD DRAWER */}
+      {showApPaymentModal && selectedPayableForPayment && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ap-payment-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+        >
+          <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl border-border animate-in fade-in zoom-in-95 duration-150">
+            <CardHeader className="pb-3 flex flex-row items-center justify-between">
+              <div>
+                <CardTitle id="ap-payment-modal-title" className="text-sm font-semibold flex items-center gap-2">
+                  <Landmark className="w-4 h-4 text-primary" />
+                  5-Step AP Payment SoD Workflow
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  {selectedPayableForPayment.payable_number || selectedPayableForPayment.ap_number} — Net{" "}
+                  {formatPhpMinor(selectedPayableForPayment.net_payable_minor)}
+                </CardDescription>
+              </div>
+              <button
+                type="button"
+                aria-label="Close AP payment drawer"
+                onClick={() => setShowApPaymentModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </CardHeader>
+            <CardContent className="space-y-4 text-xs">
+              <div className="grid grid-cols-5 gap-1 text-center font-mono text-[10px]">
+                <div className="p-1.5 rounded bg-muted/50 border font-medium">1. Prepare</div>
+                <div className="p-1.5 rounded bg-muted/50 border font-medium">2. Verify</div>
+                <div className="p-1.5 rounded bg-muted/50 border font-medium">3. Bank Appr</div>
+                <div className="p-1.5 rounded bg-muted/50 border font-medium">4. Execute</div>
+                <div className="p-1.5 rounded bg-muted/50 border font-medium">5. Reconcile</div>
+              </div>
+
+              <form onSubmit={handleMakerPrepareApPayment} className="space-y-3 border-t pt-3">
+                <span className="font-semibold text-primary block">Step 1: Maker Prepares AP Payment</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-medium mb-1">Payment Amount (PHP)</label>
+                    <Input type="number" step="0.01" value={apPayAmountPhp} onChange={(e) => setApPayAmountPhp(e.target.value)} required className="h-8 text-xs" />
+                  </div>
+                  <div>
+                    <label className="block font-medium mb-1">Method</label>
+                    <select
+                      value={apPayMethod}
+                      onChange={(e) => setApPayMethod(e.target.value)}
+                      className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 py-1"
+                    >
+                      <option value="bank_transfer">Bank Transfer / PESONet</option>
+                      <option value="check">Corporate Check</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-medium mb-1">Execution Date</label>
+                    <Input type="date" value={apPayExecDate} onChange={(e) => setApPayExecDate(e.target.value)} className="h-8 text-xs" />
+                  </div>
+                  <div>
+                    <label className="block font-medium mb-1">Bank Reference</label>
+                    <Input value={apPayBankRef} onChange={(e) => setApPayBankRef(e.target.value)} className="h-8 text-xs font-mono" />
+                  </div>
+                </div>
+                <Button type="submit" size="sm" className="w-full text-xs" disabled={actionLoading}>
+                  Prepare AP Payment (Maker)
+                </Button>
+              </form>
+
+              {(paymentsByPayable[selectedPayableForPayment.id] ?? []).map((p) => (
+                <div key={p.id} className="p-2.5 rounded border bg-muted/20 space-y-2">
+                  <div className="flex items-center justify-between font-mono">
+                    <span className="font-semibold">{p.payment_number} — {formatPhpMinor(p.payment_amount_minor)}</span>
+                    <FinancialStatusBadge status={p.status} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-1 text-[11px] text-muted-foreground">
+                    <span>Maker: {p.maker_id}</span>
+                    <span>Verifier: {p.verifier_id || "Pending"}</span>
+                    <span>Bank Approver: {p.bank_approver_id || "Pending"}</span>
+                    <span>Executed By: {p.executed_by_id || "Pending"}</span>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    {p.status === "prepared" && (
+                      <Button size="sm" variant="outline" className="w-full h-7 text-xs" disabled={actionLoading} onClick={() => handleAdvanceApPaymentStep(selectedPayableForPayment.id, p, "verify")}>
+                        Step 2: Verify Payment (Verifier)
+                      </Button>
+                    )}
+                    {p.status === "verified" && (
+                      <Button size="sm" variant="outline" className="w-full h-7 text-xs" disabled={actionLoading} onClick={() => handleAdvanceApPaymentStep(selectedPayableForPayment.id, p, "bank_approve")}>
+                        Step 3: Bank Approve (Bank Approver)
+                      </Button>
+                    )}
+                    {p.status === "bank_approved" && (
+                      <Button size="sm" className="w-full h-7 text-xs" disabled={actionLoading} onClick={() => handleAdvanceApPaymentStep(selectedPayableForPayment.id, p, "execute")}>
+                        Step 4: Execute Bank Transfer
+                      </Button>
+                    )}
+                    {(p.status === "executed_unverified" || p.status === "executed") && (
+                      <Button size="sm" className="w-full h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white" disabled={actionLoading} onClick={() => handleAdvanceApPaymentStep(selectedPayableForPayment.id, p, "reconcile")}>
+                        Step 5: Reconcile Evidence &amp; GL
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </CardContent>
           </Card>
         </div>
       )}
