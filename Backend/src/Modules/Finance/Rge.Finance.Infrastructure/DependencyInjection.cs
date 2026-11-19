@@ -26,6 +26,7 @@ public static class DependencyInjection
         services.AddSingleton<ISodGuard, SodGuard>();
 
         // Domain repositories
+        services.AddScoped<Rge.BuildingBlocks.Application.Behaviors.RequestPipelineExecutor>();
         services.AddScoped<ICashAdvanceRepository, CashAdvanceRepository>();
         services.AddScoped<IDisbursementRepository, DisbursementRepository>();
         services.AddScoped<IExpenseReportRepository, ExpenseReportRepository>();
