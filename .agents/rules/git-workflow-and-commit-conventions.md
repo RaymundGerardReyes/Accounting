@@ -170,6 +170,23 @@ description: Repository rules for Conventional Commits, scoped staging, secret p
          heroku buildpacks:add --index 2 https://github.com/jincod/dotnetcore-buildpack.git -a <app-name>
          ```
 
+19. **Git Release Versioning, Pre-Push Tag Protection, and Scoped Staging Invariants**:
+    - **ADR 0011 Invariant & Version Sync Engine**:
+      - `package.json` and `Frontend/package.json` must strictly remain `"version": "0.0.0-managed"`.
+      - The authoritative version is maintained in the root `VERSION` file (e.g. `0.5.37`) and injected into `Frontend/.env.production.local` (`NEXT_PUBLIC_APP_VERSION`, `NEXT_PUBLIC_APP_LINE=dotnet`).
+      - Use `python scripts/git_workflow.py version` to inspect versions and `python scripts/git_workflow.py bump --type patch` (or `--type minor`) to update `VERSION` without corrupting `package.json`.
+    - **Pre-Push Tag Protection & Shell Authorization**:
+      - `.githooks/pre-push` blocks all tag pushes unless explicitly authorized by the developer with `ALLOW_TAG_PUSH=1`.
+      - Automated agents and scripts are forbidden from pushing tags autonomously.
+      - To push an authorized tag, explicitly execute in your shell:
+        - **Git Bash / sh**: `ALLOW_TAG_PUSH=1 git push origin <tag_name>` (or `ALLOW_TAG_PUSH=1 git push origin Checkout-test --tags`)
+        - **PowerShell**: `$env:ALLOW_TAG_PUSH = '1'; git push origin <tag_name>; Remove-Item Env:ALLOW_TAG_PUSH`
+    - **Scoped Staging for UI/UX & Tests**:
+      - Never run `git add .` or stage unrelated scratch notes (`DO NOT Delete this.txt`, `FinanceRecording.txt`).
+      - Stage frontend implementation files under scope `frontend` (`python scripts/git_workflow.py add --scope frontend`) and commit with `feat(frontend): <desc>`.
+      - Stage test files under scope `test` (`python scripts/git_workflow.py add --scope test`) and commit with `test(frontend): <desc>`.
+
+
 
 
 

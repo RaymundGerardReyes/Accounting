@@ -58,4 +58,9 @@ description: Frontend defensive aggregation invariants, collection reducers, API
 - **Non-Blocking Background Sync**: If the payment attempt returned by the local-first fetch is non-terminal (`Pending` / `RequiresAction`), the component may trigger asynchronous background reconciliation (`auto_reconcile=true`) without reverting the UI to a full-screen blocking loader (`loading = false` remains preserved; only a local button/card spinner `isReconciling = true` is displayed).
 - **SignalR-First Coordination**: When SignalR is connected (`isSignalRConnected === true`), disable aggressive multi-second polling loops. The real-time hub pushes `PaymentStatusChanged` within milliseconds of webhook arrival or background worker reconciliation. When disconnected, fallback polling must default to `auto_reconcile=false` with a relaxed cadence (>= 6s) to avoid gateway rate-limit saturation.
 
+## 9. Minimal API Symmetric Dual-Key Payloads & Graceful Test Fallback
+- **Symmetric Dual-Key Contracts with `.NET 10` Minimal APIs**: When Minimal API request DTOs use `JsonPropertyName` snake_case fields (`employee_id`, `business_purpose`, `amount_minor`, `outcome`, `lines`) that differ slightly from earlier client helper properties (`purpose_code`, `returned_amount_minor`, `report_decision`), client API helpers must emit both keys symmetrically and normalize both camelCase and snake_case responses cleanly so zero endpoints fail binding silently.
+- **Live Backend with Graceful Test Fallback**: Components such as `OfficialGeneralLedgerTab` must query live backend APIs (`/api/v1/finance/gl/*`) while preserving deterministic initial seed fallbacks when running offline or in unit tests.
+
+
 
