@@ -45,21 +45,35 @@ public sealed class ReceiptEmailBackgroundWorker : BackgroundService
         _logger = logger;
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Spawn bounded concurrent consumers so one slow SMTP handshake never blocks other receipts
-        var consumers = Enumerable.Range(1, WorkerConcurrency)
-            .Select(workerId => ConsumeQueueLoopAsync(workerId, stoppingToken))
-            .ToArray();
+        try
+        {
+            // Spawn bounded concurrent consumers so one slow SMTP handshake never blocks other receipts
+            var consumers = Enumerable.Range(1, WorkerConcurrency)
+                .Select(workerId => ConsumeQueueLoopAsync(workerId, stoppingToken))
+                .ToArray();
 
-        return Task.WhenAll(consumers);
+            await Task.WhenAll(consumers).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            _logger.LogInformation("[RECEIPT-WORKER-STOPPED] Receipt email background worker stopped gracefully.");
+        }
     }
 
     private async Task ConsumeQueueLoopAsync(int workerId, CancellationToken stoppingToken)
     {
-        await foreach (var job in _queue.ReadAllAsync(stoppingToken).ConfigureAwait(false))
+        try
         {
-            await ProcessEmailJobWithRetryAsync(workerId, job, stoppingToken).ConfigureAwait(false);
+            await foreach (var job in _queue.ReadAllAsync(stoppingToken).ConfigureAwait(false))
+            {
+                await ProcessEmailJobWithRetryAsync(workerId, job, stoppingToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Graceful shutdown: stoppingToken signaled cancellation while reading from channel
         }
     }
 
