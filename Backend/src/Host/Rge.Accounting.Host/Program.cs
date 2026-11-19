@@ -55,6 +55,14 @@ if (string.IsNullOrEmpty(configuredUrls))
 builder.ConfigureHardenedKestrel();
 // 2. Fail fast if secrets are missing or using compromised legacy keys in non-Development
 SecretsConfiguration.ValidateRequiredSecretsOrThrow(builder.Configuration, builder.Environment);
+
+builder.Host.UseDefaultServiceProvider((context, options) =>
+{
+    bool validate = context.HostingEnvironment.IsDevelopment() || context.HostingEnvironment.IsEnvironment("Testing");
+    options.ValidateScopes = validate;
+    options.ValidateOnBuild = validate;
+});
+
 // 3. Register platform services, JSON snake_case source-generation, rate limiting, and observability
 builder.Services.AddAccountingPlatformHost(builder.Configuration);
 var app = builder.Build();

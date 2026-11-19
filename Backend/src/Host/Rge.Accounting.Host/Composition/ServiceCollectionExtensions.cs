@@ -11,6 +11,7 @@ using Rge.Audit.Api;
 using Rge.Audit.Infrastructure;
 using Rge.BuildingBlocks.Api.Serialization;
 using Rge.BuildingBlocks.Application.Abstractions;
+using Rge.BuildingBlocks.Application.Behaviors;
 using Rge.BuildingBlocks.Application.Messaging;
 using Rge.BuildingBlocks.Infrastructure.Caching;
 using Rge.BuildingBlocks.Infrastructure.Outbox;
@@ -397,6 +398,7 @@ public static class ServiceCollectionExtensions
         services.AddHybridCache();
 #pragma warning restore EXTEXP0018
         services.AddSingleton<CacheInvalidator>();
+        services.AddSingleton<IApplicationCache>(sp => sp.GetRequiredService<CacheInvalidator>());
         services.AddSingleton<DbDataSource>(sp =>
         {
             var cfg = sp.GetRequiredService<IConfiguration>();
@@ -424,6 +426,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<NpgsqlDataSourceFactory>();
         services.AddScoped<ConnectionScope>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();
+        services.AddScoped<RequestPipelineExecutor>();
 
         // 2. Transactional Outbox & In-Process Event Dispatcher
         services.AddSingleton<OutboxLeaseManager>();

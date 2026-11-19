@@ -70,6 +70,9 @@
   <Folder Name="/Backend/tests/Modules/Payments.Integration.Tests/">
     <Project Path="Backend/tests/Modules/Payments.Integration.Tests/Rge.Payments.Integration.Tests.csproj" />
   </Folder>
+  <Folder Name="/Backend/tests/Modules/Receipts.Integration.Tests/">
+    <Project Path="Backend/tests/Modules/Receipts.Integration.Tests/Rge.Receipts.Integration.Tests.csproj" />
+  </Folder>
   <Folder Name="/Backend/tests/Tests.Common/">
     <Project Path="Backend/tests/Tests.Common/Rge.Tests.Common.csproj" />
   </Folder>
