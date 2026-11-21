@@ -51,6 +51,16 @@ public sealed class FulfillKotobeeOrderService
         }
 
         var opts = _optionsMonitor.CurrentValue;
+        if (!opts.Enabled)
+        {
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                _logger.LogInformation(
+                    "Kotobee integration is disabled. Skipping fulfillment for Order {OrderId}.",
+                    job.OrderId);
+            }
+            return;
+        }
 
         // Resolve purchased SKUs -> Kotobee book targets (supports single books & bundles)
         var targets = _mappingResolver.ResolveBooksForOrder(job.PurchasedProductSkus);

@@ -325,6 +325,62 @@ def remediate_production_secrets(env: dict) -> None:
         v_val = v_file.read_text(encoding="utf-8").strip() if v_file.exists() else "0.5.0"
         env["NEXT_PUBLIC_APP_VERSION"] = v_val
 
+    # 8. Kotobee fulfillment platform environment variable mapping & auto-remediation
+    kotobee_key = (
+        env.get("KOTOBEE_ACCESS_KEY")
+        or env.get("Integrations__Kotobee__AccessKey")
+        or ""
+    ).strip()
+    kotobee_serial = (
+        env.get("KOTOBEE_SERIAL")
+        or env.get("Integrations__Kotobee__Serial")
+        or ""
+    ).strip()
+    kotobee_lib_id = (
+        env.get("KOTOBEE_LIBRARY_ID")
+        or env.get("KOTOBEE_DEFAULT_LIBRARY_ID")
+        or env.get("Integrations__Kotobee__DefaultLibraryId")
+        or ""
+    ).strip()
+    kotobee_mode = (
+        env.get("KOTOBEE_PUBLISHING_MODE")
+        or env.get("Integrations__Kotobee__PublishingMode")
+        or "library"
+    ).strip()
+    kotobee_secret = (
+        env.get("KOTOBEE_SHEET_SECRET")
+        or env.get("KOTOBEE_SHEET_WEBHOOK_SECRET")
+        or env.get("Integrations__Kotobee__SheetWebhookSecret")
+        or ""
+    ).strip()
+
+    if kotobee_key:
+        env["KOTOBEE_ACCESS_KEY"] = kotobee_key
+        env["Integrations__Kotobee__AccessKey"] = kotobee_key
+    if kotobee_serial:
+        env["KOTOBEE_SERIAL"] = kotobee_serial
+        env["Integrations__Kotobee__Serial"] = kotobee_serial
+    if kotobee_lib_id:
+        env["KOTOBEE_LIBRARY_ID"] = kotobee_lib_id
+        env["Integrations__Kotobee__DefaultLibraryId"] = kotobee_lib_id
+    if kotobee_mode:
+        env["KOTOBEE_PUBLISHING_MODE"] = kotobee_mode
+        env["Integrations__Kotobee__PublishingMode"] = kotobee_mode
+    if kotobee_secret:
+        env["KOTOBEE_SHEET_SECRET"] = kotobee_secret
+        env["Integrations__Kotobee__SheetWebhookSecret"] = kotobee_secret
+
+    kotobee_enabled_val = env.get("KOTOBEE_ENABLED") or env.get("Integrations__Kotobee__Enabled")
+    if kotobee_enabled_val is not None:
+        is_kotobee_enabled = kotobee_enabled_val.strip().lower() in ("true", "1", "yes")
+    else:
+        # Auto-enable if credentials are provided, otherwise auto-disable to prevent startup crashes
+        is_kotobee_enabled = bool(kotobee_key or kotobee_serial)
+
+    env["KOTOBEE_ENABLED"] = "true" if is_kotobee_enabled else "false"
+    env["Integrations__Kotobee__Enabled"] = "true" if is_kotobee_enabled else "false"
+    log(f"[Supervisor] Kotobee integration: {'Enabled' if is_kotobee_enabled else 'Disabled (unconfigured)'}")
+
 
 def cleanup(signum=None, frame=None):
     global is_shutting_down, backend_proc, frontend_proc

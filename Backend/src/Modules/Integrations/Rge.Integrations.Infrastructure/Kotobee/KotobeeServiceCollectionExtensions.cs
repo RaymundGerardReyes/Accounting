@@ -19,7 +19,52 @@ public static class KotobeeServiceCollectionExtensions
         {
             services
                 .AddOptions<KotobeeOptions>()
-                .Bind(configuration.GetSection(KotobeeOptions.SectionName))
+                .Bind(configuration.GetSection(KotobeeOptions.SectionName));
+
+            services.PostConfigure<KotobeeOptions>(opts =>
+            {
+                var section = configuration.GetSection(KotobeeOptions.SectionName);
+                var hasFlatKey = !string.IsNullOrWhiteSpace(configuration["KOTOBEE_ACCESS_KEY"]);
+                var hasFlatSerial = !string.IsNullOrWhiteSpace(configuration["KOTOBEE_SERIAL"]);
+                var hasConfiguredSection = section.Exists() || hasFlatKey || hasFlatSerial;
+
+                // 1. If explicit KOTOBEE_ENABLED env var is set, respect it
+                if (bool.TryParse(configuration["KOTOBEE_ENABLED"], out var enabledVal))
+                {
+                    opts.Enabled = enabledVal;
+                }
+                // 2. If no section and no Kotobee credentials exist in environment, auto-disable to prevent startup crashes
+                else if (!hasConfiguredSection)
+                {
+                    opts.Enabled = false;
+                }
+
+                // 3. Flat env var overrides (for Heroku / Docker / PaaS)
+                if (hasFlatKey)
+                    opts.AccessKey = configuration["KOTOBEE_ACCESS_KEY"]!.Trim();
+                if (hasFlatSerial)
+                    opts.Serial = configuration["KOTOBEE_SERIAL"]!.Trim();
+                if (!string.IsNullOrWhiteSpace(configuration["KOTOBEE_LIBRARY_ID"]))
+                    opts.DefaultLibraryId = configuration["KOTOBEE_LIBRARY_ID"]!.Trim();
+                else if (!string.IsNullOrWhiteSpace(configuration["KOTOBEE_DEFAULT_LIBRARY_ID"]))
+                    opts.DefaultLibraryId = configuration["KOTOBEE_DEFAULT_LIBRARY_ID"]!.Trim();
+                if (!string.IsNullOrWhiteSpace(configuration["KOTOBEE_PUBLISHING_MODE"]))
+                    opts.PublishingMode = configuration["KOTOBEE_PUBLISHING_MODE"]!.Trim();
+                if (!string.IsNullOrWhiteSpace(configuration["KOTOBEE_SHEET_SECRET"]))
+                    opts.SheetWebhookSecret = configuration["KOTOBEE_SHEET_SECRET"]!.Trim();
+                else if (!string.IsNullOrWhiteSpace(configuration["KOTOBEE_SHEET_WEBHOOK_SECRET"]))
+                    opts.SheetWebhookSecret = configuration["KOTOBEE_SHEET_WEBHOOK_SECRET"]!.Trim();
+
+                if ((!string.IsNullOrWhiteSpace(opts.AccessKey) || !string.IsNullOrWhiteSpace(opts.Serial)) &&
+                    configuration["KOTOBEE_ENABLED"]?.Equals("false", StringComparison.OrdinalIgnoreCase) != true &&
+                    !string.Equals(configuration["Integrations:Kotobee:Enabled"], "false", StringComparison.OrdinalIgnoreCase))
+                {
+                    opts.Enabled = true;
+                }
+            });
+
+            services
+                .AddOptions<KotobeeOptions>()
                 .Validate(opts =>
                 {
                     if (!opts.Enabled) return true;
