@@ -5,7 +5,7 @@ using Rge.Integrations.Application.Ports;
 
 namespace Rge.Integrations.Infrastructure.Kotobee;
 
-public sealed class PgKotobeeEntitlementRepository : IKotobeeEntitlementRepository
+public sealed class PgKotobeeEntitlementRepository : IKotobeeEntitlementRepository, IKotobeeSheetWriteBackTracker
 {
     private readonly NpgsqlDataSource? _dataSource;
     private readonly ILogger<PgKotobeeEntitlementRepository> _logger;
@@ -282,6 +282,84 @@ public sealed class PgKotobeeEntitlementRepository : IKotobeeEntitlementReposito
             return _fallbackCache.Values
                 .Where(r => string.Equals(r.OrderId, orderId, StringComparison.OrdinalIgnoreCase))
                 .ToList();
+        }
+    }
+
+    public async Task RecordSheetWriteBackResultAsync(
+        string orderId,
+        bool success,
+        string? updatedTabName,
+        int? updatedRowNumber,
+        string? errorMessage,
+        AuditExecutionContext auditContext,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(orderId);
+        ArgumentNullException.ThrowIfNull(auditContext);
+
+        if (_dataSource is null)
+        {
+            foreach (var kvp in _fallbackCache)
+            {
+                if (string.Equals(kvp.Value.OrderId, orderId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _fallbackCache[kvp.Key] = kvp.Value with
+                    {
+                        SheetWritebackStatus = success ? "Synced" : "Failed",
+                        SheetUpdatedTab = updatedTabName ?? kvp.Value.SheetUpdatedTab,
+                        SheetUpdatedRow = updatedRowNumber ?? kvp.Value.SheetUpdatedRow,
+                        SheetWritebackError = success ? null : errorMessage,
+                        SheetWritebackAtUtc = DateTimeOffset.UtcNow
+                    };
+                }
+            }
+            return;
+        }
+
+        try
+        {
+            await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+            await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+
+            // Mandatory for V0013 trigger: stamp audited actor + reason for this transaction only
+            await using (var stampCmd = new NpgsqlCommand("""
+                SELECT set_config('app.audit_actor', @actor, true),
+                       set_config('app.audit_reason', @reason, true),
+                       set_config('app.correlation_id', @corr, true);
+                """, conn, tx))
+            {
+                stampCmd.Parameters.AddWithValue("actor", auditContext.ActorId);
+                stampCmd.Parameters.AddWithValue("reason", auditContext.AuditReason);
+                stampCmd.Parameters.AddWithValue("corr", (object?)auditContext.CorrelationId ?? DBNull.Value);
+                await stampCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            const string sql = """
+                UPDATE kotobee_entitlements
+                SET sheet_writeback_status = @wb_status,
+                    sheet_updated_tab      = COALESCE(@tab, sheet_updated_tab),
+                    sheet_updated_row      = COALESCE(@row, sheet_updated_row),
+                    sheet_writeback_error  = @err,
+                    sheet_writeback_at_utc = NOW(),
+                    updated_at_utc         = NOW()
+                WHERE order_id = @order_id;
+                """;
+
+            await using (var cmd = new NpgsqlCommand(sql, conn, tx))
+            {
+                cmd.Parameters.AddWithValue("wb_status", success ? "Synced" : "Failed");
+                cmd.Parameters.AddWithValue("tab", (object?)updatedTabName ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("row", updatedRowNumber.HasValue ? (object)updatedRowNumber.Value : DBNull.Value);
+                cmd.Parameters.AddWithValue("err", (object?)errorMessage ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("order_id", orderId);
+                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed recording sheet write-back tracking for Order {OrderId} in Postgres.", orderId);
         }
     }
 }

@@ -41,7 +41,12 @@ public sealed record KotobeeEntitlementRecord(
     int AttemptCount,
     string? LastError,
     DateTimeOffset? ExpiresAtUtc,
-    DateTimeOffset? ActivatedAtUtc
+    DateTimeOffset? ActivatedAtUtc,
+    string SheetWritebackStatus = "Pending",
+    string? SheetUpdatedTab = null,
+    int? SheetUpdatedRow = null,
+    string? SheetWritebackError = null,
+    DateTimeOffset? SheetWritebackAtUtc = null
 );
 
 public interface IKotobeeApiClient
@@ -143,4 +148,49 @@ public interface ITamperAlertSink
 public interface IAdminAlertEmailSender
 {
     Task SendSecurityAlertAsync(string subject, string bodyHtml, CancellationToken ct = default);
+}
+
+public sealed record AuditExecutionContext(
+    string ActorId,
+    string AuditReason,
+    string? CorrelationId = null,
+    bool IsAdmin = false
+);
+
+public sealed record KotobeeSheetStatusWriteBackRequest(
+    string OrderId,
+    string BuyerEmail,
+    string? ProductHint,       // Chosen product name/SKU from Google Form (fallback row matcher)
+    string? PreferredTabName,  // Optional tab name if known; null scans all tabs dynamically
+    string PaymentStatus,      // "PAID", "FAILED", "CANCELED"
+    string KotobeeStatus,      // "ACTIVATED", "PARTIAL_FAILED", "FAILED", "ALREADY_ACTIVE", "SKIPPED_UNPAID"
+    string ActivatedBookIds,   // e.g., "501, 502"
+    string UpdatedAtUtc,
+    string Notes
+);
+
+public sealed record KotobeeSheetWriteBackResult(
+    bool Success,
+    string? UpdatedTabName,
+    int? UpdatedRowNumber,
+    string? ErrorMessage
+);
+
+public interface IKotobeeSheetStatusWriter
+{
+    Task<KotobeeSheetWriteBackResult> WriteActivationStatusAsync(
+        KotobeeSheetStatusWriteBackRequest request,
+        CancellationToken ct = default);
+}
+
+public interface IKotobeeSheetWriteBackTracker
+{
+    Task RecordSheetWriteBackResultAsync(
+        string orderId,
+        bool success,
+        string? updatedTabName,
+        int? updatedRowNumber,
+        string? errorMessage,
+        AuditExecutionContext auditContext,
+        CancellationToken ct = default);
 }

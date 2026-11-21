@@ -209,6 +209,58 @@ public sealed class KotobeeDynamicSheetEndpoints : IEndpointModule
 
         app.MapGet("/api/integrations/kotobee/sheet/snapshots", snapshotsHandler).WithTags("KotobeeSheet");
         app.MapGet("/api/v1/integrations/kotobee/sheet/snapshots", snapshotsHandler).WithTags("KotobeeSheet");
+
+        // 4. Manual / Admin write-back retry endpoint
+        var retryHandler = async (
+            string orderId,
+            HttpContext context,
+            KotobeeSheetWriteBackCoordinator coordinator,
+            IKotobeeEntitlementRepository repo,
+            KotobeePreExecutionIsolationGuard guard,
+            ILogger<KotobeeDynamicSheetEndpoints> logger,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                guard.ValidateInputAntiSqlInjection(orderId, nameof(orderId));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+
+            var records = await repo.GetByOrderIdAsync(orderId, ct).ConfigureAwait(false);
+            if (records.Count == 0)
+            {
+                return Results.NotFound(new { error = $"No Kotobee entitlements found for order '{orderId}'." });
+            }
+
+            var primary = records[0];
+            var actor = context.User?.Identity?.Name ?? "admin:manual_retry";
+            var auditContext = new AuditExecutionContext(
+                ActorId: actor,
+                AuditReason: "Manual admin trigger of Kotobee sheet status write-back retry",
+                CorrelationId: context.TraceIdentifier);
+
+            var result = await coordinator.SyncPaidFulfillmentOutcomeAsync(
+                orderId: orderId,
+                buyerEmail: primary.BuyerEmail,
+                productHint: primary.ProductSku,
+                auditContext: auditContext,
+                ct: ct).ConfigureAwait(false);
+
+            return Results.Ok(new
+            {
+                orderId,
+                success = result.Success,
+                updatedTabName = result.UpdatedTabName,
+                updatedRowNumber = result.UpdatedRowNumber,
+                errorMessage = result.ErrorMessage
+            });
+        };
+
+        app.MapPost("/api/integrations/kotobee/orders/{orderId}/writeback/retry", retryHandler).WithTags("KotobeeSheet");
+        app.MapPost("/api/v1/integrations/kotobee/orders/{orderId}/writeback/retry", retryHandler).WithTags("KotobeeSheet");
     }
 
     private static bool VerifyHmacSha256(string payload, string signatureHeader, string secret)

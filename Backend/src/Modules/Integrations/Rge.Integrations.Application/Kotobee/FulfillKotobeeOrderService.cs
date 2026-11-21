@@ -12,6 +12,7 @@ public sealed class FulfillKotobeeOrderService
     private readonly IKotobeeCatalogMappingResolver _mappingResolver;
     private readonly IOptionsMonitor<KotobeeOptions> _optionsMonitor;
     private readonly ILogger<FulfillKotobeeOrderService> _logger;
+    private readonly KotobeeSheetWriteBackCoordinator? _sheetCoordinator;
 
     public FulfillKotobeeOrderService(
         IPaidOrderVerifier paidOrderVerifier,
@@ -19,7 +20,8 @@ public sealed class FulfillKotobeeOrderService
         IKotobeeEntitlementRepository repository,
         IKotobeeCatalogMappingResolver mappingResolver,
         IOptionsMonitor<KotobeeOptions> optionsMonitor,
-        ILogger<FulfillKotobeeOrderService> logger)
+        ILogger<FulfillKotobeeOrderService> logger,
+        KotobeeSheetWriteBackCoordinator? sheetCoordinator = null)
     {
         _paidOrderVerifier = paidOrderVerifier ?? throw new ArgumentNullException(nameof(paidOrderVerifier));
         _kotobee = kotobee ?? throw new ArgumentNullException(nameof(kotobee));
@@ -27,6 +29,7 @@ public sealed class FulfillKotobeeOrderService
         _mappingResolver = mappingResolver ?? throw new ArgumentNullException(nameof(mappingResolver));
         _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _sheetCoordinator = sheetCoordinator;
     }
 
     public async Task FulfillPaidOrderAsync(KotobeeFulfillmentJob job, CancellationToken ct = default)
@@ -59,6 +62,31 @@ public sealed class FulfillKotobeeOrderService
                     "Order {OrderId} contains no Kotobee-mapped products. Skipping.",
                     job.OrderId);
             }
+
+            if (_sheetCoordinator is not null)
+            {
+                try
+                {
+                    var audit = new AuditExecutionContext(
+                        ActorId: "kotobee:worker",
+                        AuditReason: "No ebook items fulfillment status sync",
+                        CorrelationId: job.OrderId);
+
+                    await _sheetCoordinator.SyncPaidFulfillmentOutcomeAsync(
+                        job.OrderId,
+                        job.BuyerEmail,
+                        productHint: string.Join(", ", job.PurchasedProductSkus),
+                        auditContext: audit,
+                        ct: ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex,
+                        "Failed to sync no-ebook outcome to Google Sheets for Order {OrderId}.",
+                        job.OrderId);
+                }
+            }
+
             return;
         }
 
@@ -219,6 +247,35 @@ public sealed class FulfillKotobeeOrderService
                     "Failed Kotobee activation for Order {OrderId}, Book {BookId}.",
                     job.OrderId, target.BookId);
                 await _repository.MarkFailedAsync(job.OrderId, target.BookId, ex.Message, ct).ConfigureAwait(false);
+            }
+        }
+
+        // =========================================================================
+        // CLOSED-LOOP DYNAMIC GOOGLE SHEET STATUS WRITE-BACK:
+        // Summarizes outcomes (ACTIVATED / PARTIAL_FAILED / FAILED) and writes to Sheet.
+        // Isolated: failure never rolls back Kotobee or crashes the background worker.
+        // =========================================================================
+        if (_sheetCoordinator is not null)
+        {
+            try
+            {
+                var audit = new AuditExecutionContext(
+                    ActorId: "kotobee:worker",
+                    AuditReason: "Fulfillment complete status sync",
+                    CorrelationId: job.OrderId);
+
+                await _sheetCoordinator.SyncPaidFulfillmentOutcomeAsync(
+                    job.OrderId,
+                    job.BuyerEmail,
+                    productHint: string.Join(", ", job.PurchasedProductSkus),
+                    auditContext: audit,
+                    ct: ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to sync fulfillment outcome to Google Sheets for Order {OrderId}. Background retry available.",
+                    job.OrderId);
             }
         }
     }

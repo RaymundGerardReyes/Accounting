@@ -511,35 +511,76 @@ function doPost(e) {
 
     var body = JSON.parse(e.postData.contents);
     var providedSecret = body.secret || (e.parameter && e.parameter.secret) || "";
-    if (!providedSecret || providedSecret !== CONFIG.SECRET_KEY) {
+
+    // Check HMAC-SHA256 signature if provided, or verify secret directly
+    if (body.signature && body.orderId && body.buyerEmail && body.paymentStatus && body.kotobeeStatus) {
+      var canonical = body.orderId + "|" + body.buyerEmail + "|" + body.paymentStatus + "|" + body.kotobeeStatus + "|" + (body.updatedAtUtc || "");
+      var expectedSig = computeHmacSha256Hex(canonical, CONFIG.SECRET_KEY);
+      if (expectedSig.toLowerCase() !== String(body.signature).toLowerCase()) {
+        return createJsonResponse({ ok: false, error: "Invalid HMAC signature" });
+      }
+    } else if (!providedSecret || providedSecret !== CONFIG.SECRET_KEY) {
       return createJsonResponse({ ok: false, error: "Unauthorized webhook secret" });
     }
 
     var context = resolveSheetSafely(null);
-    var sheet = context.sheet;
-    if (!sheet) {
+    var spreadsheet = context.spreadsheet || (context.sheet ? context.sheet.getParent() : null);
+    if (!spreadsheet) {
       return createJsonResponse({
         ok: false,
         error: "Spreadsheet not bound. Set " + PROP_KEYS.FALLBACK_SPREADSHEET_ID + " in Script Properties."
       });
     }
 
-    var targetRow = findMatchingRow(
-      sheet,
-      body.response_id || body.responseId,
-      body.order_number || body.orderNumber,
-      body.payment_attempt_id || body.paymentAttemptId,
-      body.sheet_row_index || body.sheetRowIndex
-    );
+    var targetSheet = null;
+    var targetRow = null;
+    var orderLookup = body.orderId || body.order_number || body.orderNumber;
+    var emailLookup = body.buyerEmail || body.email;
 
+    // 1. Try preferred tab name if requested
+    if (body.preferredTabName) {
+      var pref = spreadsheet.getSheetByName(body.preferredTabName);
+      if (pref) {
+        var rPref = findMatchingRow(pref, body.response_id || body.responseId, orderLookup, body.payment_attempt_id || body.paymentAttemptId, body.sheet_row_index || body.sheetRowIndex, emailLookup);
+        if (rPref) {
+          targetSheet = pref;
+          targetRow = rPref;
+        }
+      }
+    }
+
+    // 2. Try default / bound sheet
+    if (!targetRow && context.sheet) {
+      var rDefault = findMatchingRow(context.sheet, body.response_id || body.responseId, orderLookup, body.payment_attempt_id || body.paymentAttemptId, body.sheet_row_index || body.sheetRowIndex, emailLookup);
+      if (rDefault) {
+        targetSheet = context.sheet;
+        targetRow = rDefault;
+      }
+    }
+
+    // 3. Search across all sheets in workbook
     if (!targetRow) {
+      var allSheets = spreadsheet.getSheets();
+      for (var sIdx = 0; sIdx < allSheets.length; sIdx++) {
+        var sh = allSheets[sIdx];
+        if (targetSheet && sh.getName() === targetSheet.getName()) continue;
+        var rAny = findMatchingRow(sh, body.response_id || body.responseId, orderLookup, body.payment_attempt_id || body.paymentAttemptId, body.sheet_row_index || body.sheetRowIndex, emailLookup);
+        if (rAny) {
+          targetSheet = sh;
+          targetRow = rAny;
+          break;
+        }
+      }
+    }
+
+    if (!targetRow || !targetSheet) {
       return createJsonResponse({
         ok: false,
-        error: "Could not find matching row for Order " + (body.order_number || body.response_id)
+        error: "Could not find matching row for Order " + (orderLookup || body.response_id || emailLookup)
       });
     }
 
-    var rawStatus = body.payment_status || body.status || "PENDING";
+    var rawStatus = body.payment_status || body.paymentStatus || body.status || "PENDING";
     var normalizedStatus = normalizeDisplayStatus(rawStatus);
     var receiptNo = body.official_receipt_no || body.official_receipt_number || "";
     var outcomeDetails = body.outcome_details || "";
@@ -553,18 +594,36 @@ function doPost(e) {
       outcomeDetails = "Checkout session expired (" + (body.provider_event_id || "checkout_session.expired") + ")";
     }
 
-    ensureAndWriteColumns(sheet, targetRow, {
+    var writeColumns = {
       "Payment Status": normalizedStatus,
       "Official Receipt No": receiptNo,
       "Webhook Outcome Details": outcomeDetails,
       "Synchronized At": formatSafeTimestamp(new Date())
-    });
+    };
+
+    if (body.kotobeeStatus || body.kotobee_status) {
+      writeColumns["Kotobee Status"] = body.kotobeeStatus || body.kotobee_status;
+      if (body.activatedBookIds || body.activated_book_ids) {
+        writeColumns["Kotobee Books"] = body.activatedBookIds || body.activated_book_ids;
+      }
+      if (body.notes) {
+        writeColumns["Kotobee Notes"] = body.notes;
+      }
+      writeColumns["Kotobee Updated At"] = body.updatedAtUtc || formatSafeTimestamp(new Date());
+    }
+
+    ensureAndWriteColumns(targetSheet, targetRow, writeColumns);
 
     return createJsonResponse({
       ok: true,
+      success: true,
       row_updated: targetRow,
-      order_number: body.order_number || body.orderNumber,
+      rowNumber: targetRow,
+      tabName: targetSheet.getName(),
+      sheetName: targetSheet.getName(),
+      order_number: orderLookup,
       payment_status: normalizedStatus,
+      kotobee_status: body.kotobeeStatus || body.kotobee_status || null,
       official_receipt_no: receiptNo || null
     });
   } catch (err) {
@@ -949,15 +1008,16 @@ function ensureAndWriteColumns(sheet, rowIndex, columnMap) {
   SpreadsheetApp.flush();
 }
 
-function findMatchingRow(sheet, responseId, orderNumber, paymentAttemptId, sheetRowIndex) {
+function findMatchingRow(sheet, responseId, orderNumber, paymentAttemptId, sheetRowIndex, email) {
   var lastRow = sheet.getLastRow();
   var lastCol = sheet.getLastColumn();
   if (lastRow < 2 || lastCol < 1) return null;
 
   var headerMap = buildHeaderMap(sheet);
   var respCol = (resolveColumnIndex(headerMap, "Response ID") || 0) - 1;
-  var orderCol = (resolveColumnIndex(headerMap, "Order Number") || 0) - 1;
+  var orderCol = (resolveColumnIndex(headerMap, "Order Number") || resolveColumnIndex(headerMap, "Order ID") || resolveColumnIndex(headerMap, "order_id") || 0) - 1;
   var attemptCol = (resolveColumnIndex(headerMap, "Payment Attempt ID") || 0) - 1;
+  var emailCol = (resolveColumnIndex(headerMap, "Email Address") || resolveColumnIndex(headerMap, "Email") || resolveColumnIndex(headerMap, "buyer_email") || 0) - 1;
 
   var allValues = sheet.getRange(1, 1, lastRow, lastCol).getValues();
 
@@ -971,6 +1031,17 @@ function findMatchingRow(sheet, responseId, orderNumber, paymentAttemptId, sheet
     }
     if (attemptCol >= 0 && paymentAttemptId && String(row[attemptCol]).trim() === String(paymentAttemptId).trim()) {
       return r + 1;
+    }
+  }
+
+  // Fallback match on email (latest submission first)
+  if (emailCol >= 0 && email && String(email).trim().length > 0) {
+    var cleanEmail = String(email).trim().toLowerCase();
+    for (var re = allValues.length - 1; re >= 1; re--) {
+      var emailCandidate = String(allValues[re][emailCol] || "").trim().toLowerCase();
+      if (emailCandidate === cleanEmail) {
+        return re + 1;
+      }
     }
   }
 

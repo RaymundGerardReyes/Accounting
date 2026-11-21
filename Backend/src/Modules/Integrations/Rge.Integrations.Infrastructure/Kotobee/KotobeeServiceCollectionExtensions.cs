@@ -40,6 +40,12 @@ public static class KotobeeServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(15);
         });
 
+        // Typed HttpClient for Google Apps Script Sheet Status Writer with safe timeout
+        services.AddHttpClient<IKotobeeSheetStatusWriter, AppsScriptKotobeeSheetStatusWriter>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+
         // Core services & adapters
         services.AddSingleton<IKotobeeFulfillmentQueue, ChannelKotobeeFulfillmentQueue>();
         services.AddSingleton<IntelligentSheetSchemaAdapter>();
@@ -49,11 +55,14 @@ public static class KotobeeServiceCollectionExtensions
         services.AddScoped<IKotobeeSheetSnapshotStore, PgKotobeeSheetSnapshotStore>();
         services.AddScoped<IKotobeeCatalogMappingResolver, DynamicSheetKotobeeCatalogProvider>();
         services.AddScoped<IPaidOrderVerifier, PaymentsContractPaidOrderVerifier>();
-        services.AddScoped<IKotobeeEntitlementRepository>(sp =>
+        services.AddScoped<PgKotobeeEntitlementRepository>(sp =>
             new PgKotobeeEntitlementRepository(
                 sp.GetService<NpgsqlDataSource>(),
                 sp.GetService<Microsoft.Extensions.Logging.ILogger<PgKotobeeEntitlementRepository>>()));
+        services.AddScoped<IKotobeeEntitlementRepository>(sp => sp.GetRequiredService<PgKotobeeEntitlementRepository>());
+        services.AddScoped<IKotobeeSheetWriteBackTracker>(sp => sp.GetRequiredService<PgKotobeeEntitlementRepository>());
 
+        services.AddScoped<KotobeeSheetWriteBackCoordinator>();
         services.AddScoped<FulfillKotobeeOrderService>();
         services.AddScoped<OnOrderPaidEnqueueKotobeeHandler>();
         services.AddScoped<OrderPaidKotobeeOutboxHandler>();
