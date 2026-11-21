@@ -91,6 +91,7 @@ public static class DependencyInjection
         services.AddSingleton<IPricingPolicy, ServerAuthoritativePricing>();
         services.AddSingleton<IProductCatalog, JsonProductCatalog>();
         services.AddScoped<IOrderRepository, OrderRepository>();
+        services.AddScoped<Rge.Payments.Contracts.Abstractions.IOrderLookup, Persistence.Repositories.OrderLookup>();
         services.AddScoped<IPaymentAttemptRepository, PaymentAttemptRepository>();
         services.AddScoped<IWebhookEventStore, WebhookEventStore>();
         services.AddScoped<IOrderPaidOutboxPublisher, OrderPaidOutboxPublisher>();
