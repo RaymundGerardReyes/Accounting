@@ -369,7 +369,8 @@
         "dependencies": {
           "Rge.BuildingBlocks.Application": "[1.0.0, )",
           "Rge.Integrations.Contracts": "[1.0.0, )",
-          "Rge.Integrations.Domain": "[1.0.0, )"
+          "Rge.Integrations.Domain": "[1.0.0, )",
+          "Rge.Payments.Contracts": "[1.0.0, )"
         }
       },
       "rge.integrations.contracts": {
@@ -390,7 +391,8 @@
         "dependencies": {
           "Rge.BuildingBlocks.Infrastructure": "[1.0.0, )",
           "Rge.Integrations.Application": "[1.0.0, )",
-          "Rge.Integrations.Domain": "[1.0.0, )"
+          "Rge.Integrations.Domain": "[1.0.0, )",
+          "Rge.Payments.Contracts": "[1.0.0, )"
         }
       },
       "rge.payments.api": {
