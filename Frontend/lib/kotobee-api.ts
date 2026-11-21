@@ -22,3 +22,31 @@ export async function fetchOrderKotobeeEntitlements(
   }
   return res.json();
 }
+
+export interface KotobeeSheetSchemaDto {
+  source: string;
+  snapshotId?: string;
+  spreadsheetId?: string;
+  sheetRange?: string;
+  contentSha256?: string;
+  activeRowCount: number;
+  syncedAtUtc?: string;
+  mappings: Record<string, Array<{
+    bookId: string;
+    libraryId?: string | null;
+    accessDurationDays?: number | null;
+  }>>;
+}
+
+export async function fetchKotobeeSheetSchema(
+  signal?: AbortSignal
+): Promise<KotobeeSheetSchemaDto> {
+  const res = await fetch("/api/integrations/kotobee/sheet/schema", {
+    credentials: "include",
+    signal,
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to load sheet schema (${res.status})`);
+  }
+  return res.json();
+}
