@@ -7,16 +7,19 @@ using Rge.Integrations.Application.SheetSyncHandler;
 using Rge.Integrations.Application.SubmitGoogleForm;
 using Rge.Integrations.Application.TestPayMongo;
 using Rge.Integrations.Application.TestSmtp;
+using Rge.Integrations.Infrastructure.Kotobee;
 
 namespace Rge.Integrations.Infrastructure;
 
 public static class DependencyInjection
 {
-    public static IServiceCollection AddIntegrationsModule(this IServiceCollection services)
+    public static IServiceCollection AddIntegrationsModule(
+        this IServiceCollection services,
+        Microsoft.Extensions.Configuration.IConfiguration? configuration = null)
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddSingleton<SecretStoreWriter>(sp => new SecretStoreWriter(sp.GetService<Microsoft.Extensions.Configuration.IConfiguration>()));
+        services.AddSingleton<SecretStoreWriter>(sp => new SecretStoreWriter(configuration ?? sp.GetService<Microsoft.Extensions.Configuration.IConfiguration>()));
         services.AddSingleton<ISecretStore>(sp => sp.GetRequiredService<SecretStoreWriter>());
         services.AddSingleton<IPayMongoProbe>(sp => sp.GetRequiredService<SecretStoreWriter>());
         services.AddSingleton<IIntegrationDiagnosticProbe>(sp => sp.GetRequiredService<SecretStoreWriter>());
@@ -37,6 +40,8 @@ public static class DependencyInjection
         services.AddScoped<GetFormStatusHandler>();
         services.AddScoped<SubmitGoogleFormHandler>();
         services.AddScoped<SheetSyncHandlerHandler>();
+        
+        services.AddKotobeeIntegration(configuration);
         
         return services;
     }

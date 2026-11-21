@@ -29,6 +29,13 @@
         "dependencies": {
           "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
         }
+      },
+      "rge.payments.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "Rge.BuildingBlocks.Application": "[1.0.0, )",
+          "Rge.BuildingBlocks.SharedKernel": "[1.0.0, )"
+        }
       }
     }
   }
