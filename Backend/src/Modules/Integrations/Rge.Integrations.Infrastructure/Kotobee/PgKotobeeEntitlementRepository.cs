@@ -35,6 +35,9 @@ public sealed class PgKotobeeEntitlementRepository : IKotobeeEntitlementReposito
         }
 
         const string sql = """
+            SELECT set_config('app.audit_actor', 'kotobee-fulfillment-worker', true),
+                   set_config('app.audit_reason', 'Enqueue pending book entitlement for paid order', true);
+
             INSERT INTO kotobee_entitlements (
                 id, order_id, product_sku, buyer_email, kotobee_uid,
                 kotobee_mode, kotobee_lib_id, kotobee_book_id, status,
@@ -94,6 +97,9 @@ public sealed class PgKotobeeEntitlementRepository : IKotobeeEntitlementReposito
         }
 
         const string sql = """
+            SELECT set_config('app.audit_actor', 'kotobee-fulfillment-worker', true),
+                   set_config('app.audit_reason', 'Active entitlement confirmed in Kotobee API', true);
+
             UPDATE kotobee_entitlements
             SET status = 'Active',
                 kotobee_uid = COALESCE(@uid, kotobee_uid),
@@ -137,6 +143,9 @@ public sealed class PgKotobeeEntitlementRepository : IKotobeeEntitlementReposito
         }
 
         const string sql = """
+            SELECT set_config('app.audit_actor', 'kotobee-fulfillment-worker', true),
+                   set_config('app.audit_reason', 'Fulfillment attempt failed in Kotobee API', true);
+
             UPDATE kotobee_entitlements
             SET status = 'Failed',
                 last_error = @error,
@@ -176,6 +185,9 @@ public sealed class PgKotobeeEntitlementRepository : IKotobeeEntitlementReposito
         }
 
         const string sql = """
+            SELECT set_config('app.audit_actor', 'kotobee-admin', true),
+                   set_config('app.audit_reason', 'Administrator revoked book entitlement access', true);
+
             UPDATE kotobee_entitlements
             SET status = 'Revoked',
                 book_access_state = 'none',

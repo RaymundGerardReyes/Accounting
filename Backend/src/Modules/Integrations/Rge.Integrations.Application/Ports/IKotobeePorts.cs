@@ -105,3 +105,42 @@ public interface IPaidOrderVerifier
 {
     Task<bool> IsOrderConfirmedPaidAsync(string orderId, CancellationToken ct = default);
 }
+
+public sealed record KotobeeSheetCatalogSnapshot(
+    Guid Id,
+    string SpreadsheetId,
+    string SheetRange,
+    string ContentSha256,
+    int ActiveRowCount,
+    string MappingsJson,
+    string SyncedBy,
+    DateTimeOffset SyncedAtUtc,
+    bool IsCurrent
+);
+
+public interface IKotobeeSheetSnapshotStore
+{
+    Task SaveSnapshotAsync(KotobeeSheetCatalogSnapshot snapshot, CancellationToken ct = default);
+    Task<KotobeeSheetCatalogSnapshot?> GetLatestCurrentSnapshotAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<KotobeeSheetCatalogSnapshot>> GetAllSnapshotsAsync(int limit = 50, CancellationToken ct = default);
+}
+
+public sealed record TamperAlertEvent(
+    string Operation,
+    string TableName,
+    string RecordId,
+    string ActorId,
+    string AuditReason,
+    string? CorrelationId,
+    string? Details
+);
+
+public interface ITamperAlertSink
+{
+    Task RecordTamperAttemptAsync(TamperAlertEvent alertEvent, CancellationToken ct = default);
+}
+
+public interface IAdminAlertEmailSender
+{
+    Task SendSecurityAlertAsync(string subject, string bodyHtml, CancellationToken ct = default);
+}

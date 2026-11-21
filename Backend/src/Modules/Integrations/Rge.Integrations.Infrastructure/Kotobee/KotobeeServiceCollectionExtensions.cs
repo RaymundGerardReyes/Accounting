@@ -42,7 +42,12 @@ public static class KotobeeServiceCollectionExtensions
 
         // Core services & adapters
         services.AddSingleton<IKotobeeFulfillmentQueue, ChannelKotobeeFulfillmentQueue>();
-        services.AddSingleton<IKotobeeCatalogMappingResolver, KotobeeCatalogMappingResolver>();
+        services.AddSingleton<IntelligentSheetSchemaAdapter>();
+        services.AddSingleton<KotobeePreExecutionIsolationGuard>();
+        services.AddScoped<IAdminAlertEmailSender, SmtpAdminAlertEmailSender>();
+        services.AddScoped<ITamperAlertSink, DualPostgresAndSmtpTamperAlertSink>();
+        services.AddScoped<IKotobeeSheetSnapshotStore, PgKotobeeSheetSnapshotStore>();
+        services.AddScoped<IKotobeeCatalogMappingResolver, DynamicSheetKotobeeCatalogProvider>();
         services.AddScoped<IPaidOrderVerifier, PaymentsContractPaidOrderVerifier>();
         services.AddScoped<IKotobeeEntitlementRepository>(sp =>
             new PgKotobeeEntitlementRepository(
