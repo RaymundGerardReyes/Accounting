@@ -67,6 +67,12 @@
   </Folder>
   <Folder Name="/Backend/tests/" />
   <Folder Name="/Backend/tests/Modules/" />
+  <Folder Name="/Backend/tests/Modules/Integrations.Application.Tests/">
+    <Project Path="Backend/tests/Modules/Integrations.Application.Tests/Rge.Integrations.Application.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Backend/tests/Modules/Integrations.Integration.Tests/">
+    <Project Path="Backend/tests/Modules/Integrations.Integration.Tests/Rge.Integrations.Integration.Tests.csproj" />
+  </Folder>
   <Folder Name="/Backend/tests/Modules/Payments.Integration.Tests/">
     <Project Path="Backend/tests/Modules/Payments.Integration.Tests/Rge.Payments.Integration.Tests.csproj" />
   </Folder>
