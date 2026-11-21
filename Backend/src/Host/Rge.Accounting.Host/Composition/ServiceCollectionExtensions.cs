@@ -443,6 +443,8 @@ public static class ServiceCollectionExtensions
             var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
             var receiptOutboxHandler = new OrderPaidReceiptOutboxHandler(scopeFactory);
             dispatcher.RegisterHandler(receiptOutboxHandler);
+            var kotobeeOutboxHandler = new Rge.Integrations.Infrastructure.Kotobee.OrderPaidKotobeeOutboxHandler(scopeFactory);
+            dispatcher.RegisterHandler(kotobeeOutboxHandler);
             return dispatcher;
         });
 
@@ -530,7 +532,7 @@ public static class ServiceCollectionExtensions
         services.AddAuditModule();
         services.AddDocumentsModule();
         services.AddCostAllocationModule();
-        services.AddIntegrationsModule();
+        services.AddIntegrationsModule(configuration);
         services.AddFinanceModule(configuration);
 
         // 5. Register All Endpoint Modules into ModuleRegistry
@@ -545,6 +547,7 @@ public static class ServiceCollectionExtensions
                     .Register(new DocumentEndpoints())
                     .Register(new CostAllocationEndpoints())
                     .Register(new IntegrationEndpoints())
+                    .Register(new Rge.Integrations.Api.KotobeeEndpoints())
                     .Register(new GoogleFormsEndpoints())
                     .Register(new FinanceEndpoints());
             return registry;
