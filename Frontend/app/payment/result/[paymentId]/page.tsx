@@ -39,6 +39,7 @@ import {
   formatPhpFromMinor,
 } from "@/lib/payment-api"
 import { PaymentCountdown } from "@/components/payment/PaymentCountdown"
+import { KotobeeAccessStatusCard } from "@/components/payment/KotobeeAccessStatusCard"
 import { usePaymentSignalR } from "@/hooks/usePaymentSignalR"
 
 interface PageProps {
@@ -954,6 +955,12 @@ function PaymentResultContent({ params }: PageProps) {
               </div>
             </CardFooter>
           </Card>
+
+          {/* Kotobee Ebook Access Status */}
+          <KotobeeAccessStatusCard
+            orderId={payment?.order_id || (order?.id ?? paymentId)}
+            isOrderPaid={status === "succeeded"}
+          />
 
           {/* Deliverable 2: Internal Treasury Acknowledgement & Audit Disclosure */}
           <details className="group border border-border rounded-lg bg-card/60 overflow-hidden shadow-xs transition-colors">
