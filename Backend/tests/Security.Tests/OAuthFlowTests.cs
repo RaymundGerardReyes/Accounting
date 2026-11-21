@@ -440,3 +440,46 @@ public sealed class OAuthFlowTests
         Assert.Contains(Role.SystemAdmin, callbackResult.Value.Roles!);
     }
 }
+
+public sealed class GoogleRedirectUriConfigGuardTests
+{
+    [Theory]
+    // Case 1: Explicit GOOGLE_REDIRECT_URI wins and trims trailing slash
+    [InlineData(
+        "https://app.mydomain.dev/api/auth/google/callback/",
+        "/api/auth/google/callback",
+        "https://app.mydomain.dev",
+        "https://app.mydomain.dev/api/auth/google/callback")]
+    // Case 2: Accidental full URL inside GOOGLE_REDIRECT_PATH does NOT create a double URL!
+    [InlineData(
+        "",
+        "https://app.mydomain.dev/api/auth/google/callback/",
+        "https://app.mydomain.dev",
+        "https://app.mydomain.dev/api/auth/google/callback")]
+    // Case 3: Clean relative path + NEXT_PUBLIC_APP_URL
+    [InlineData(
+        "",
+        "api/auth/google/callback",
+        "https://app.mydomain.dev/",
+        "https://app.mydomain.dev/api/auth/google/callback")]
+    public void Build_HandlesMisconfiguredEnvVarsWithoutDoubleUrl(
+        string redirectUri,
+        string redirectPath,
+        string appUrl,
+        string expected)
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["GOOGLE_REDIRECT_URI"] = redirectUri,
+                ["GOOGLE_REDIRECT_PATH"] = redirectPath,
+                ["NEXT_PUBLIC_APP_URL"] = appUrl
+            })
+            .Build();
+
+        var builder = new Rge.Identity.Infrastructure.OAuth.GoogleRedirectUriBuilder(config);
+        var actual = builder.Build(new DefaultHttpContext());
+
+        Assert.Equal(expected, actual);
+    }
+}
