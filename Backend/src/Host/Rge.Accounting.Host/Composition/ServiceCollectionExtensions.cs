@@ -503,6 +503,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IActorCache>(sp => new ActorCache(sp.GetRequiredService<IClock>()));
         services.AddSingleton<ICsrfTokenService>(new CsrfTokenService(csrfKey));
         services.AddSingleton<Rge.CostAllocation.Contracts.IConfigurationUserSyncHandler, ConfigurationUserSyncHandler>();
+        services.AddSingleton<Rge.Identity.Infrastructure.OAuth.IGoogleRedirectUriBuilder, Rge.Identity.Infrastructure.OAuth.GoogleRedirectUriBuilder>();
 
         services.AddHttpClient("GoogleOAuth");
         services.AddScoped<IOAuthTokenExchangeService, GoogleOAuthTokenExchangeService>();
