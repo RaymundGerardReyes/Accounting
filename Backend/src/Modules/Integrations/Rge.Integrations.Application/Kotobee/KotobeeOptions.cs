@@ -4,6 +4,9 @@ public sealed class KotobeeOptions
 {
     public const string SectionName = "Integrations:Kotobee";
 
+    /// <summary>Master switch for Kotobee integration. Defaults to true.</summary>
+    public bool Enabled { get; set; } = true;
+
     /// <summary>Base API URL. Official default: https://www.kotobee.com/api/v1</summary>
     public string BaseUrl { get; set; } = "https://www.kotobee.com/api/v1";
 

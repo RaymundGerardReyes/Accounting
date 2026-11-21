@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using Rge.Integrations.Application.Kotobee;
 using Rge.Integrations.Application.Ports;
@@ -16,8 +17,21 @@ public static class KotobeeServiceCollectionExtensions
 
         if (configuration is not null)
         {
-            services.Configure<KotobeeOptions>(
-                configuration.GetSection(KotobeeOptions.SectionName));
+            services
+                .AddOptions<KotobeeOptions>()
+                .Bind(configuration.GetSection(KotobeeOptions.SectionName))
+                .Validate(opts =>
+                {
+                    if (!opts.Enabled) return true;
+
+                    var hasAuth = !string.IsNullOrWhiteSpace(opts.AccessKey)
+                               || !string.IsNullOrWhiteSpace(opts.Serial);
+                    var isLibrary = string.Equals(opts.PublishingMode, "library", StringComparison.OrdinalIgnoreCase);
+                    var hasLibId = !isLibrary || !string.IsNullOrWhiteSpace(opts.DefaultLibraryId);
+
+                    return hasAuth && hasLibId && opts.MinRequestIntervalMs >= 1000;
+                }, "Kotobee integration is enabled, but AccessKey/Serial, DefaultLibraryId (for library mode), or MinRequestIntervalMs (>= 1000) is invalid.")
+                .ValidateOnStart();
         }
 
         // Typed HttpClient for Kotobee API with a safe timeout

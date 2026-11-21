@@ -32,6 +32,7 @@ public sealed class FulfillKotobeeOrderService
     public async Task FulfillPaidOrderAsync(KotobeeFulfillmentJob job, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(job);
+        ct.ThrowIfCancellationRequested();
 
         // =========================================================================
         // STRICT PAID-ONLY GUARD (Layer 2):
