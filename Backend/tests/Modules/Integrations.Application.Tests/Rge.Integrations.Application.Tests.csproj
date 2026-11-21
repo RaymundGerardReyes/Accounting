@@ -2,7 +2,7 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <NoWarn>$(NoWarn);CA1707;CA1515;CA2007</NoWarn>
+    <NoWarn>$(NoWarn);CA1707;CA1515;CA2007;CA1307;CA1310;xUnit2031;CA1849;CA1861;CA1873</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
