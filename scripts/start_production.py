@@ -266,6 +266,8 @@ def remediate_production_secrets(env: dict) -> None:
         or ""
     ).strip()
     if google_redirect_uri:
+        # Strip trailing slash so it strictly matches Google Cloud Console
+        google_redirect_uri = google_redirect_uri.rstrip("/")
         env["GOOGLE_REDIRECT_URI"] = google_redirect_uri
         env["Authentication__Google__RedirectUri"] = google_redirect_uri
 
@@ -275,6 +277,13 @@ def remediate_production_secrets(env: dict) -> None:
         or ""
     ).strip()
     if google_redirect_path:
+        # Guard against full URL accidentally passed in GOOGLE_REDIRECT_PATH
+        if "://" in google_redirect_path:
+            from urllib.parse import urlparse
+            parsed_path = urlparse(google_redirect_path).path
+            google_redirect_path = "/" + parsed_path.strip("/") if parsed_path else "/api/auth/google/callback"
+        else:
+            google_redirect_path = "/" + google_redirect_path.strip("/")
         env["GOOGLE_REDIRECT_PATH"] = google_redirect_path
         env["Authentication__Google__RedirectPath"] = google_redirect_path
 
