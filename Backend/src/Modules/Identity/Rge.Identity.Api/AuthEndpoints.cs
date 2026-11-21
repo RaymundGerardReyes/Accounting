@@ -432,9 +432,11 @@ public sealed class AuthEndpoints : IEndpointModule
         }
 
         // 2. Next check configured static public URL (e.g. during local dev or server-to-server)
-        string? configUrl = config?["Authentication:PublicAppUrl"]
+        string? configUrl = config?["GOOGLE_PUBLIC_ORIGIN"]
+            ?? config?["Authentication:PublicAppUrl"]
             ?? config?["NEXT_PUBLIC_APP_URL"]
             ?? config?["APP_URL"]
+            ?? Environment.GetEnvironmentVariable("GOOGLE_PUBLIC_ORIGIN")
             ?? Environment.GetEnvironmentVariable("NEXT_PUBLIC_APP_URL")
             ?? Environment.GetEnvironmentVariable("APP_URL");
 
@@ -469,9 +471,10 @@ public sealed class AuthEndpoints : IEndpointModule
             ?? Environment.GetEnvironmentVariable("GOOGLE_REDIRECT_URI")
             ?? Environment.GetEnvironmentVariable("GOOGLE_CALLBACK_URL");
 
-        if (!string.IsNullOrWhiteSpace(explicitUri) && Uri.TryCreate(explicitUri, UriKind.Absolute, out _))
+        if (!string.IsNullOrWhiteSpace(explicitUri) && Uri.TryCreate(explicitUri.Trim(), UriKind.Absolute, out var parsedExplicit))
         {
-            return explicitUri;
+            // Strip any accidental trailing slash so it matches Google Cloud Console strictly
+            return parsedExplicit.GetLeftPart(UriPartial.Path).TrimEnd('/');
         }
 
         // 2. Query parameter override (must match host authority or be relative to avoid open redirect)
@@ -501,9 +504,19 @@ public sealed class AuthEndpoints : IEndpointModule
 
         if (!string.IsNullOrWhiteSpace(pathOverride))
         {
-            string normPath = pathOverride.StartsWith('/')
-                ? pathOverride
-                : $"/{pathOverride}";
+            string trimmed = pathOverride.Trim();
+            // Guard against full URL accidentally placed in GOOGLE_REDIRECT_PATH
+            if (Uri.TryCreate(trimmed, UriKind.Absolute, out var fullUri))
+            {
+                trimmed = fullUri.AbsolutePath;
+            }
+
+            string normPath = "/" + trimmed.Trim('/');
+            if (normPath == "/")
+            {
+                normPath = $"/api/auth/{provider}/callback";
+            }
+
             return $"{publicBaseUrl.TrimEnd('/')}{normPath}";
         }
 

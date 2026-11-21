@@ -211,6 +211,8 @@ public static class IdentityServiceCollectionExtensions
             byte[] csrfKey = "0123456789abcdef0123456789abcdef"u8.ToArray();
             return new CsrfTokenService(csrfKey);
         });
+        services.AddSingleton<OAuth.IGoogleRedirectUriBuilder>(sp =>
+            new OAuth.GoogleRedirectUriBuilder(sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>()));
 
         services.AddScoped(sp =>
         {
