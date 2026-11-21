@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  calculateVatInclusiveSplitCentavos,
   parsePhpInputToCentavos,
   sanitizeCsvCell,
   validateCentavoJournalLines,
@@ -27,11 +28,18 @@ describe("Official General Ledger helpers", () => {
     ]).isValid).toBe(false)
   })
 
-  it("accepts a balanced integer-centavo journal and neutralizes CSV formulas", () => {
-    expect(validateCentavoJournalLines([
-      { accountCode: "5110", debitCentavos: 10000, creditCentavos: 0 },
-      { accountCode: "1010", debitCentavos: 0, creditCentavos: 10000 },
-    ]).isValid).toBe(true)
+  it("accepts balanced multi-line integer-centavo journals and computes exact 12% VAT-inclusive splits", () => {
+    const vatSplit = calculateVatInclusiveSplitCentavos(1120000, 1200)
+    expect(vatSplit.netBaseCentavos).toBe(1000000)
+    expect(vatSplit.vatCentavos).toBe(120000)
+    expect(
+      validateCentavoJournalLines([
+        { accountCode: "5110", debitCentavos: vatSplit.netBaseCentavos, creditCentavos: 0 },
+        { accountCode: "1160", debitCentavos: vatSplit.vatCentavos, creditCentavos: 0 },
+        { accountCode: "2010", debitCentavos: 0, creditCentavos: vatSplit.grossCentavos },
+      ]).isValid,
+    ).toBe(true)
+
     expect(sanitizeCsvCell("=HYPERLINK(\"https://example.test\")")).toBe(
       "\"'=HYPERLINK(\"\"https://example.test\"\")\"",
     )
