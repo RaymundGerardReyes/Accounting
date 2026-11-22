@@ -92,7 +92,7 @@ const mockOrders: Order[] = [
 function mockFetchEndpoints(orders: Order[] = mockOrders, failOrders = false) {
   global.fetch = vi.fn().mockImplementation((url: string) => {
     const urlStr = String(url)
-    if (urlStr.includes("/api/v1/orders")) {
+    if (urlStr.includes("/api/v1/orders") || urlStr.includes("/api/orders")) {
       if (failOrders) {
         return Promise.reject(new Error("API network failure"))
       }

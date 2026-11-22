@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { CopyableHash, FinancialStatusBadge } from "@/components/ui/financial-primitives"
+import { ServerPaginationBar } from "@/components/payment/ServerPaginationBar"
 import {
   createManualGlJournal,
   decideGlJournal,
@@ -256,6 +257,15 @@ export function OfficialGeneralLedgerTab({
   const [submitting, setSubmitting] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
 
+  // Journal Register pagination state
+  const [registerPage, setRegisterPage] = useState(1)
+  const [registerPageSize, setRegisterPageSize] = useState(10)
+
+  // Reset pagination when filter criteria change
+  useEffect(() => {
+    setRegisterPage(1)
+  }, [search, sourceFilter, departmentFilter, accountingPeriod])
+
   // Workbench state
   const [grossInput, setGrossInput] = useState("11200.00")
   const [wbDate, setWbDate] = useState("2026-11-18")
@@ -328,6 +338,21 @@ export function OfficialGeneralLedgerTab({
       return matchSource && matchDept && matchSearch
     })
   }, [journals, search, sourceFilter, departmentFilter])
+
+  const totalRegisterPages = Math.max(1, Math.ceil(visibleJournals.length / registerPageSize))
+  const safeRegisterPage = Math.min(registerPage, totalRegisterPages)
+
+  // Keep state synchronized if totalRegisterPages drops below registerPage
+  useEffect(() => {
+    if (registerPage > totalRegisterPages) {
+      setRegisterPage(totalRegisterPages)
+    }
+  }, [registerPage, totalRegisterPages])
+
+  const paginatedJournals = useMemo(() => {
+    const start = (safeRegisterPage - 1) * registerPageSize
+    return visibleJournals.slice(start, start + registerPageSize)
+  }, [visibleJournals, safeRegisterPage, registerPageSize])
 
   const trialBalance = useMemo(() => {
     if (liveTrialRows && liveTrialRows.length > 0) {
@@ -745,7 +770,12 @@ export function OfficialGeneralLedgerTab({
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {visibleJournals.map((journal) => {
+            {visibleJournals.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted-foreground">
+                No journal entries match your current filter. Try clearing your search query or source filter.
+              </div>
+            ) : (
+              paginatedJournals.map((journal) => {
               const isPreparer = journal.preparedByActorId === currentActor.actorId
               return (
                 <div key={journal.journalId} className="rounded-md border p-3 text-xs space-y-2">
@@ -835,7 +865,25 @@ export function OfficialGeneralLedgerTab({
                   </div>
                 </div>
               )
-            })}
+            }))}
+
+            {visibleJournals.length > 0 && (
+              <ServerPaginationBar
+                page={safeRegisterPage}
+                pageSize={registerPageSize}
+                totalCount={visibleJournals.length}
+                totalPages={totalRegisterPages}
+                hasNextPage={safeRegisterPage < totalRegisterPages}
+                hasPreviousPage={safeRegisterPage > 1}
+                isFetching={loading}
+                onPageChange={setRegisterPage}
+                onPageSizeChange={(newSize) => {
+                  setRegisterPageSize(newSize)
+                  setRegisterPage(1)
+                }}
+                pageSizeOptions={[5, 10, 20, 50]}
+              />
+            )}
           </CardContent>
         </Card>
       )}

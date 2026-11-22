@@ -55,6 +55,8 @@ import {
   OrderSummary,
 } from "@/lib/payment-api"
 import { usePaymentSignalR } from "@/hooks/usePaymentSignalR"
+import { usePaginatedOrders } from "@/hooks/use-paginated-orders"
+import { ServerPaginationBar } from "@/components/payment/ServerPaginationBar"
 import { CurrencyDisplay, FinancialStatusBadge } from "@/components/ui/financial-primitives"
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card"
 
@@ -1206,10 +1208,16 @@ export function PaymentsHub() {
   usePaymentSignalR({
     enabled: true,
     onOrderIngested: () => {
+      paginatedOrders.throttledRealtimeRefresh()
       void loadOrders()
       void loadGoogleFormsStatus()
     },
-    onStatusChanged: () => {
+    onStatusChanged: (event: any) => {
+      if (event?.orderId && event?.status) {
+        paginatedOrders.applyRealtimeOrderPatch({ id: event.orderId, status: event.status })
+      } else {
+        paginatedOrders.throttledRealtimeRefresh()
+      }
       void loadOrders()
       void loadGoogleFormsStatus()
     },
@@ -1220,6 +1228,7 @@ export function PaymentsHub() {
       }
     },
     onPollFallback: () => {
+      paginatedOrders.throttledRealtimeRefresh()
       void loadOrders()
       void loadGoogleFormsStatus()
     },
@@ -1291,6 +1300,14 @@ export function PaymentsHub() {
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "paid" | "cancelled">("all")
 
+  // Real server-driven pagination hook (connected to ListOrdersEndpoint via /api/orders)
+  const paginatedOrders = usePaginatedOrders<Order>({
+    initialPage: 1,
+    initialPageSize: 10,
+    initialStatus: "All",
+    searchDebounceMs: 300,
+  })
+
   // New Order Modal State
   const [showOrderModal, setShowOrderModal] = useState(false)
   const [showGFormsModal, setShowGFormsModal] = useState(false)
@@ -1308,7 +1325,7 @@ export function PaymentsHub() {
 
   const openEditOrder = (order: Order) => {
     setEditingOrder(order)
-    setEditName(order.customerName || (order.metadata as any)?.customer_name || "")
+    setEditName((order as any).customerName || (order.metadata as any)?.customer_name || "")
     setEditEmail((order as any).customerEmail || (order.metadata as any)?.customer_email || "")
     setEditDescription(order.title || (order as any).description || "")
     setEditAmountPhp(((order.amount_minor ?? 0) / 100).toFixed(2))
@@ -1395,7 +1412,7 @@ export function PaymentsHub() {
       })
 
       if (res.ok || res.status === 204) {
-        setRawOrders((prev) => prev.filter((o) => o.id !== orderId))
+        setOrders((prev) => prev.filter((o) => o.id !== orderId))
         setFeedbackMessage(`Order ${orderId} deleted successfully.`)
         await loadAllData()
       } else {
@@ -1455,11 +1472,19 @@ export function PaymentsHub() {
         order.order_number.toLowerCase().includes(query) ||
         order.title.toLowerCase().includes(query) ||
         order.reference_code.toLowerCase().includes(query) ||
-        (order.customerName && order.customerName.toLowerCase().includes(query)) ||
+        ((order as any).customerName && (order as any).customerName.toLowerCase().includes(query)) ||
         (order.metadata?.customer_name && String(order.metadata.customer_name).toLowerCase().includes(query))
       return matchesStatus && matchesSearch
     })
   }, [orders, statusFilter, searchQuery])
+
+  // Displayed Orders: prioritizes server-driven paginated orders when available, falling back to local unified ledger
+  const displayedOrders = useMemo(() => {
+    if (paginatedOrders.orders.length > 0) {
+      return paginatedOrders.orders
+    }
+    return filteredOrders
+  }, [paginatedOrders.orders, filteredOrders])
 
   // Flat list of all attempts from orders
   const allAttempts = useMemo(() => {
@@ -1835,7 +1860,10 @@ export function PaymentsHub() {
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value)
+                  paginatedOrders.setSearchInput(e.target.value)
+                }}
                 placeholder="Search order #, title, or reference..."
                 aria-label="Search orders"
                 className="w-full pl-9 pr-8 py-1.5 text-xs bg-muted/30 border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring font-mono"
@@ -1843,7 +1871,10 @@ export function PaymentsHub() {
               {searchQuery && (
                 <button
                   type="button"
-                  onClick={() => setSearchQuery("")}
+                  onClick={() => {
+                    setSearchQuery("")
+                    paginatedOrders.setSearchInput("")
+                  }}
                   aria-label="Clear search"
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
@@ -1859,7 +1890,10 @@ export function PaymentsHub() {
                   <button
                     key={status}
                     type="button"
-                    onClick={() => setStatusFilter(status)}
+                    onClick={() => {
+                      setStatusFilter(status)
+                      paginatedOrders.setStatus(status === "all" ? "All" : status)
+                    }}
                     className={`px-3 py-1.5 rounded-md text-xs font-mono uppercase transition-all ${
                       active
                         ? "bg-primary text-primary-foreground font-semibold shadow-2xs"
@@ -1957,7 +1991,7 @@ export function PaymentsHub() {
                 <>
                   {/* Mobile Stacked Card View (block md:hidden) */}
                   <div className="block md:hidden divide-y divide-border/70">
-                    {filteredOrders.map((o) => (
+                    {displayedOrders.map((o) => (
                       <OrderMobileCard
                         key={o.id}
                         order={o}
@@ -1990,7 +2024,7 @@ export function PaymentsHub() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border/70">
-                        {filteredOrders.map((o) => (
+                        {displayedOrders.map((o) => (
                           <OrderDesktopRow
                             key={o.id}
                             order={o}
@@ -2009,6 +2043,24 @@ export function PaymentsHub() {
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Server-Driven Pagination Bar */}
+                  {displayedOrders.length > 0 && (
+                    <div className="p-4 border-t border-border/60">
+                      <ServerPaginationBar
+                        page={paginatedOrders.page}
+                        pageSize={paginatedOrders.pageSize}
+                        totalCount={paginatedOrders.pagination.totalCount > 0 ? paginatedOrders.pagination.totalCount : filteredOrders.length}
+                        totalPages={paginatedOrders.pagination.totalPages > 1 ? paginatedOrders.pagination.totalPages : Math.max(1, Math.ceil(filteredOrders.length / paginatedOrders.pageSize))}
+                        hasNextPage={paginatedOrders.pagination.hasNextPage}
+                        hasPreviousPage={paginatedOrders.pagination.hasPreviousPage}
+                        isFetching={paginatedOrders.isFetchingPage}
+                        onPageChange={paginatedOrders.setPage}
+                        onPageSizeChange={paginatedOrders.setPageSize}
+                        pageSizeOptions={[10, 20, 50, 100]}
+                      />
+                    </div>
+                  )}
                 </>
               )}
             </CardContent>

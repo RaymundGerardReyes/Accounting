@@ -111,11 +111,14 @@ import {
   resolveExceptionRegisterItem,
   fetchAuditEvents,
   uploadDocumentJson,
+  FinanceResourceKey,
 } from "@/lib/finance-api"
 import {
   calculateVatInclusiveSplitCentavos,
   OfficialGeneralLedgerTab,
 } from "@/components/official-general-ledger-tab"
+import { useFinanceTabPagination } from "@/hooks/use-finance-tab-pagination"
+import { ServerPaginationBar } from "@/components/payment/ServerPaginationBar"
 
 export function FinanceOperationsHub() {
   // Navigation tabs
@@ -153,6 +156,40 @@ export function FinanceOperationsHub() {
   const [trackerRows, setTrackerRows] = useState<CentralizedTrackerRow[]>([])
   const [exceptionRegister, setExceptionRegister] = useState<any[]>([])
   const [auditEventsData, setAuditEventsData] = useState<{ chain_integrity?: any; events: any[] }>({ events: [] })
+
+  // Multi-tab server-driven pagination for financial subledgers
+  const currentFinanceResource: FinanceResourceKey =
+    activeTab === "advances"
+      ? "cash-advances"
+      : activeTab === "expenses"
+      ? "expense-reports"
+      : activeTab === "p2p"
+      ? "payables"
+      : "cash-advances"
+
+  const {
+    items: tabPagedData,
+    pagination: tabPagination,
+    page: tabCurrentPage,
+    pageSize: tabCurrentPageSize,
+    setPage: setTabCurrentPage,
+    setPageSize: setTabCurrentPageSize,
+    isLoading: tabPaginationLoading,
+  } = useFinanceTabPagination(currentFinanceResource)
+
+  const displayedAdvances = useMemo(() => {
+    if (activeTab === "advances" && tabPagedData.length > 0) {
+      return tabPagedData as CashAdvanceRecord[]
+    }
+    return advances
+  }, [activeTab, tabPagedData, advances])
+
+  const displayedExpenses = useMemo(() => {
+    if (activeTab === "expenses" && tabPagedData.length > 0) {
+      return tabPagedData as ExpenseReportRecord[]
+    }
+    return expenses
+  }, [activeTab, tabPagedData, expenses])
 
   // UI state
   const [loading, setLoading] = useState<boolean>(true)
@@ -1636,14 +1673,14 @@ export function FinanceOperationsHub() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {advances.length === 0 ? (
+                    {displayedAdvances.length === 0 ? (
                       <tr>
                         <td colSpan={10} className="py-8 text-center text-muted-foreground">
                           No cash advance requests found. Click "Request Cash Advance" to create one.
                         </td>
                       </tr>
                     ) : (
-                      advances.map((adv) => {
+                      displayedAdvances.map((adv) => {
                         const isReleasedOrExecuted = ["released", "executed_unverified", "evidence_verified"].includes(
                           adv.payment_status,
                         )
@@ -1780,6 +1817,24 @@ export function FinanceOperationsHub() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Server-Driven Pagination Bar for Cash Advances */}
+              {displayedAdvances.length > 0 && (
+                <div className="p-4 border-t border-border/60">
+                  <ServerPaginationBar
+                    page={tabCurrentPage}
+                    pageSize={tabCurrentPageSize}
+                    totalCount={tabPagination.totalCount > 0 ? tabPagination.totalCount : displayedAdvances.length}
+                    totalPages={tabPagination.totalPages > 1 ? tabPagination.totalPages : Math.max(1, Math.ceil(displayedAdvances.length / tabCurrentPageSize))}
+                    hasNextPage={tabPagination.hasNextPage}
+                    hasPreviousPage={tabPagination.hasPreviousPage}
+                    isFetching={tabPaginationLoading}
+                    onPageChange={setTabCurrentPage}
+                    onPageSizeChange={setTabCurrentPageSize}
+                    pageSizeOptions={[10, 20, 50, 100]}
+                  />
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -1824,14 +1879,14 @@ export function FinanceOperationsHub() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {expenses.length === 0 ? (
+                    {displayedExpenses.length === 0 ? (
                       <tr>
                         <td colSpan={10} className="py-8 text-center text-muted-foreground">
                           No expense reports found. Click "New Expense Report" to create one.
                         </td>
                       </tr>
                     ) : (
-                      expenses.map((exp) => {
+                      displayedExpenses.map((exp) => {
                         const isSubmittedForReview =
                           exp.submission_status === "submitted" ||
                           exp.review_status === "submitted" ||
@@ -1929,6 +1984,24 @@ export function FinanceOperationsHub() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Server-Driven Pagination Bar for Expense Reports */}
+              {displayedExpenses.length > 0 && (
+                <div className="p-4 border-t border-border/60">
+                  <ServerPaginationBar
+                    page={tabCurrentPage}
+                    pageSize={tabCurrentPageSize}
+                    totalCount={tabPagination.totalCount > 0 ? tabPagination.totalCount : displayedExpenses.length}
+                    totalPages={tabPagination.totalPages > 1 ? tabPagination.totalPages : Math.max(1, Math.ceil(displayedExpenses.length / tabCurrentPageSize))}
+                    hasNextPage={tabPagination.hasNextPage}
+                    hasPreviousPage={tabPagination.hasPreviousPage}
+                    isFetching={tabPaginationLoading}
+                    onPageChange={setTabCurrentPage}
+                    onPageSizeChange={setTabCurrentPageSize}
+                    pageSizeOptions={[10, 20, 50, 100]}
+                  />
+                </div>
+              )}
             </CardContent>
           </Card>
 
