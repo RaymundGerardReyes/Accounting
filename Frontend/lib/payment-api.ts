@@ -1076,7 +1076,7 @@ export function normalizePagedResponse<T>(
         rawItems.length > 0 ? (page - 1) * pageSize + rawItems.length : 0
       const totalCount =
         reportedTotalCount !== undefined
-          ? Math.max(0, Math.floor(reportedTotalCount))
+          ? Math.max(minImpliedTotal, Math.floor(reportedTotalCount))
           : minImpliedTotal
 
       const computedTotalPages = Math.max(1, Math.ceil(totalCount / pageSize))
