@@ -23,6 +23,9 @@ public sealed class OrderRepository : IOrderRepository
     private static long _lastBridgeTicksUtc;
     private static readonly long BridgeCooldownTicks = TimeSpan.FromSeconds(30).Ticks;
 
+    // Adjustable: short retry backoff for transient PostgreSQL pooler bursts (EMAXCONNSESSION / 53300)
+    private static readonly int[] PoolSaturationRetryDelaysMs = [150, 350];
+
     static OrderRepository()
     {
         EnsureSeeded();
@@ -44,104 +47,186 @@ public sealed class OrderRepository : IOrderRepository
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var sw = Stopwatch.StartNew();
         double connAcquireMs = 0;
         double sqlDurationMs = 0;
         double materializeDurationMs = 0;
 
-        try
+        for (int attempt = 0; ; attempt++)
         {
-            var connSw = Stopwatch.StartNew();
-            DbConnection connection = await _connectionScope.GetOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-            connSw.Stop();
-            connAcquireMs = connSw.Elapsed.TotalMilliseconds;
-
-            var sqlSw = Stopwatch.StartNew();
-            await using DbCommand cmd = connection.CreateCommand();
-            cmd.Transaction = _connectionScope.CurrentTransaction;
-            cmd.CommandText = OrderQueries.ListOrdersPagedSql;
-            cmd.CommandTimeout = SqlTimeouts.FastReadSeconds;
-
-            AddParam(cmd, "@Status", request.Status);
-            AddParam(cmd, "@Category", request.Category);
-            AddParam(cmd, "@SearchPattern", BuildSafeIlikePattern(request.Search));
-            AddParam(cmd, "@PageSize", request.PageSize);
-            AddParam(cmd, "@Offset", request.Offset);
-
-            var rows = new List<OrderJoinedRow>();
-            await using DbDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            try
             {
-                var row = new OrderJoinedRow
+                var connSw = Stopwatch.StartNew();
+                DbConnection connection = await _connectionScope.GetOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+                connSw.Stop();
+                connAcquireMs = connSw.Elapsed.TotalMilliseconds;
+
+                var sqlSw = Stopwatch.StartNew();
+                await using DbCommand cmd = connection.CreateCommand();
+                cmd.Transaction = _connectionScope.CurrentTransaction;
+                cmd.CommandText = OrderQueries.ListOrdersPagedSql;
+                cmd.CommandTimeout = SqlTimeouts.FastReadSeconds;
+
+                AddParam(cmd, "@Status", request.Status);
+                AddParam(cmd, "@Category", request.Category);
+                AddParam(cmd, "@SearchPattern", BuildSafeIlikePattern(request.Search));
+                AddParam(cmd, "@PageSize", request.PageSize);
+                AddParam(cmd, "@Offset", request.Offset);
+
+                var rows = new List<OrderJoinedRow>();
+                await using DbDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    TotalCount = reader.GetInt32(0),
-                    Id = await reader.IsDBNullAsync(1, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(1),
-                    OrderNumber = await reader.IsDBNullAsync(2, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(2),
-                    CustomerName = await reader.IsDBNullAsync(3, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(3),
-                    CustomerEmail = await reader.IsDBNullAsync(4, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(4),
-                    Category = await reader.IsDBNullAsync(5, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(5),
-                    Status = await reader.IsDBNullAsync(6, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(6),
-                    SubtotalCentavos = reader.GetInt64(7),
-                    VatCentavos = reader.GetInt64(8),
-                    TotalCentavos = reader.GetInt64(9),
-                    Currency = await reader.IsDBNullAsync(10, cancellationToken).ConfigureAwait(false) ? "PHP" : reader.GetString(10),
-                    CreatedAt = await reader.GetFieldValueAsync<DateTimeOffset>(11, cancellationToken).ConfigureAwait(false),
-                    UpdatedAt = await reader.GetFieldValueAsync<DateTimeOffset>(12, cancellationToken).ConfigureAwait(false)
-                };
-                rows.Add(row);
+                    int totalCount = await reader.IsDBNullAsync(0, cancellationToken).ConfigureAwait(false)
+                        ? 0
+                        : reader.GetInt32(0);
+
+                    bool hasOrderRow = !await reader.IsDBNullAsync(1, cancellationToken).ConfigureAwait(false);
+                    if (!hasOrderRow)
+                    {
+                        // Guard: LEFT JOIN paged_orders returns 1 placeholder row with NULL order columns
+                        // when filters match 0 records or OFFSET >= total_count.
+                        // Never call GetInt64/GetFieldValueAsync on NULL columns!
+                        rows.Add(new OrderJoinedRow
+                        {
+                            TotalCount = totalCount,
+                            Id = null,
+                            Currency = "PHP"
+                        });
+                        continue;
+                    }
+
+                    var row = new OrderJoinedRow
+                    {
+                        TotalCount = totalCount,
+                        Id = reader.GetString(1),
+                        OrderNumber = await reader.IsDBNullAsync(2, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(2),
+                        CustomerName = await reader.IsDBNullAsync(3, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(3),
+                        CustomerEmail = await reader.IsDBNullAsync(4, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(4),
+                        Category = await reader.IsDBNullAsync(5, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(5),
+                        Status = await reader.IsDBNullAsync(6, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(6),
+                        SubtotalCentavos = await reader.IsDBNullAsync(7, cancellationToken).ConfigureAwait(false) ? 0L : reader.GetInt64(7),
+                        VatCentavos = await reader.IsDBNullAsync(8, cancellationToken).ConfigureAwait(false) ? 0L : reader.GetInt64(8),
+                        TotalCentavos = await reader.IsDBNullAsync(9, cancellationToken).ConfigureAwait(false) ? 0L : reader.GetInt64(9),
+                        Currency = await reader.IsDBNullAsync(10, cancellationToken).ConfigureAwait(false) ? "PHP" : reader.GetString(10),
+                        CreatedAt = await reader.IsDBNullAsync(11, cancellationToken).ConfigureAwait(false)
+                            ? DateTimeOffset.UtcNow
+                            : await reader.GetFieldValueAsync<DateTimeOffset>(11, cancellationToken).ConfigureAwait(false),
+                        UpdatedAt = await reader.IsDBNullAsync(12, cancellationToken).ConfigureAwait(false)
+                            ? DateTimeOffset.UtcNow
+                            : await reader.GetFieldValueAsync<DateTimeOffset>(12, cancellationToken).ConfigureAwait(false)
+                    };
+                    rows.Add(row);
+                }
+                sqlSw.Stop();
+                sqlDurationMs = sqlSw.Elapsed.TotalMilliseconds;
+
+                var matSw = Stopwatch.StartNew();
+                var materialized = OrderMaterializer.MaterializePage(rows);
+                matSw.Stop();
+                materializeDurationMs = matSw.Elapsed.TotalMilliseconds;
+
+                var pagedResult = PagedResult<Order>.Create(
+                    items: materialized.Orders,
+                    page: request.Page,
+                    pageSize: request.PageSize,
+                    totalCount: materialized.TotalCount);
+
+                return new RepositoryPagedOrders(
+                    Page: pagedResult,
+                    Timing: new RepositoryPageTiming(
+                        ConnectionAcquireMs: Math.Round(connAcquireMs, 2),
+                        SqlDurationMs: Math.Round(sqlDurationMs, 2),
+                        MaterializeDurationMs: Math.Round(materializeDurationMs, 2)));
             }
-            sqlSw.Stop();
-            sqlDurationMs = sqlSw.Elapsed.TotalMilliseconds;
+            catch (OperationCanceledException)
+            {
+                // Never treat frontend AbortController cancellations as a DB outage.
+                throw;
+            }
+            catch (Exception ex) when (IsTransientPoolSaturation(ex))
+            {
+                if (attempt < PoolSaturationRetryDelaysMs.Length)
+                {
+                    int delayMs = PoolSaturationRetryDelaysMs[attempt];
+                    _logger?.LogWarning(
+                        ex,
+                        "Transient PostgreSQL pool saturation on ListPagedAsync (page={Page}, attempt={Attempt}); retrying in {DelayMs}ms.",
+                        request.Page,
+                        attempt + 1,
+                        delayMs);
+                    await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
 
-            var matSw = Stopwatch.StartNew();
-            var materialized = OrderMaterializer.MaterializePage(rows);
-            matSw.Stop();
-            materializeDurationMs = matSw.Elapsed.TotalMilliseconds;
+                // Do NOT silently fall back to stale in-memory seeds on live pool exhaustion;
+                // returning an error lets the frontend preserve the current page and retry cleanly.
+                _logger?.LogError(
+                    ex,
+                    "PostgreSQL connection pool remained saturated for ListPagedAsync (page={Page}) after retries.",
+                    request.Page);
+                throw;
+            }
+            catch (Exception ex) when (ex is DbException or InvalidOperationException)
+            {
+                // Offline / no-database test fallback only (never triggered by mapping bugs or AbortError).
+                _logger?.LogWarning(ex, "Database unreachable for ListPagedAsync; falling back to in-memory store.");
 
-            var pagedResult = PagedResult<Order>.Create(
-                items: materialized.Orders,
-                page: request.Page,
-                pageSize: request.PageSize,
-                totalCount: materialized.TotalCount);
+                EnsureSeeded();
+                var all = MemoryById.Values.AsEnumerable();
+                if (!string.IsNullOrWhiteSpace(request.Status))
+                {
+                    all = all.Where(o => string.Equals(o.Status, request.Status, StringComparison.OrdinalIgnoreCase));
+                }
+                if (!string.IsNullOrWhiteSpace(request.Category))
+                {
+                    all = all.Where(o => string.Equals(o.Category, request.Category, StringComparison.OrdinalIgnoreCase));
+                }
+                if (!string.IsNullOrWhiteSpace(request.Search))
+                {
+                    var s = request.Search.Trim();
+                    all = all.Where(o => (o.OrderNumber?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+                        || (o.CustomerName?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+                        || (o.CustomerEmail?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false));
+                }
 
-            return new RepositoryPagedOrders(
-                Page: pagedResult,
-                Timing: new RepositoryPageTiming(
-                    ConnectionAcquireMs: Math.Round(connAcquireMs, 2),
-                    SqlDurationMs: Math.Round(sqlDurationMs, 2),
-                    MaterializeDurationMs: Math.Round(materializeDurationMs, 2)));
+                var ordered = all.OrderByDescending(o => o.CreatedAt).ThenByDescending(o => o.Id).ToList();
+                var totalCount = ordered.Count;
+                var items = ordered.Skip(request.Offset).Take(request.PageSize).ToList();
+
+                var paged = PagedResult<Order>.Create(items, request.Page, request.PageSize, totalCount);
+                return new RepositoryPagedOrders(
+                    Page: paged,
+                    Timing: new RepositoryPageTiming(0.01, 0.05, 0.02));
+            }
         }
-        catch (Exception ex)
+    }
+
+    private static bool IsTransientPoolSaturation(Exception ex)
+    {
+        if (ex is TimeoutException)
         {
-            _logger?.LogDebug(ex, "Database unreachable for ListPagedAsync; falling back to in-memory store.");
-
-            // In-memory fallback
-            var all = MemoryById.Values.AsEnumerable();
-            if (!string.IsNullOrWhiteSpace(request.Status))
-            {
-                all = all.Where(o => string.Equals(o.Status, request.Status, StringComparison.OrdinalIgnoreCase));
-            }
-            if (!string.IsNullOrWhiteSpace(request.Category))
-            {
-                all = all.Where(o => string.Equals(o.Category, request.Category, StringComparison.OrdinalIgnoreCase));
-            }
-            if (!string.IsNullOrWhiteSpace(request.Search))
-            {
-                var s = request.Search.Trim();
-                all = all.Where(o => (o.OrderNumber?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
-                    || (o.CustomerName?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
-                    || (o.CustomerEmail?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false));
-            }
-
-            var ordered = all.OrderByDescending(o => o.CreatedAt).ThenByDescending(o => o.Id).ToList();
-            var totalCount = ordered.Count;
-            var items = ordered.Skip(request.Offset).Take(request.PageSize).ToList();
-
-            var paged = PagedResult<Order>.Create(items, request.Page, request.PageSize, totalCount);
-            return new RepositoryPagedOrders(
-                Page: paged,
-                Timing: new RepositoryPageTiming(0.01, 0.05, 0.02));
+            return true;
         }
+
+        if (ex is DbException dbEx)
+        {
+            // 53300 = too_many_connections, 53400 = configuration_limit_exceeded, 57P03 = cannot_connect_now
+            if (string.Equals(dbEx.SqlState, "53300", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(dbEx.SqlState, "53400", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(dbEx.SqlState, "57P03", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (dbEx.Message.Contains("EMAXCONNSESSION", StringComparison.OrdinalIgnoreCase) ||
+                dbEx.Message.Contains("max clients reached", StringComparison.OrdinalIgnoreCase) ||
+                dbEx.Message.Contains("connection pool has been exhausted", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return ex.InnerException is not null && IsTransientPoolSaturation(ex.InnerException);
     }
 
     public async Task<KeysetPage<Order>> ListKeysetAsync(

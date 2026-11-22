@@ -49,11 +49,24 @@ export function usePaginatedOrders<
   const [isFetchingPage, setIsFetchingPage] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
 
-  // 3. Concurrency, cancellation & deduplication refs
+  // 3. Concurrency, cancellation, deduplication & synchronous state mirror refs
   const abortControllerRef = useRef<AbortController | null>(null)
   const requestSequenceRef = useRef<number>(0)
   const lastRealtimeRefreshAtRef = useRef<number>(0)
   const hasLoadedOnceRef = useRef<boolean>(false)
+
+  // Synchronous mirror refs to guarantee instant, race-free lookups during renders and events
+  const pageDataRef = useRef<PagedResponse<TOrder>>(pageData)
+  pageDataRef.current = pageData
+
+  const statusRef = useRef<string>(status)
+  statusRef.current = status
+
+  const categoryRef = useRef<string>(category)
+  categoryRef.current = category
+
+  const pageSizeRef = useRef<number>(pageSize)
+  pageSizeRef.current = pageSize
 
   // 4. Debounce search input AND reset page to 1 atomically when debounced value changes
   useEffect(() => {
@@ -68,25 +81,30 @@ export function usePaginatedOrders<
     return () => window.clearTimeout(timer)
   }, [searchInput, debouncedSearch, searchDebounceMs])
 
-  // 5. Filter setters that atomically reset page to 1 (prevents double-fetch)
+  // 5. Filter setters that atomically reset page to 1 (prevents double-fetch) using ref mirrors
   const setStatus = useCallback((nextStatus: string) => {
-    setStatusState((prev) => {
-      if (prev !== nextStatus) setPageState(1)
-      return nextStatus
-    })
+    if (statusRef.current !== nextStatus) {
+      statusRef.current = nextStatus
+      setStatusState(nextStatus)
+      setPageState(1)
+    }
   }, [])
 
   const setCategory = useCallback((nextCategory: string) => {
-    setCategoryState((prev) => {
-      if (prev !== nextCategory) setPageState(1)
-      return nextCategory
-    })
+    if (categoryRef.current !== nextCategory) {
+      categoryRef.current = nextCategory
+      setCategoryState(nextCategory)
+      setPageState(1)
+    }
   }, [])
 
   const setPageSize = useCallback((nextPageSize: number) => {
     const clamped = Math.min(100, Math.max(1, nextPageSize))
-    setPageSizeState(clamped)
-    setPageState(1)
+    if (pageSizeRef.current !== clamped) {
+      pageSizeRef.current = clamped
+      setPageSizeState(clamped)
+      setPageState(1)
+    }
   }, [])
 
   const setPage = useCallback((nextPage: number) => {
@@ -130,16 +148,18 @@ export function usePaginatedOrders<
         if (currentRequestId !== requestSequenceRef.current) return
 
         // If the current page is now beyond totalPages (e.g., after records were deleted/filtered),
-        // clamp back to the last valid page.
+        // safely clamp back to the last valid page.
+        const safeTotalPages = Math.max(1, result.data.totalPages)
         if (
           result.data.totalCount > 0 &&
-          targetPage > result.data.totalPages
+          targetPage > safeTotalPages
         ) {
-          setPageState(result.data.totalPages)
+          setPageState(safeTotalPages)
           return
         }
 
         hasLoadedOnceRef.current = true
+        pageDataRef.current = result.data
         setPageData(result.data)
         setMetrics(result.metrics)
       } catch (err: any) {
@@ -165,42 +185,44 @@ export function usePaginatedOrders<
   }, [fetchCurrentPage])
 
   // 7. Phase 6: Real-time SignalR & Polling Coherency
-  // Updates a visible row in-place without a network round-trip when safe,
+  // Updates a visible row in-place without a network round-trip using synchronous pageDataRef,
   // or throttles background revalidation while preserving page & filters.
   const applyRealtimeOrderPatch = useCallback(
     (updatedOrder: Partial<TOrder> & { id: string }) => {
-      let patchedInPlace = false
+      const currentItems = pageDataRef.current.items
+      const idx = currentItems.findIndex((item) => item.id === updatedOrder.id)
 
-      setPageData((prev) => {
-        const idx = prev.items.findIndex((item) => item.id === updatedOrder.id)
-        if (idx === -1) return prev
-
-        const merged = { ...prev.items[idx], ...updatedOrder }
-
-        // If a status filter is active and the updated order no longer matches it,
-        // we need a server refresh to pull the next matching record onto the page.
-        if (status !== "All" && merged.status && merged.status !== status) {
-          patchedInPlace = false
-          return prev
-        }
-
-        patchedInPlace = true
-        const nextItems = [...prev.items]
-        nextItems[idx] = merged
-        return { ...prev, items: nextItems }
-      })
-
-      // If the item wasn't on the current page or shifted out of the active status filter,
-      // perform a throttled silent revalidation of the current page.
-      if (!patchedInPlace) {
+      // If the item wasn't on the current page, perform throttled revalidation
+      if (idx === -1) {
         const now = Date.now()
         if (now - lastRealtimeRefreshAtRef.current >= realtimeThrottleMs) {
           lastRealtimeRefreshAtRef.current = now
           void fetchCurrentPage({ silent: true })
         }
+        return
       }
+
+      const merged = { ...currentItems[idx], ...updatedOrder }
+
+      // If a status filter is active and the updated order no longer matches it,
+      // trigger background revalidation to pull in the next matching record.
+      if (statusRef.current !== "All" && merged.status && merged.status !== statusRef.current) {
+        const now = Date.now()
+        if (now - lastRealtimeRefreshAtRef.current >= realtimeThrottleMs) {
+          lastRealtimeRefreshAtRef.current = now
+          void fetchCurrentPage({ silent: true })
+        }
+        return
+      }
+
+      // Valid match on current page: patch in place without any network fetch
+      const nextItems = [...currentItems]
+      nextItems[idx] = merged
+      const nextData: PagedResponse<TOrder> = { ...pageDataRef.current, items: nextItems }
+      pageDataRef.current = nextData
+      setPageData(nextData)
     },
-    [status, realtimeThrottleMs, fetchCurrentPage]
+    [realtimeThrottleMs, fetchCurrentPage]
   )
 
   const throttledRealtimeRefresh = useCallback(() => {
@@ -211,6 +233,10 @@ export function usePaginatedOrders<
     lastRealtimeRefreshAtRef.current = now
     void fetchCurrentPage({ silent: true })
   }, [realtimeThrottleMs, fetchCurrentPage])
+
+  const refreshPage = useCallback(() => {
+    void fetchCurrentPage({ silent: false })
+  }, [fetchCurrentPage])
 
   return {
     // Data & Metadata
@@ -234,7 +260,7 @@ export function usePaginatedOrders<
     setStatus,
     setCategory,
     setSearchInput: setSearchInputState,
-    refreshPage: () => fetchCurrentPage({ silent: false }),
+    refreshPage,
     applyRealtimeOrderPatch,
     throttledRealtimeRefresh,
   }

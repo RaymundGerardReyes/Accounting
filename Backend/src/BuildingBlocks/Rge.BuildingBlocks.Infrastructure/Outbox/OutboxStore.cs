@@ -100,12 +100,10 @@ public sealed class OutboxStore : IOutboxStore, IOutboxWriter
 
         try
         {
-            DbConnection connection = await _connectionScope
-                .GetOpenConnectionAsync(cancellationToken)
-                .ConfigureAwait(false);
+            await using ConnectionLease lease = await AcquireConnectionAsync(cancellationToken).ConfigureAwait(false);
 
-            await using DbCommand cmd = connection.CreateCommand();
-            cmd.Transaction = _connectionScope.CurrentTransaction;
+            await using DbCommand cmd = lease.Connection.CreateCommand();
+            cmd.Transaction = lease.Transaction;
             cmd.CommandText = EnqueueSql;
             cmd.CommandTimeout = SqlTimeouts.WebhookHotWriteSeconds;
 
@@ -135,11 +133,11 @@ public sealed class OutboxStore : IOutboxStore, IOutboxWriter
     {
         try
         {
-            DbConnection connection = await _connectionScope
-                .GetOpenConnectionAsync(cancellationToken)
-                .ConfigureAwait(false);
+            // Standalone connection is returned to the pool the exact moment this method exits
+            await using ConnectionLease lease = await AcquireConnectionAsync(cancellationToken).ConfigureAwait(false);
 
-            await using DbCommand cmd = connection.CreateCommand();
+            await using DbCommand cmd = lease.Connection.CreateCommand();
+            cmd.Transaction = lease.Transaction;
             cmd.CommandText = ClaimBatchSql;
             cmd.CommandTimeout = SqlTimeouts.StandardCommandSeconds;
 
@@ -213,12 +211,13 @@ public sealed class OutboxStore : IOutboxStore, IOutboxWriter
 
         try
         {
-            DbConnection connection = await _connectionScope
-                .GetOpenConnectionAsync(cancellationToken)
-                .ConfigureAwait(false);
+            await using ConnectionLease lease = await AcquireConnectionAsync(cancellationToken).ConfigureAwait(false);
 
-            await using DbCommand cmd = connection.CreateCommand();
+            await using DbCommand cmd = lease.Connection.CreateCommand();
+            cmd.Transaction = lease.Transaction;
             cmd.CommandText = CompleteSql;
+            cmd.CommandTimeout = SqlTimeouts.StandardCommandSeconds;
+
             AddParam(cmd, "@id", messageId);
             AddParam(cmd, "@processed_at", processedAtUtc);
 
@@ -248,12 +247,13 @@ public sealed class OutboxStore : IOutboxStore, IOutboxWriter
 
         try
         {
-            DbConnection connection = await _connectionScope
-                .GetOpenConnectionAsync(cancellationToken)
-                .ConfigureAwait(false);
+            await using ConnectionLease lease = await AcquireConnectionAsync(cancellationToken).ConfigureAwait(false);
 
-            await using DbCommand cmd = connection.CreateCommand();
+            await using DbCommand cmd = lease.Connection.CreateCommand();
+            cmd.Transaction = lease.Transaction;
             cmd.CommandText = FailSql;
+            cmd.CommandTimeout = SqlTimeouts.StandardCommandSeconds;
+
             AddParam(cmd, "@id", messageId);
             AddParam(cmd, "@failed_at", failedAtUtc);
             AddParam(cmd, "@error_message", errorReason);
@@ -263,6 +263,45 @@ public sealed class OutboxStore : IOutboxStore, IOutboxWriter
         catch (Exception ex) when (ex is DbException or InvalidOperationException)
         {
         }
+    }
+
+    /// <summary>
+    /// Rents a connection for a single OutboxStore call:
+    /// - If a transaction is active on ConnectionScope, borrows the scoped connection (leaving disposal to the scope).
+    /// - Otherwise, opens a standalone pooled connection and disposes it immediately when the query finishes.
+    /// </summary>
+    private async ValueTask<ConnectionLease> AcquireConnectionAsync(CancellationToken cancellationToken)
+    {
+        if (_connectionScope.CurrentTransaction is not null)
+        {
+            DbConnection scoped = await _connectionScope
+                .GetOpenConnectionAsync(cancellationToken)
+                .ConfigureAwait(false);
+            return new ConnectionLease(scoped, _connectionScope.CurrentTransaction, ownsConnection: false);
+        }
+
+        DbConnection standalone = await _connectionScope
+            .OpenStandaloneConnectionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return new ConnectionLease(standalone, transaction: null, ownsConnection: true);
+    }
+
+    private readonly struct ConnectionLease : IAsyncDisposable
+    {
+        private readonly bool _ownsConnection;
+
+        public DbConnection Connection { get; }
+        public DbTransaction? Transaction { get; }
+
+        public ConnectionLease(DbConnection connection, DbTransaction? transaction, bool ownsConnection)
+        {
+            Connection = connection;
+            Transaction = transaction;
+            _ownsConnection = ownsConnection;
+        }
+
+        public ValueTask DisposeAsync() =>
+            _ownsConnection ? Connection.DisposeAsync() : ValueTask.CompletedTask;
     }
 
     private static void AddParam(DbCommand cmd, string name, object? value)

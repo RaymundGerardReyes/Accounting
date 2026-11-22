@@ -65,7 +65,7 @@ public sealed class NpgsqlDataSourceFactory : IAsyncDisposable, IDisposable
             {
                 kvBuilder.SslMode = SslMode.Require;
             }
-            ApplyPoolDefaults(kvBuilder);
+            ApplyPoolDefaults(kvBuilder, isLocal);
             return kvBuilder.ConnectionString;
         }
 
@@ -109,7 +109,7 @@ public sealed class NpgsqlDataSourceFactory : IAsyncDisposable, IDisposable
 #pragma warning restore CS0618
                 };
 
-                ApplyPoolDefaults(csb);
+                ApplyPoolDefaults(csb, isLocal);
                 return csb.ConnectionString;
             }
         }
@@ -117,19 +117,61 @@ public sealed class NpgsqlDataSourceFactory : IAsyncDisposable, IDisposable
         return cleaned;
     }
 
-    private static void ApplyPoolDefaults(NpgsqlConnectionStringBuilder builder)
+    private static void ApplyPoolDefaults(NpgsqlConnectionStringBuilder builder, bool isLocal)
     {
+        // Detect Transaction Mode pooler (e.g. Supabase Supavisor / PgBouncer on port 6543
+        // or explicit PG_POOLER_MODE=transaction).
+        string? poolerModeEnv = Environment.GetEnvironmentVariable("PG_POOLER_MODE");
+        bool isTransactionPooler =
+            builder.Port == 6543 ||
+            string.Equals(poolerModeEnv, "transaction", StringComparison.OrdinalIgnoreCase);
+
+        // Adjustable via Heroku Config Vars without code changes:
+        // - Session Mode (port 5432, server pool_size=15): default MaxPoolSize=10, MinPoolSize=1
+        //   so excess concurrent requests queue cleanly in Npgsql instead of hitting EMAXCONNSESSION.
+        // - Transaction Mode (port 6543): default MaxPoolSize=20, MinPoolSize=0.
+        // - Local dev DB: default MaxPoolSize=25, MinPoolSize=2.
+        int defaultMaxPool = isLocal ? 25 : (isTransactionPooler ? 20 : 10);
+        int defaultMinPool = isLocal ? 2 : (isTransactionPooler ? 0 : 1);
+
+        int maxPoolSize = ReadEnvInt("PG_MAX_POOL_SIZE", defaultMaxPool, min: 2, max: 100);
+        int minPoolSize = ReadEnvInt("PG_MIN_POOL_SIZE", defaultMinPool, min: 0, max: maxPoolSize);
+
         builder.Pooling = true;
-        builder.MinPoolSize = 5;
-        builder.MaxPoolSize = 50;
+        builder.MinPoolSize = minPoolSize;
+        builder.MaxPoolSize = maxPoolSize;
         builder.KeepAlive = 30;
         builder.NoResetOnClose = true;
-        builder.MaxAutoPrepare = 32;
-        builder.AutoPrepareMinUsages = 2;
+
+        // Prepared statements MUST be disabled in Transaction Mode poolers (port 6543),
+        // and kept modest in Session Mode to minimize per-slot memory usage.
+        if (isTransactionPooler)
+        {
+            builder.MaxAutoPrepare = 0;
+            builder.AutoPrepareMinUsages = 2;
+        }
+        else
+        {
+            builder.MaxAutoPrepare = 16;
+            builder.AutoPrepareMinUsages = 2;
+        }
+
+        // Keep warm sockets alive longer and prune less aggressively to avoid ~900ms reconnect storms.
         builder.ConnectionIdleLifetime = 300;
-        builder.ConnectionPruningInterval = 10;
+        builder.ConnectionPruningInterval = 30;
         builder.Timeout = 15;
         builder.CommandTimeout = 30;
+    }
+
+    private static int ReadEnvInt(string envName, int fallback, int min, int max)
+    {
+        string? raw = Environment.GetEnvironmentVariable(envName);
+        if (int.TryParse(raw, out int parsed))
+        {
+            return Math.Clamp(parsed, min, max);
+        }
+
+        return fallback;
     }
 
     public ValueTask<DbConnection> OpenConnectionAsync(CancellationToken cancellationToken = default) =>
