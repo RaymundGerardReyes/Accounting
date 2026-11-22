@@ -114,7 +114,7 @@ export function usePaginatedOrders<
   // 6. Core server fetch with AbortController & stale-response guard
   const fetchCurrentPage = useCallback(
     async (overrideParams?: { page?: number; silent?: boolean }) => {
-      const targetPage = overrideParams?.page ?? page
+      const targetPage = Math.max(1, overrideParams?.page ?? page)
 
       // Cancel any in-flight request before starting a new one
       if (abortControllerRef.current) {
@@ -147,10 +147,11 @@ export function usePaginatedOrders<
         // Ignore stale out-of-order responses
         if (currentRequestId !== requestSequenceRef.current) return
 
-        // If the current page is now beyond totalPages (e.g., after records were deleted/filtered),
-        // safely clamp back to the last valid page.
-        const safeTotalPages = Math.max(1, result.data.totalPages)
+        // ONLY clamp back if this page came back EMPTY and is genuinely past totalPages
+        // (e.g., rows on the last page were deleted). Never clamp away from a page with real items!
+        const safeTotalPages = Math.max(1, result.data.totalPages || 1)
         if (
+          result.data.items.length === 0 &&
           result.data.totalCount > 0 &&
           targetPage > safeTotalPages
         ) {

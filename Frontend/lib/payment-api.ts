@@ -989,35 +989,114 @@ export function sanitizePageParams(params: PageRequestParams = {}): Required<
 }
 
 /**
- * Normalizes both the new server-paginated contract and legacy array responses
- * so existing Vitest suites and incremental backend rollouts never break.
+ * Reads the first valid finite number from a list of candidate keys across
+ * camelCase, snake_case, PascalCase, and optional nested pagination/meta objects.
+ */
+function readNumericField(
+  sources: Array<Record<string, unknown> | undefined>,
+  keys: string[]
+): number | undefined {
+  for (const src of sources) {
+    if (!src || typeof src !== "object") continue
+    for (const key of keys) {
+      const val = src[key]
+      if (typeof val === "number" && Number.isFinite(val)) {
+        return val
+      }
+      if (typeof val === "string" && val.trim() !== "") {
+        const parsed = Number(val)
+        if (Number.isFinite(parsed)) {
+          return parsed
+        }
+      }
+    }
+  }
+  return undefined
+}
+
+/**
+ * Reads the first valid boolean from candidate keys across camelCase, snake_case, and PascalCase.
+ */
+function readBooleanField(
+  sources: Array<Record<string, unknown> | undefined>,
+  keys: string[]
+): boolean | undefined {
+  for (const src of sources) {
+    if (!src || typeof src !== "object") continue
+    for (const key of keys) {
+      const val = src[key]
+      if (typeof val === "boolean") {
+        return val
+      }
+    }
+  }
+  return undefined
+}
+
+/**
+ * Normalizes both server-paginated contracts (camelCase, snake_case, PascalCase,
+ * or nested pagination/meta objects) and legacy array responses
+ * so existing Vitest suites and backend rollouts never break.
  */
 export function normalizePagedResponse<T>(
   raw: unknown,
   requestedPage = DEFAULT_PAGE,
   requestedPageSize = DEFAULT_PAGE_SIZE
 ): PagedResponse<T> {
-  if (raw && typeof raw === "object" && "items" in raw && Array.isArray((raw as any).items)) {
-    const obj = raw as Partial<PagedResponse<T>> & { items: T[] }
-    const page = Math.max(1, Number(obj.page) || requestedPage)
-    const pageSize = Math.max(1, Number(obj.pageSize) || requestedPageSize)
-    const totalCount =
-      typeof obj.totalCount === "number" ? Math.max(0, obj.totalCount) : obj.items.length
-    const totalPages =
-      typeof obj.totalPages === "number"
-        ? Math.max(1, obj.totalPages)
-        : Math.max(1, Math.ceil(totalCount / pageSize))
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const obj = raw as Record<string, unknown>
+    const rawItems = Array.isArray(obj.items)
+      ? (obj.items as T[])
+      : Array.isArray(obj.Items)
+        ? (obj.Items as T[])
+        : null
 
-    return {
-      items: obj.items,
-      page,
-      pageSize,
-      totalCount,
-      totalPages,
-      hasNextPage:
-        typeof obj.hasNextPage === "boolean" ? obj.hasNextPage : page < totalPages,
-      hasPreviousPage:
-        typeof obj.hasPreviousPage === "boolean" ? obj.hasPreviousPage : page > 1,
+    if (rawItems !== null) {
+      // Check top-level fields first, then common nested metadata wrappers (pagination / meta)
+      const nestedPagination =
+        obj.pagination && typeof obj.pagination === "object"
+          ? (obj.pagination as Record<string, unknown>)
+          : undefined
+      const nestedMeta =
+        obj.meta && typeof obj.meta === "object"
+          ? (obj.meta as Record<string, unknown>)
+          : undefined
+      const sources = [obj, nestedPagination, nestedMeta]
+
+      const reportedPage = readNumericField(sources, ["page", "Page", "currentPage", "current_page"])
+      const reportedPageSize = readNumericField(sources, ["pageSize", "page_size", "PageSize", "limit"])
+      const reportedTotalCount = readNumericField(sources, ["totalCount", "total_count", "TotalCount", "total"])
+      const reportedTotalPages = readNumericField(sources, ["totalPages", "total_pages", "TotalPages"])
+
+      const page = Math.max(1, Math.floor(reportedPage ?? requestedPage))
+      const pageSize = Math.max(1, Math.floor(reportedPageSize ?? requestedPageSize))
+
+      // Never let totalCount fall below the minimum records implied by the current page's items
+      const minImpliedTotal =
+        rawItems.length > 0 ? (page - 1) * pageSize + rawItems.length : 0
+      const totalCount =
+        reportedTotalCount !== undefined
+          ? Math.max(0, Math.floor(reportedTotalCount))
+          : minImpliedTotal
+
+      const computedTotalPages = Math.max(1, Math.ceil(totalCount / pageSize))
+      const totalPages =
+        reportedTotalPages !== undefined
+          ? Math.max(1, Math.floor(reportedTotalPages), computedTotalPages)
+          : computedTotalPages
+
+      const reportedHasNext = readBooleanField(sources, ["hasNextPage", "has_next_page", "HasNextPage", "hasMore", "has_more"])
+      const reportedHasPrev = readBooleanField(sources, ["hasPreviousPage", "has_previous_page", "HasPreviousPage", "hasPrevPage", "has_prev_page"])
+
+      return {
+        items: rawItems,
+        page,
+        pageSize,
+        totalCount,
+        totalPages,
+        hasNextPage: reportedHasNext !== undefined ? reportedHasNext : page < totalPages,
+        hasPreviousPage: reportedHasPrev !== undefined ? reportedHasPrev : page > 1,
+      }
     }
   }
 

@@ -1180,17 +1180,30 @@ export function PaymentsHub() {
     }
   }, [])
 
+  // Search & Status Filter State for Orders Table
+  const [searchQuery, setSearchQuery] = useState("")
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "paid" | "cancelled">("all")
+
+  // Real server-driven pagination hook (connected to ListOrdersEndpoint via /api/orders)
+  const paginatedOrders = usePaginatedOrders<Order>({
+    initialPage: 1,
+    initialPageSize: 10,
+    initialStatus: "All",
+    searchDebounceMs: 300,
+  })
+
   const loadAllData = useCallback(async () => {
     setActionLoading(true)
     try {
       await Promise.all([
+        paginatedOrders.refreshPage(),
         loadOrders(true),
         isAdminRef.current ? loadAdminDiagnostics() : Promise.resolve(),
       ])
     } finally {
       setActionLoading(false)
     }
-  }, [loadOrders, loadAdminDiagnostics])
+  }, [paginatedOrders.refreshPage, loadOrders, loadAdminDiagnostics])
 
   // Initial order load on mount
   useEffect(() => {
@@ -1296,17 +1309,6 @@ export function PaymentsHub() {
     }
   }
 
-  // Search & Status Filter State for Orders Table
-  const [searchQuery, setSearchQuery] = useState("")
-  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "paid" | "cancelled">("all")
-
-  // Real server-driven pagination hook (connected to ListOrdersEndpoint via /api/orders)
-  const paginatedOrders = usePaginatedOrders<Order>({
-    initialPage: 1,
-    initialPageSize: 10,
-    initialStatus: "All",
-    searchDebounceMs: 300,
-  })
 
   // New Order Modal State
   const [showOrderModal, setShowOrderModal] = useState(false)
@@ -2045,22 +2047,33 @@ export function PaymentsHub() {
                   </div>
 
                   {/* Server-Driven Pagination Bar */}
-                  {displayedOrders.length > 0 && (
-                    <div className="p-4 border-t border-border/60">
-                      <ServerPaginationBar
-                        page={paginatedOrders.page}
-                        pageSize={paginatedOrders.pageSize}
-                        totalCount={paginatedOrders.pagination.totalCount > 0 ? paginatedOrders.pagination.totalCount : filteredOrders.length}
-                        totalPages={paginatedOrders.pagination.totalPages > 1 ? paginatedOrders.pagination.totalPages : Math.max(1, Math.ceil(filteredOrders.length / paginatedOrders.pageSize))}
-                        hasNextPage={paginatedOrders.pagination.hasNextPage}
-                        hasPreviousPage={paginatedOrders.pagination.hasPreviousPage}
-                        isFetching={paginatedOrders.isFetchingPage}
-                        onPageChange={paginatedOrders.setPage}
-                        onPageSizeChange={paginatedOrders.setPageSize}
-                        pageSizeOptions={[10, 20, 50, 100]}
-                      />
-                    </div>
-                  )}
+                  {displayedOrders.length > 0 && (() => {
+                    const effectiveTotalCount =
+                      paginatedOrders.pagination.totalCount > 0
+                        ? paginatedOrders.pagination.totalCount
+                        : filteredOrders.length
+                    const effectiveTotalPages = Math.max(
+                      1,
+                      paginatedOrders.pagination.totalPages,
+                      Math.ceil(effectiveTotalCount / paginatedOrders.pageSize)
+                    )
+                    return (
+                      <div className="p-4 border-t border-border/60">
+                        <ServerPaginationBar
+                          page={paginatedOrders.page}
+                          pageSize={paginatedOrders.pageSize}
+                          totalCount={effectiveTotalCount}
+                          totalPages={effectiveTotalPages}
+                          hasNextPage={paginatedOrders.page < effectiveTotalPages}
+                          hasPreviousPage={paginatedOrders.page > 1}
+                          isFetching={paginatedOrders.isFetchingPage}
+                          onPageChange={paginatedOrders.setPage}
+                          onPageSizeChange={paginatedOrders.setPageSize}
+                          pageSizeOptions={[10, 20, 50, 100]}
+                        />
+                      </div>
+                    )
+                  })()}
                 </>
               )}
             </CardContent>
