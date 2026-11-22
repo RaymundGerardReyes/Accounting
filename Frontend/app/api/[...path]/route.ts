@@ -189,6 +189,11 @@ async function proxyRequest(
     const cacheControl = backendRes.headers.get("cache-control")
     if (cacheControl) response.headers.set("cache-control", cacheControl)
 
+    const kotobeeFulfillmentStatus = backendRes.headers.get("x-kotobee-fulfillment-status")
+    if (kotobeeFulfillmentStatus) {
+      response.headers.set("x-kotobee-fulfillment-status", kotobeeFulfillmentStatus)
+    }
+
     // Forward Set-Cookie headers from Backend to Browser
     const setCookieHeaders = backendRes.headers.getSetCookie?.() || []
     for (const cookieStr of setCookieHeaders) {

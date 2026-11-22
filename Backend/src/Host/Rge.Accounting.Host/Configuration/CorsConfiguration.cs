@@ -126,7 +126,7 @@ public static class CorsConfiguration
                     "Accept",
                     "Origin",
                     "X-Requested-With")
-                .WithExposedHeaders("X-Correlation-Id", "X-Correlation-ID")
+                .WithExposedHeaders("X-Correlation-Id", "X-Correlation-ID", "X-Kotobee-Fulfillment-Status")
                 .AllowCredentials();
             });
         });

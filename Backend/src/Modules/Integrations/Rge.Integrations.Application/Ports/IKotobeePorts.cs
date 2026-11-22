@@ -194,3 +194,12 @@ public interface IKotobeeSheetWriteBackTracker
         AuditExecutionContext auditContext,
         CancellationToken ct = default);
 }
+
+public interface IKotobeeOrderEligibilityChecker
+{
+    /// <summary>
+    /// Returns true if the order contains at least one SKU mapped to a Kotobee ebook;
+    /// returns false for non-ebook orders so the UI can hide the access card immediately.
+    /// </summary>
+    Task<bool> OrderHasMappedKotobeeItemsAsync(string orderId, CancellationToken ct = default);
+}

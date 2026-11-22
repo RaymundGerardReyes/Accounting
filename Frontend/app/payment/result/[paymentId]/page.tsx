@@ -957,10 +957,12 @@ function PaymentResultContent({ params }: PageProps) {
           </Card>
 
           {/* Kotobee Ebook Access Status */}
-          <KotobeeAccessStatusCard
-            orderId={payment?.order_id || (order?.id ?? paymentId)}
-            isOrderPaid={status === "succeeded"}
-          />
+          {Boolean(payment?.order_id || order?.id) && (
+            <KotobeeAccessStatusCard
+              orderId={(payment?.order_id || order?.id)!}
+              isOrderPaid={status === "succeeded"}
+            />
+          )}
 
           {/* Deliverable 2: Internal Treasury Acknowledgement & Audit Disclosure */}
           <details className="group border border-border rounded-lg bg-card/60 overflow-hidden shadow-xs transition-colors">

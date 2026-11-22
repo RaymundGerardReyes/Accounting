@@ -37,14 +37,40 @@ public sealed class KotobeeEndpoints : IEndpointModule
             string orderId,
             string? sortBy,
             string? sortDirection,
+            HttpContext httpContext,
             IKotobeeEntitlementRepository repo,
             KotobeePreExecutionIsolationGuard guard,
+            IKotobeeOrderEligibilityChecker? eligibilityChecker,
             CancellationToken ct) =>
         {
             guard.ValidateInputAntiSqlInjection(orderId, nameof(orderId));
             guard.ValidateSortParameters(sortBy, sortDirection);
 
             var records = await repo.GetByOrderIdAsync(orderId, ct).ConfigureAwait(false);
+
+            // Compute non-breaking fulfillment status header while keeping the JSON array body intact
+            string fulfillmentStatus;
+            if (records.Count > 0)
+            {
+                bool hasPending = records.Any(r =>
+                    string.Equals(r.Status, "Pending", StringComparison.OrdinalIgnoreCase));
+                fulfillmentStatus = hasPending ? "pending" : "ready";
+            }
+            else if (eligibilityChecker is not null)
+            {
+                bool hasKotobeeItems = await eligibilityChecker
+                    .OrderHasMappedKotobeeItemsAsync(orderId, ct)
+                    .ConfigureAwait(false);
+                fulfillmentStatus = hasKotobeeItems ? "pending" : "not_applicable";
+            }
+            else
+            {
+                // Safe fallback if eligibility checker is not registered
+                fulfillmentStatus = "pending";
+            }
+
+            httpContext.Response.Headers["X-Kotobee-Fulfillment-Status"] = fulfillmentStatus;
+
             var query = records.AsEnumerable();
 
             if (!string.IsNullOrWhiteSpace(sortBy))

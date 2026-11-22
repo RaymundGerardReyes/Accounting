@@ -99,6 +99,7 @@ public static class KotobeeServiceCollectionExtensions
         services.AddScoped<ITamperAlertSink, DualPostgresAndSmtpTamperAlertSink>();
         services.AddScoped<IKotobeeSheetSnapshotStore, PgKotobeeSheetSnapshotStore>();
         services.AddScoped<IKotobeeCatalogMappingResolver, DynamicSheetKotobeeCatalogProvider>();
+        services.AddScoped<IKotobeeOrderEligibilityChecker, OrderKotobeeEligibilityChecker>();
         services.AddScoped<IPaidOrderVerifier, PaymentsContractPaidOrderVerifier>();
         services.AddScoped<PgKotobeeEntitlementRepository>(sp =>
             new PgKotobeeEntitlementRepository(
